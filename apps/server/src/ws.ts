@@ -29,6 +29,7 @@ import {
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
+  FilesystemScanGitReposError,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -61,6 +62,7 @@ import { redactServerSettingsForClient, ServerSettingsService } from "./serverSe
 import { TerminalManager } from "./terminal/Services/Manager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
+import { WorkspaceGitScan } from "./workspace/Services/WorkspaceGitScan.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
 import { VcsStatusBroadcaster } from "./vcs/VcsStatusBroadcaster.ts";
 import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
@@ -184,6 +186,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
+      const workspaceGitScan = yield* WorkspaceGitScan;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
@@ -1012,6 +1015,20 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               Effect.mapError(
                 (cause) =>
                   new FilesystemBrowseError({
+                    message: cause.detail,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.filesystemScanGitRepos]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.filesystemScanGitRepos,
+            workspaceGitScan.scan(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new FilesystemScanGitReposError({
                     message: cause.detail,
                     cause,
                   }),

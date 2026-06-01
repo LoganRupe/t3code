@@ -24,6 +24,7 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
     },
     filesystem: {
       browse: rpcClient.filesystem.browse,
+      scanGitRepos: rpcClient.filesystem.scanGitRepos,
     },
     sourceControl: {
       lookupRepository: rpcClient.sourceControl.lookupRepository,

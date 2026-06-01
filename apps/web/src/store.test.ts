@@ -514,6 +514,7 @@ describe("incremental orchestration updates", () => {
         projectId: recreatedProjectId,
         title: "Project Recreated",
         workspaceRoot: "/tmp/project",
+        repoRoots: ["/tmp/project"],
         defaultModelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: DEFAULT_MODEL,

@@ -17,6 +17,7 @@ export function resolveThreadWorkspaceCwd(input: {
   readonly projects: ReadonlyArray<{
     readonly id: ProjectId;
     readonly workspaceRoot: string;
+    readonly repoRoots?: ReadonlyArray<string> | undefined;
   }>;
 }): string | undefined {
   const worktreeCwd = input.thread.worktreePath ?? undefined;
@@ -24,5 +25,10 @@ export function resolveThreadWorkspaceCwd(input: {
     return worktreeCwd;
   }
 
-  return input.projects.find((project) => project.id === input.thread.projectId)?.workspaceRoot;
+  const project = input.projects.find((candidate) => candidate.id === input.thread.projectId);
+  if (!project) return undefined;
+  if (project.repoRoots && project.repoRoots.length > 0) {
+    return project.repoRoots[0];
+  }
+  return project.workspaceRoot;
 }

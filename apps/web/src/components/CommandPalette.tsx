@@ -1131,12 +1131,29 @@ function OpenCommandPaletteDialog() {
 
       try {
         const projectId = newProjectId();
+        let repoRoots: ReadonlyArray<string> | undefined;
+        let multiRootCount = 0;
+        try {
+          const scan = await api.filesystem.scanGitRepos({ parentPath: cwd });
+          if (!scan.parentHasGit) {
+            const childRepos = scan.children
+              .filter((child) => child.hasGit)
+              .map((child) => child.absolutePath);
+            if (childRepos.length >= 2) {
+              repoRoots = childRepos;
+              multiRootCount = childRepos.length;
+            }
+          }
+        } catch {
+          // Scan failure is non-fatal — fall back to single-root project.
+        }
         await api.orchestration.dispatchCommand({
           type: "project.create",
           commandId: newCommandId(),
           projectId,
           title: inferProjectTitleFromPath(cwd),
           workspaceRoot: cwd,
+          ...(repoRoots ? { repoRoots } : {}),
           createWorkspaceRootIfMissing: true,
           defaultModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
@@ -1144,6 +1161,15 @@ function OpenCommandPaletteDialog() {
           },
           createdAt: new Date().toISOString(),
         });
+        if (multiRootCount > 0) {
+          toastManager.add(
+            stackedThreadToast({
+              type: "info",
+              title: `Added project with ${multiRootCount} repos`,
+              description: `Detected ${multiRootCount} sibling git repositories under ${cwd}.`,
+            }),
+          );
+        }
         await handleNewThread(scopeProjectRef(browseEnvironmentId, projectId), {
           envMode: settings.defaultThreadEnvMode,
         }).catch(() => undefined);

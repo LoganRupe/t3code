@@ -105,6 +105,7 @@ import {
 } from "./environment/Services/ServerEnvironment.ts";
 import { WorkspaceEntriesLive } from "./workspace/Layers/WorkspaceEntries.ts";
 import { WorkspaceFileSystemLive } from "./workspace/Layers/WorkspaceFileSystem.ts";
+import { WorkspaceGitScanLive } from "./workspace/Layers/WorkspaceGitScan.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as VcsDriver from "./vcs/VcsDriver.ts";
@@ -489,6 +490,7 @@ const buildAppUnderTest = (options?: {
         Layer.provide(WorkspacePathsLive),
         Layer.provide(workspaceEntriesLayer),
       ),
+      WorkspaceGitScanLive,
       ProjectFaviconResolverLive,
     );
     const gitWorkflowLayer = GitWorkflowService.layer.pipe(

@@ -161,8 +161,32 @@ export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityR
       return yield* Cache.get(repositoryIdentityCache, cacheKey);
     });
 
+    const resolveMany: RepositoryIdentityResolverShape["resolveMany"] = Effect.fn(
+      "RepositoryIdentityResolver.resolveMany",
+    )(function* (cwds) {
+      const seen = new Set<string>();
+      const uniqueCwds = cwds.filter((cwd) => {
+        if (seen.has(cwd)) return false;
+        seen.add(cwd);
+        return true;
+      });
+      const identities = yield* Effect.forEach(uniqueCwds, resolve, {
+        concurrency: "unbounded",
+      });
+      const result: RepositoryIdentity[] = [];
+      const seenKeys = new Set<string>();
+      for (const identity of identities) {
+        if (identity === null) continue;
+        if (seenKeys.has(identity.canonicalKey)) continue;
+        seenKeys.add(identity.canonicalKey);
+        result.push(identity);
+      }
+      return result;
+    });
+
     return {
       resolve,
+      resolveMany,
     } satisfies RepositoryIdentityResolverShape;
   },
 );

@@ -4,6 +4,9 @@ import type * as Effect from "effect/Effect";
 
 export interface RepositoryIdentityResolverShape {
   readonly resolve: (cwd: string) => Effect.Effect<RepositoryIdentity | null>;
+  readonly resolveMany: (
+    cwds: ReadonlyArray<string>,
+  ) => Effect.Effect<ReadonlyArray<RepositoryIdentity>>;
 }
 
 export class RepositoryIdentityResolver extends Context.Service<

@@ -90,7 +90,10 @@ const make = Effect.gen(function* () {
         });
       }
 
-      const workspaceCwd = threadContext.value.worktreePath ?? threadContext.value.workspaceRoot;
+      const workspaceCwd =
+        threadContext.value.worktreePath ??
+        threadContext.value.repoRoots[0] ??
+        threadContext.value.workspaceRoot;
       if (!workspaceCwd) {
         return yield* new CheckpointInvariantError({
           operation,
@@ -195,7 +198,10 @@ const make = Effect.gen(function* () {
       });
     }
 
-    const workspaceCwd = threadContext.value.worktreePath ?? threadContext.value.workspaceRoot;
+    const workspaceCwd =
+      threadContext.value.worktreePath ??
+      threadContext.value.repoRoots[0] ??
+      threadContext.value.workspaceRoot;
     if (!workspaceCwd) {
       return yield* new CheckpointInvariantError({
         operation,

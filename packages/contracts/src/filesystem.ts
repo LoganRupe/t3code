@@ -28,3 +28,30 @@ export class FilesystemBrowseError extends Schema.TaggedErrorClass<FilesystemBro
     cause: Schema.optional(Schema.Defect),
   },
 ) {}
+
+export const FilesystemScanGitReposInput = Schema.Struct({
+  parentPath: TrimmedNonEmptyString.check(Schema.isMaxLength(FILESYSTEM_PATH_MAX_LENGTH)),
+});
+export type FilesystemScanGitReposInput = typeof FilesystemScanGitReposInput.Type;
+
+export const FilesystemScanGitReposChild = Schema.Struct({
+  name: TrimmedNonEmptyString,
+  absolutePath: TrimmedNonEmptyString,
+  hasGit: Schema.Boolean,
+});
+export type FilesystemScanGitReposChild = typeof FilesystemScanGitReposChild.Type;
+
+export const FilesystemScanGitReposResult = Schema.Struct({
+  parentPath: TrimmedNonEmptyString,
+  parentHasGit: Schema.Boolean,
+  children: Schema.Array(FilesystemScanGitReposChild),
+});
+export type FilesystemScanGitReposResult = typeof FilesystemScanGitReposResult.Type;
+
+export class FilesystemScanGitReposError extends Schema.TaggedErrorClass<FilesystemScanGitReposError>()(
+  "FilesystemScanGitReposError",
+  {
+    message: TrimmedNonEmptyString,
+    cause: Schema.optional(Schema.Defect),
+  },
+) {}

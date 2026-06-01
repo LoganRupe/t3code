@@ -19,7 +19,12 @@ import type {
   VcsStatusResult,
 } from "./git.ts";
 import type { ReviewDiffPreviewInput, ReviewDiffPreviewResult } from "./review.ts";
-import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
+import type {
+  FilesystemBrowseInput,
+  FilesystemBrowseResult,
+  FilesystemScanGitReposInput,
+  FilesystemScanGitReposResult,
+} from "./filesystem.ts";
 import type {
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
@@ -524,6 +529,7 @@ export interface EnvironmentApi {
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
+    scanGitRepos: (input: FilesystemScanGitReposInput) => Promise<FilesystemScanGitReposResult>;
   };
   sourceControl: {
     lookupRepository: (
