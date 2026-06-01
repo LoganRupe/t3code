@@ -171,7 +171,7 @@ export const makeRepositoryIdentityResolver = Effect.fn("makeRepositoryIdentityR
         return true;
       });
       const identities = yield* Effect.forEach(uniqueCwds, resolve, {
-        concurrency: "unbounded",
+        concurrency: 4,
       });
       const result: RepositoryIdentity[] = [];
       const seenKeys = new Set<string>();
