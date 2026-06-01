@@ -1144,8 +1144,9 @@ function OpenCommandPaletteDialog() {
               multiRootCount = childRepos.length;
             }
           }
-        } catch {
-          // Scan failure is non-fatal — fall back to single-root project.
+        } catch (scanError) {
+          // Non-fatal — fall back to single-root project.
+          console.warn("CommandPalette.scanGitRepos failed", { parentPath: cwd, scanError });
         }
         await api.orchestration.dispatchCommand({
           type: "project.create",
