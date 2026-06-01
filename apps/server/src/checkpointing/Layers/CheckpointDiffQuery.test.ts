@@ -25,6 +25,7 @@ function makeThreadCheckpointContext(input: {
     threadId: input.threadId,
     projectId: input.projectId,
     workspaceRoot: input.workspaceRoot,
+    repoRoots: [input.workspaceRoot],
     worktreePath: input.worktreePath,
     checkpoints: [
       {
@@ -101,6 +102,7 @@ describe("CheckpointDiffQueryLive", () => {
                 threadId,
                 projectId,
                 workspaceRoot: "/tmp/workspace",
+                repoRoots: ["/tmp/workspace"],
                 worktreePath: "/tmp/worktree",
                 latestCheckpointTurnCount: 4,
                 toCheckpointRef,

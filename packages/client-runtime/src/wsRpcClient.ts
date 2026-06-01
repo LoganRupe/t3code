@@ -103,6 +103,7 @@ export interface WsRpcClient {
   };
   readonly filesystem: {
     readonly browse: RpcUnaryMethod<typeof WS_METHODS.filesystemBrowse>;
+    readonly scanGitRepos: RpcUnaryMethod<typeof WS_METHODS.filesystemScanGitRepos>;
   };
   readonly assets: {
     readonly createUrl: RpcUnaryMethod<typeof WS_METHODS.assetsCreateUrl>;
@@ -280,6 +281,8 @@ export function createWsRpcClient(
     },
     filesystem: {
       browse: (input) => transport.request((client) => client[WS_METHODS.filesystemBrowse](input)),
+      scanGitRepos: (input) =>
+        transport.request((client) => client[WS_METHODS.filesystemScanGitRepos](input)),
     },
     assets: {
       createUrl: (input) =>

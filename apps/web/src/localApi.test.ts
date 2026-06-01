@@ -431,6 +431,8 @@ describe("wsApi", () => {
         id: ProjectId.make("project-1"),
         title: "Project",
         workspaceRoot: "/tmp/workspace",
+        repoRoots: ["/tmp/workspace"],
+        repositoryIdentities: [],
         defaultModelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",

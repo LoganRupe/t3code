@@ -250,6 +250,9 @@ function createMockEnvironmentApi(input: {
     projects: {} as EnvironmentApi["projects"],
     filesystem: {
       browse: input.browse,
+      scanGitRepos: (() => {
+        throw new Error("Not implemented in browser test.");
+      }) as EnvironmentApi["filesystem"]["scanGitRepos"],
     },
     assets: {
       createUrl: vi.fn(async ({ resource }) => ({
@@ -413,6 +416,8 @@ function createSnapshotForTargetUser(options: {
         id: PROJECT_ID,
         title: "Project",
         workspaceRoot: "/repo/project",
+        repoRoots: ["/repo/project"],
+        repositoryIdentities: [],
         defaultModelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5",
@@ -899,6 +904,8 @@ function createSnapshotWithSecondaryProject(options?: {
         id: SECOND_PROJECT_ID,
         title: "Docs Portal",
         workspaceRoot: "/repo/clients/docs-portal",
+        repoRoots: ["/repo/clients/docs-portal"],
+        repositoryIdentities: [],
         defaultModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5" },
         scripts: [],
         createdAt: NOW_ISO,

@@ -1183,7 +1183,12 @@ function applyEnvironmentOrchestrationEvent(
           id: event.payload.projectId,
           title: event.payload.title,
           workspaceRoot: event.payload.workspaceRoot,
+          repoRoots:
+            event.payload.repoRoots && event.payload.repoRoots.length > 0
+              ? event.payload.repoRoots
+              : [event.payload.workspaceRoot],
           repositoryIdentity: event.payload.repositoryIdentity ?? null,
+          repositoryIdentities: [],
           defaultModelSelection: event.payload.defaultModelSelection,
           scripts: event.payload.scripts,
           createdAt: event.payload.createdAt,

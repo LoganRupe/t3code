@@ -14,7 +14,9 @@ function makeProject(
 ): EnvironmentScopedProjectShell {
   return {
     workspaceRoot: `/workspaces/${input.id}`,
+    repoRoots: [`/workspaces/${input.id}`],
     repositoryIdentity: null,
+    repositoryIdentities: [],
     defaultModelSelection: null,
     scripts: [],
     createdAt: "2026-04-01T00:00:00.000Z",

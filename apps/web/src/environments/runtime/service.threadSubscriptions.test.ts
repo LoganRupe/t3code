@@ -128,6 +128,7 @@ vi.mock("@t3tools/client-runtime", async (importOriginal) => {
     },
     filesystem: {
       browse: vi.fn(),
+      scanGitRepos: vi.fn(),
     },
     assets: { createUrl: vi.fn() },
     sourceControl: {

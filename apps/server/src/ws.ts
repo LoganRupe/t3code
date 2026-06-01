@@ -44,6 +44,7 @@ import {
   FilesystemBrowseError,
   AssetAccessError,
   EnvironmentAuthorizationError,
+  FilesystemScanGitReposError,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -80,6 +81,7 @@ import { issueAssetUrl } from "./assets/AssetAccess.ts";
 import * as PortScanner from "./preview/PortScanner.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
+import { WorkspaceGitScan } from "./workspace/Services/WorkspaceGitScan.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
 import { VcsStatusBroadcaster } from "./vcs/VcsStatusBroadcaster.ts";
 import { VcsProvisioningService } from "./vcs/VcsProvisioningService.ts";
@@ -274,6 +276,7 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
       const startup = yield* ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem;
+      const workspaceGitScan = yield* WorkspaceGitScan;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner;
       const repositoryIdentityResolver = yield* RepositoryIdentityResolver;
       const serverEnvironment = yield* ServerEnvironment;
@@ -1281,6 +1284,20 @@ const makeWsRpcLayer = (currentSession: AuthenticatedSession) =>
                 workspaceRoot: thread.value.worktreePath ?? project.value.workspaceRoot,
               });
             }),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.filesystemScanGitRepos]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.filesystemScanGitRepos,
+            workspaceGitScan.scan(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new FilesystemScanGitReposError({
+                    message: cause.detail,
+                    cause,
+                  }),
+              ),
+            ),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.subscribeVcsStatus]: (input) =>

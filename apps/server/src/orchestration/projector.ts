@@ -202,10 +202,16 @@ export function projectEvent(
       return decodeForEvent(ProjectCreatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {
           const existing = nextBase.projects.find((entry) => entry.id === payload.projectId);
+          const nextRepoRoots =
+            payload.repoRoots && payload.repoRoots.length > 0
+              ? payload.repoRoots
+              : [payload.workspaceRoot];
           const nextProject = {
             id: payload.projectId,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
+            repoRoots: nextRepoRoots,
+            repositoryIdentities: [],
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
             createdAt: payload.createdAt,
@@ -236,6 +242,7 @@ export function projectEvent(
                   ...(payload.workspaceRoot !== undefined
                     ? { workspaceRoot: payload.workspaceRoot }
                     : {}),
+                  ...(payload.repoRoots !== undefined ? { repoRoots: payload.repoRoots } : {}),
                   ...(payload.defaultModelSelection !== undefined
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
