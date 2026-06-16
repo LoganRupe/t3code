@@ -262,7 +262,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: asProjectId("project-1"),
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
+          repoRoots: ["/tmp/project-1"],
           repositoryIdentity: null,
+          repositoryIdentities: [],
           defaultModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -373,7 +375,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: asProjectId("project-1"),
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
+          repoRoots: ["/tmp/project-1"],
           repositoryIdentity: null,
+          repositoryIdentities: [],
           defaultModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",

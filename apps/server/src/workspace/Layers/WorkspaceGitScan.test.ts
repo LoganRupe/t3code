@@ -12,7 +12,11 @@ const TestLayer = WorkspaceGitScanLive.pipe(Layer.provideMerge(NodeServices.laye
 
 const makeTempDir = Effect.fn(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
-  return yield* fileSystem.makeTempDirectoryScoped({
+  // NOTE: unscoped on purpose. The previous `makeTempDirectoryScoped` was wrapped
+  // in `Effect.scoped(makeTempDir())` at each call site, which closed the scope —
+  // and deleted the directory — before the test body ran. Tests only passed when
+  // their first op was a recursive mkdir that happened to recreate the dir.
+  return yield* fileSystem.makeTempDirectory({
     prefix: "t3code-workspace-git-scan-",
   });
 });
