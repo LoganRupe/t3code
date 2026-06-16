@@ -19,7 +19,7 @@ export class WorkspaceGitScanError extends Schema.TaggedErrorClass<WorkspaceGitS
     parentPath: Schema.String,
     operation: Schema.String,
     detail: Schema.String,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
 

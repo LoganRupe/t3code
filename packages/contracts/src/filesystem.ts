@@ -52,6 +52,6 @@ export class FilesystemScanGitReposError extends Schema.TaggedErrorClass<Filesys
   "FilesystemScanGitReposError",
   {
     message: TrimmedNonEmptyString,
-    cause: Schema.optional(Schema.Defect),
+    cause: Schema.optional(Schema.Defect()),
   },
 ) {}
