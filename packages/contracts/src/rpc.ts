@@ -400,7 +400,7 @@ export const WsAssetsCreateUrlRpc = Rpc.make(WS_METHODS.assetsCreateUrl, {
 export const WsFilesystemScanGitReposRpc = Rpc.make(WS_METHODS.filesystemScanGitRepos, {
   payload: FilesystemScanGitReposInput,
   success: FilesystemScanGitReposResult,
-  error: FilesystemScanGitReposError,
+  error: Schema.Union([FilesystemScanGitReposError, EnvironmentAuthorizationError]),
 });
 
 export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {

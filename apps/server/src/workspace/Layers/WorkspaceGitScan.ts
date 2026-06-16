@@ -27,7 +27,7 @@ export const makeWorkspaceGitScan = Effect.gen(function* () {
   const hasGitMarker = (absolutePath: string) =>
     fileSystem.stat(path.join(absolutePath, ".git")).pipe(
       Effect.map(() => true),
-      Effect.catch(() => Effect.succeed(false)),
+      Effect.orElseSucceed(() => false),
     );
 
   const scan: WorkspaceGitScanShape["scan"] = Effect.fn("WorkspaceGitScan.scan")(function* (input) {
@@ -74,7 +74,7 @@ export const makeWorkspaceGitScan = Effect.gen(function* () {
           const absolutePath = path.join(normalizedParent, name);
           const childStat = yield* fileSystem
             .stat(absolutePath)
-            .pipe(Effect.catch(() => Effect.succeed(null)));
+            .pipe(Effect.orElseSucceed(() => null));
           if (!childStat || childStat.type !== "Directory") return null;
           const hasGit = yield* hasGitMarker(absolutePath);
           return { name, absolutePath, hasGit };

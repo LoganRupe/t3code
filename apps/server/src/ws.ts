@@ -170,6 +170,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.projectsWriteFile, AuthOrchestrationOperateScope],
   [WS_METHODS.shellOpenInEditor, AuthOrchestrationOperateScope],
   [WS_METHODS.filesystemBrowse, AuthOrchestrationReadScope],
+  [WS_METHODS.filesystemScanGitRepos, AuthOrchestrationReadScope],
   [WS_METHODS.assetsCreateUrl, AuthOrchestrationReadScope],
   [WS_METHODS.subscribeVcsStatus, AuthOrchestrationReadScope],
   [WS_METHODS.vcsRefreshStatus, AuthOrchestrationReadScope],
