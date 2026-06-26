@@ -26,7 +26,9 @@ import {
   type OrchestrationSession,
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
+  type RepositoryIdentity,
   ModelSelection,
+  OrchestrationThreadWorktree,
   ProjectId,
   ThreadLinkedPullRequest,
   ThreadId,
@@ -102,6 +104,7 @@ const MESSAGE_TRIM_WHITESPACE =
   "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
 const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
   Struct.assign({
+    repoRoots: Schema.fromJsonString(Schema.Array(Schema.String)),
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     autoPull: Schema.Number,
     projectIcon: Schema.NullOr(Schema.fromJsonString(ProjectIconOverride)),
@@ -130,6 +133,7 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
     modelSelection: Schema.fromJsonString(ModelSelection),
     linkedPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
     branchPullRequest: Schema.NullOr(Schema.fromJsonString(ThreadLinkedPullRequest)),
+    worktrees: Schema.fromJsonString(Schema.Array(OrchestrationThreadWorktree)),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -250,7 +254,9 @@ const ProjectionThreadCheckpointContextThreadRowSchema = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   workspaceRoot: Schema.String,
+  repoRoots: Schema.fromJsonString(Schema.Array(Schema.String)),
   worktreePath: Schema.NullOr(Schema.String),
+  worktrees: Schema.fromJsonString(Schema.Array(OrchestrationThreadWorktree)),
 });
 const FullThreadDiffContextLookupInput = Schema.Struct({
   threadId: ThreadId,
@@ -260,7 +266,9 @@ const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
   threadId: ThreadId,
   projectId: ProjectId,
   workspaceRoot: Schema.String,
+  repoRoots: Schema.fromJsonString(Schema.Array(Schema.String)),
   worktreePath: Schema.NullOr(Schema.String),
+  worktrees: Schema.fromJsonString(Schema.Array(OrchestrationThreadWorktree)),
   latestCheckpointTurnCount: Schema.NullOr(NonNegativeInt),
   toCheckpointRef: Schema.NullOr(CheckpointRef),
 });
@@ -383,15 +391,23 @@ function mapSessionRow(
   };
 }
 
+function normalizeRepoRoots(
+  row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
+): ReadonlyArray<string> {
+  return row.repoRoots.length > 0 ? row.repoRoots : [row.workspaceRoot];
+}
+
 function mapProjectShellRow(
   row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
-  repositoryIdentity: OrchestrationProject["repositoryIdentity"],
+  repositoryIdentities: ReadonlyArray<RepositoryIdentity>,
 ): OrchestrationProjectShell {
   return {
     id: row.projectId,
     title: row.title,
     workspaceRoot: row.workspaceRoot,
-    repositoryIdentity,
+    repoRoots: normalizeRepoRoots(row),
+    repositoryIdentity: repositoryIdentities[0] ?? null,
+    repositoryIdentities,
     defaultModelSelection: row.defaultModelSelection,
     defaultThreadEnvMode: row.defaultThreadEnvMode,
     autoPull: row.autoPull === 1,
@@ -500,23 +516,31 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       options?.includeDeleted === true
         ? projectRows
         : projectRows.filter((row) => row.deletedAt === null);
-    const uniqueWorkspaceRoots = [...new Set(filteredProjectRows.map((row) => row.workspaceRoot))];
-    const repositoryIdentityByWorkspaceRoot = new Map(
+    const uniqueRoots = [...new Set(filteredProjectRows.flatMap((row) => normalizeRepoRoots(row)))];
+    const identityByRoot = new Map(
       yield* Effect.forEach(
-        uniqueWorkspaceRoots,
-        (workspaceRoot) =>
+        uniqueRoots,
+        (root) =>
           repositoryIdentityResolver
-            .resolve(workspaceRoot)
-            .pipe(Effect.map((identity) => [workspaceRoot, identity] as const)),
+            .resolve(root)
+            .pipe(Effect.map((identity) => [root, identity] as const)),
         { concurrency: repositoryIdentityResolutionConcurrency },
       ),
     );
 
     return new Map(
-      filteredProjectRows.map((row) => [
-        row.projectId,
-        repositoryIdentityByWorkspaceRoot.get(row.workspaceRoot) ?? null,
-      ]),
+      filteredProjectRows.map((row) => {
+        const identities: RepositoryIdentity[] = [];
+        const seen = new Set<string>();
+        for (const root of normalizeRepoRoots(row)) {
+          const identity = identityByRoot.get(root);
+          if (!identity) continue;
+          if (seen.has(identity.canonicalKey)) continue;
+          seen.add(identity.canonicalKey);
+          identities.push(identity);
+        }
+        return [row.projectId, identities] as const;
+      }),
     );
   });
 
@@ -534,6 +558,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           workspace_root AS "workspaceRoot",
+          repo_roots AS "repoRoots",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
           auto_pull AS "autoPull",
@@ -566,6 +591,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
           branch_pull_request_json AS "branchPullRequest",
+          worktrees_json AS "worktrees",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -606,6 +632,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
           branch_pull_request_json AS "branchPullRequest",
+          worktrees_json AS "worktrees",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -648,6 +675,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
           branch_pull_request_json AS "branchPullRequest",
+          worktrees_json AS "worktrees",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1088,6 +1116,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           workspace_root AS "workspaceRoot",
+          repo_roots AS "repoRoots",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
           auto_pull AS "autoPull",
@@ -1114,6 +1143,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           workspace_root AS "workspaceRoot",
+          repo_roots AS "repoRoots",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
           auto_pull AS "autoPull",
@@ -1182,7 +1212,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           threads.thread_id AS "threadId",
           threads.project_id AS "projectId",
           projects.workspace_root AS "workspaceRoot",
-          threads.worktree_path AS "worktreePath"
+          projects.repo_roots AS "repoRoots",
+          threads.worktree_path AS "worktreePath",
+          threads.worktrees_json AS "worktrees"
         FROM projection_threads AS threads
         INNER JOIN projection_projects AS projects
           ON projects.project_id = threads.project_id
@@ -1208,6 +1240,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           worktree_path AS "worktreePath",
           linked_pull_request_json AS "linkedPullRequest",
           branch_pull_request_json AS "branchPullRequest",
+          worktrees_json AS "worktrees",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -1952,7 +1985,9 @@ pending_approval_requests AS (
           threads.thread_id AS "threadId",
           threads.project_id AS "projectId",
           projects.workspace_root AS "workspaceRoot",
+          projects.repo_roots AS "repoRoots",
           threads.worktree_path AS "worktreePath",
+          threads.worktrees_json AS "worktrees",
           (
             SELECT MAX(turns.checkpoint_turn_count)
             FROM projection_turns AS turns
@@ -2216,21 +2251,26 @@ pending_approval_requests AS (
                 { includeDeleted: true },
               );
 
-              const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => ({
-                id: row.projectId,
-                title: row.title,
-                workspaceRoot: row.workspaceRoot,
-                repositoryIdentity: repositoryIdentities.get(row.projectId) ?? null,
-                defaultModelSelection: row.defaultModelSelection,
-                defaultThreadEnvMode: row.defaultThreadEnvMode,
-                autoPull: row.autoPull === 1,
-                faviconPath: row.faviconPath ?? null,
-                projectIcon: row.projectIcon ?? null,
-                scripts: row.scripts,
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-                deletedAt: row.deletedAt,
-              }));
+              const projects: ReadonlyArray<OrchestrationProject> = projectRows.map((row) => {
+                const projectIdentities = repositoryIdentities.get(row.projectId) ?? [];
+                return {
+                  id: row.projectId,
+                  title: row.title,
+                  workspaceRoot: row.workspaceRoot,
+                  repoRoots: normalizeRepoRoots(row),
+                  repositoryIdentity: projectIdentities[0] ?? null,
+                  repositoryIdentities: projectIdentities,
+                  defaultModelSelection: row.defaultModelSelection,
+                  defaultThreadEnvMode: row.defaultThreadEnvMode,
+                  autoPull: row.autoPull === 1,
+                  faviconPath: row.faviconPath ?? null,
+                  projectIcon: row.projectIcon ?? null,
+                  scripts: row.scripts,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  deletedAt: row.deletedAt,
+                };
+              });
 
               const threads: ReadonlyArray<OrchestrationThread> = threadRows.map((row) => ({
                 id: row.threadId,
@@ -2244,9 +2284,10 @@ pending_approval_requests AS (
                 ...mapThreadPullRequests(
                   pullRequestsByThread.get(row.threadId) ?? [],
                   row.projectId,
-                  repositoryIdentities.get(row.projectId),
+                  repositoryIdentities.get(row.projectId)?.[0],
                 ),
                 branchPullRequest: row.branchPullRequest,
+                worktrees: row.worktrees,
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -2387,7 +2428,9 @@ pending_approval_requests AS (
                   id: row.projectId,
                   title: row.title,
                   workspaceRoot: row.workspaceRoot,
-                  repositoryIdentity: repositoryIdentities.get(row.projectId) ?? null,
+                  repoRoots: normalizeRepoRoots(row),
+                  repositoryIdentity: repositoryIdentities.get(row.projectId)?.[0] ?? null,
+                  repositoryIdentities: repositoryIdentities.get(row.projectId) ?? [],
                   defaultModelSelection: row.defaultModelSelection,
                   defaultThreadEnvMode: row.defaultThreadEnvMode,
                   autoPull: row.autoPull === 1,
@@ -2488,9 +2531,10 @@ pending_approval_requests AS (
                   ...mapThreadPullRequests(
                     pullRequestsByThread.get(row.threadId) ?? [],
                     row.projectId,
-                    repositoryIdentities.get(row.projectId),
+                    repositoryIdentities.get(row.projectId)?.[0],
                   ),
                   branchPullRequest: row.branchPullRequest,
+                  worktrees: row.worktrees,
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -2625,7 +2669,7 @@ pending_approval_requests AS (
                 projects: Arr.filterMap(projectRows, (row) =>
                   row.deletedAt === null
                     ? Result.succeed(
-                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? []),
                       )
                     : Result.failVoid,
                 ),
@@ -2641,10 +2685,11 @@ pending_approval_requests AS (
                         branch: row.branch,
                         worktreePath: row.worktreePath,
                         branchPullRequest: row.branchPullRequest,
+                        worktrees: row.worktrees,
                         ...mapThreadPullRequests(
                           pullRequestsByThread.get(row.threadId) ?? [],
                           row.projectId,
-                          repositoryIdentities.get(row.projectId),
+                          repositoryIdentities.get(row.projectId)?.[0],
                         ),
                         latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                         createdAt: row.createdAt,
@@ -2789,7 +2834,7 @@ pending_approval_requests AS (
                 projects: Arr.filterMap(projectRows, (row) =>
                   row.deletedAt === null && activeProjectIds.has(row.projectId)
                     ? Result.succeed(
-                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? []),
                       )
                     : Result.failVoid,
                 ),
@@ -2803,10 +2848,11 @@ pending_approval_requests AS (
                   branch: row.branch,
                   worktreePath: row.worktreePath,
                   branchPullRequest: row.branchPullRequest,
+                  worktrees: row.worktrees,
                   ...mapThreadPullRequests(
                     pullRequestsByThread.get(row.threadId) ?? [],
                     row.projectId,
-                    repositoryIdentities.get(row.projectId),
+                    repositoryIdentities.get(row.projectId)?.[0],
                   ),
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
@@ -2932,13 +2978,15 @@ pending_approval_requests AS (
         Effect.flatMap((option) =>
           Option.isNone(option)
             ? Effect.succeed(Option.none<OrchestrationProject>())
-            : repositoryIdentityResolver.resolve(option.value.workspaceRoot).pipe(
-                Effect.map((repositoryIdentity) =>
+            : repositoryIdentityResolver.resolveMany(normalizeRepoRoots(option.value)).pipe(
+                Effect.map((projectIdentities) =>
                   Option.some({
                     id: option.value.projectId,
                     title: option.value.title,
                     workspaceRoot: option.value.workspaceRoot,
-                    repositoryIdentity,
+                    repoRoots: normalizeRepoRoots(option.value),
+                    repositoryIdentity: projectIdentities[0] ?? null,
+                    repositoryIdentities: projectIdentities,
                     defaultModelSelection: option.value.defaultModelSelection,
                     defaultThreadEnvMode: option.value.defaultThreadEnvMode,
                     autoPull: option.value.autoPull === 1,
@@ -2966,7 +3014,7 @@ pending_approval_requests AS (
       Effect.flatMap((projects) =>
         resolveRepositoryIdentitiesForProjects(projects).pipe(
           Effect.map((identities) =>
-            projects.map((row) => mapProjectShellRow(row, identities.get(row.projectId) ?? null)),
+            projects.map((row) => mapProjectShellRow(row, identities.get(row.projectId) ?? [])),
           ),
         ),
       ),
@@ -2985,10 +3033,10 @@ pending_approval_requests AS (
         Option.isNone(option)
           ? Effect.succeed(Option.none<OrchestrationProjectShell>())
           : repositoryIdentityResolver
-              .resolve(option.value.workspaceRoot)
+              .resolveMany(normalizeRepoRoots(option.value))
               .pipe(
-                Effect.map((repositoryIdentity) =>
-                  Option.some(mapProjectShellRow(option.value, repositoryIdentity)),
+                Effect.map((projectIdentities) =>
+                  Option.some(mapProjectShellRow(option.value, projectIdentities)),
                 ),
               ),
       ),
@@ -3062,7 +3110,12 @@ pending_approval_requests AS (
         threadId: threadRow.value.threadId,
         projectId: threadRow.value.projectId,
         workspaceRoot: threadRow.value.workspaceRoot,
+        repoRoots:
+          threadRow.value.repoRoots.length > 0
+            ? threadRow.value.repoRoots
+            : [threadRow.value.workspaceRoot],
         worktreePath: threadRow.value.worktreePath,
+        worktrees: threadRow.value.worktrees,
         checkpoints: checkpointRows.map((row): OrchestrationCheckpointSummary => ({
           turnId: row.turnId,
           checkpointTurnCount: row.checkpointTurnCount,
@@ -3098,7 +3151,9 @@ pending_approval_requests AS (
         threadId: row.value.threadId,
         projectId: row.value.projectId,
         workspaceRoot: row.value.workspaceRoot,
+        repoRoots: row.value.repoRoots.length > 0 ? row.value.repoRoots : [row.value.workspaceRoot],
         worktreePath: row.value.worktreePath,
+        worktrees: row.value.worktrees,
         latestCheckpointTurnCount: row.value.latestCheckpointTurnCount ?? 0,
         toCheckpointRef: row.value.toCheckpointRef,
       });
@@ -3163,6 +3218,7 @@ pending_approval_requests AS (
                 ?.repositoryIdentity,
         ),
         branchPullRequest: threadRow.value.branchPullRequest,
+        worktrees: threadRow.value.worktrees,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -3462,6 +3518,7 @@ pending_approval_requests AS (
                 ?.repositoryIdentity,
         ),
         branchPullRequest: threadRow.value.branchPullRequest,
+        worktrees: threadRow.value.worktrees,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,

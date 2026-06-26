@@ -36,7 +36,7 @@ import {
 import { useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
-import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
+import { formatWorktreePathForDisplay, getOrphanedWorktreesForThread } from "../worktreeCleanup";
 import { stackedThreadToast, toastManager } from "../components/ui/toast";
 import { useClientSettings } from "./useSettings";
 import { useAtomCommand } from "../state/use-atom-command";
@@ -346,24 +346,27 @@ export function useThreadActions() {
         deletedIds && deletedIds.size > 0
           ? threads.filter((entry) => entry.id === threadRef.threadId || !deletedIds.has(entry.id))
           : threads;
-      const orphanedWorktreePath = getOrphanedWorktreePathForThread(
-        survivingThreads,
-        threadRef.threadId,
+      const orphanedWorktrees = getOrphanedWorktreesForThread(survivingThreads, threadRef.threadId);
+      const displayWorktreePaths = orphanedWorktrees.map((entry) =>
+        formatWorktreePathForDisplay(entry.worktreePath),
       );
-      const displayWorktreePath = orphanedWorktreePath
-        ? formatWorktreePathForDisplay(orphanedWorktreePath)
-        : null;
-      const canDeleteWorktree = orphanedWorktreePath !== null && threadProject !== null;
+      // Multi-repo workspaces (#923): a thread can own one worktree per repo
+      // root, so confirm/remove fan out across every orphaned worktree.
+      const canDeleteWorktree = orphanedWorktrees.length > 0 && threadProject !== null;
       const localApi = readLocalApi();
       let shouldDeleteWorktree = false;
       if (canDeleteWorktree && localApi) {
         const confirmationResult = await settlePromise(() =>
           localApi.dialogs.confirm(
             [
-              "This thread is the only one linked to this worktree:",
-              displayWorktreePath ?? orphanedWorktreePath,
+              orphanedWorktrees.length > 1
+                ? "This thread is the only one linked to these worktrees:"
+                : "This thread is the only one linked to this worktree:",
+              displayWorktreePaths.join("\n"),
               "",
-              "Delete the worktree too?",
+              orphanedWorktrees.length > 1
+                ? "Delete the worktrees too?"
+                : "Delete the worktree too?",
             ].join("\n"),
             { variant: "destructive" },
           ),
@@ -430,50 +433,71 @@ export function useThreadActions() {
         );
       }
 
-      if (!shouldDeleteWorktree || !orphanedWorktreePath || !threadProject) {
+      if (!shouldDeleteWorktree || orphanedWorktrees.length === 0 || !threadProject) {
         return deleteResult;
       }
 
-      const removeResult = await removeWorktree({
-        environmentId: threadRef.environmentId,
-        input: {
-          cwd: threadProject.workspaceRoot,
-          path: orphanedWorktreePath,
-          force: true,
-        },
-      });
-      const refreshResult =
-        removeResult._tag === "Success"
-          ? await refreshVcsStatus({
-              environmentId: threadRef.environmentId,
-              input: { cwd: threadProject.workspaceRoot },
-            })
-          : null;
-      const cleanupFailure =
-        removeResult._tag === "Failure"
-          ? removeResult
-          : refreshResult?._tag === "Failure"
-            ? refreshResult
-            : null;
-      if (cleanupFailure) {
-        const removalFailed = removeResult._tag === "Failure";
-        const error = squashAtomCommandFailure(cleanupFailure);
-        const message = error instanceof Error ? error.message : "An error occurred.";
-        console.error("Worktree cleanup failed after thread deletion", {
-          threadId: threadRef.threadId,
-          projectCwd: threadProject.workspaceRoot,
-          worktreePath: orphanedWorktreePath,
-          error,
+      // Multi-repo workspaces (#923): a thread can own one worktree per repo
+      // root, so remove each per-root worktree from its own repo, falling back
+      // to the project workspace root for legacy single-worktree threads. After
+      // each removal succeeds we refresh that repo's VCS status.
+      const failedRemovals: string[] = [];
+      const failedRefreshes: string[] = [];
+      for (const orphaned of orphanedWorktrees) {
+        const removeCwd = orphaned.repoRoot ?? threadProject.workspaceRoot;
+        const removeResult = await removeWorktree({
+          environmentId: threadRef.environmentId,
+          input: {
+            cwd: removeCwd,
+            path: orphaned.worktreePath,
+            force: true,
+          },
         });
+        const refreshResult =
+          removeResult._tag === "Success"
+            ? await refreshVcsStatus({
+                environmentId: threadRef.environmentId,
+                input: { cwd: removeCwd },
+              })
+            : null;
+        const failure =
+          removeResult._tag === "Failure"
+            ? removeResult
+            : refreshResult?._tag === "Failure"
+              ? refreshResult
+              : null;
+        if (failure) {
+          const error = squashAtomCommandFailure(failure);
+          const message = error instanceof Error ? error.message : "An error occurred.";
+          console.error("Worktree cleanup failed after thread deletion", {
+            threadId: threadRef.threadId,
+            projectCwd: removeCwd,
+            worktreePath: orphaned.worktreePath,
+            error,
+          });
+          if (removeResult._tag === "Failure") {
+            failedRemovals.push(
+              `${formatWorktreePathForDisplay(orphaned.worktreePath)} (${message})`,
+            );
+          } else {
+            failedRefreshes.push(message);
+          }
+        }
+      }
+
+      if (failedRemovals.length > 0 || failedRefreshes.length > 0) {
+        const removalFailed = failedRemovals.length > 0;
         toastManager.add(
           stackedThreadToast({
             type: "error",
             title: removalFailed
-              ? "Failed to delete worktree"
+              ? failedRemovals.length > 1
+                ? "Failed to delete worktrees"
+                : "Failed to delete worktree"
               : "Worktree deleted, but Git status refresh failed",
             description: removalFailed
-              ? `Could not remove ${displayWorktreePath ?? orphanedWorktreePath}. ${message}`
-              : message,
+              ? `Could not remove ${failedRemovals.join("; ")}.`
+              : failedRefreshes.join("; "),
           }),
         );
         // The thread was deleted. Cleanup has its own toast; returning its

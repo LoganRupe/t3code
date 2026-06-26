@@ -59,6 +59,11 @@ it.effect("reads project shells without loading threads or resolving excluded pr
             resolved.push(root);
             return null;
           }),
+        resolveMany: (roots) =>
+          Effect.sync(() => {
+            resolved.push(...roots);
+            return [];
+          }),
       }),
     ),
     Layer.provideMerge(SqlitePersistenceMemory),
@@ -424,7 +429,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: asProjectId("project-1"),
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
+          repoRoots: ["/tmp/project-1"],
           repositoryIdentity: null,
+          repositoryIdentities: [],
           defaultModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -462,6 +469,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           worktreePath: null,
           pullRequests: expectedPullRequests,
           branchPullRequest,
+          worktrees: [],
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
@@ -550,7 +558,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: asProjectId("project-1"),
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
+          repoRoots: ["/tmp/project-1"],
           repositoryIdentity: null,
+          repositoryIdentities: [],
           defaultModelSelection: {
             instanceId: ProviderInstanceId.make("codex"),
             model: "gpt-5-codex",
@@ -587,6 +597,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           worktreePath: null,
           pullRequests: expectedPullRequests,
           branchPullRequest,
+          worktrees: [],
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
@@ -1483,7 +1494,9 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           threadId: ThreadId.make("thread-context"),
           projectId: asProjectId("project-context"),
           workspaceRoot: "/tmp/context-workspace",
+          repoRoots: ["/tmp/context-workspace"],
           worktreePath: "/tmp/context-worktree",
+          worktrees: [],
           checkpoints: [
             {
               turnId: asTurnId("turn-1"),
@@ -2381,6 +2394,35 @@ it.effect(
                 },
                 rootPath: cwd,
               };
+            }),
+          resolveMany: (cwds: ReadonlyArray<string>) =>
+            Effect.sync(() => {
+              const seen = new Set<string>();
+              const result: Array<{
+                readonly canonicalKey: string;
+                readonly locator: {
+                  readonly source: "git-remote";
+                  readonly remoteName: string;
+                  readonly remoteUrl: string;
+                };
+                readonly rootPath: string;
+              }> = [];
+              for (const cwd of cwds) {
+                resolveCalls.push(cwd);
+                const canonicalKey = `github.com/acme${cwd}`;
+                if (seen.has(canonicalKey)) continue;
+                seen.add(canonicalKey);
+                result.push({
+                  canonicalKey,
+                  locator: {
+                    source: "git-remote",
+                    remoteName: "origin",
+                    remoteUrl: `https://github.com/acme${cwd}.git`,
+                  },
+                  rootPath: cwd,
+                });
+              }
+              return result;
             }),
         }),
       ),
@@ -3412,22 +3454,23 @@ projectionSnapshotLayer("ProjectionSnapshotQuery imported sources", (it) => {
 });
 
 it.effect("omits foreign-host PRs from legacy snapshots while preserving native links", () => {
+  const acmeWebIdentity = {
+    canonicalKey: "github.com/acme/web",
+    provider: "github",
+    displayName: "acme/web",
+    locator: {
+      source: "git-remote" as const,
+      remoteName: "origin",
+      remoteUrl: "https://github.com/acme/web.git",
+    },
+  };
   const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
     Layer.provide(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
     Layer.provide(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolve: () =>
-          Effect.succeed({
-            canonicalKey: "github.com/acme/web",
-            provider: "github",
-            displayName: "acme/web",
-            locator: {
-              source: "git-remote" as const,
-              remoteName: "origin",
-              remoteUrl: "https://github.com/acme/web.git",
-            },
-          }),
+        resolve: () => Effect.succeed(acmeWebIdentity),
+        resolveMany: () => Effect.succeed([acmeWebIdentity]),
       }),
     ),
     Layer.provideMerge(SqlitePersistenceMemory),

@@ -83,6 +83,7 @@ function makeThread(pullRequests: ReadonlyArray<ThreadPullRequestLink>): Orchest
     branch: null,
     worktreePath: null,
     pullRequests,
+    worktrees: [],
     latestTurn: null,
     createdAt: "2026-08-01T00:00:00.000Z",
     updatedAt: "2026-08-20T00:00:00.000Z",

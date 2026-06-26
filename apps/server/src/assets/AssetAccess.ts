@@ -400,6 +400,10 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   readonly resource: AssetResource;
   readonly workspaceRoot?: string;
   readonly projectFaviconPath?: string;
+  // Multi-repo workspaces (#923): ordered candidate roots a workspace-file may
+  // live under. The first root that actually contains the file wins, so a
+  // preview opens cross-root files. Falls back to `[workspaceRoot]`.
+  readonly workspaceRoots?: ReadonlyArray<string>;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -438,26 +442,74 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
       break;
     }
     case "workspace-file": {
-      if (!input.workspaceRoot) {
+      // Multi-repo workspaces (#923): a workspace-file may live under any of the
+      // candidate roots. Try each in order and keep the first root that actually
+      // contains the file. Falls back to `[workspaceRoot]`.
+      const candidateRoots =
+        input.workspaceRoots && input.workspaceRoots.length > 0
+          ? input.workspaceRoots
+          : input.workspaceRoot
+            ? [input.workspaceRoot]
+            : [];
+      if (candidateRoots.length === 0) {
         return yield* new AssetWorkspaceContextNotFoundError({
           resource: input.resource,
         });
       }
-      const workspaceRoot = yield* workspacePaths.normalizeWorkspaceRoot(input.workspaceRoot).pipe(
-        Effect.mapError(
-          (cause) =>
-            new AssetWorkspaceRootNormalizationError({
-              resource: input.resource,
-              cause,
-            }),
-        ),
-      );
-      const finalized = yield* finalizeWorkspaceFileAsset({
-        workspaceRoot,
-        requestedPath: input.resource.path,
-        resource: input.resource,
-        expiresAt,
-      });
+      let finalized: Effect.Success<ReturnType<typeof finalizeWorkspaceFileAsset>> | null = null;
+      let rootNormalizationError: AssetWorkspaceRootNormalizationError | null = null;
+      let pathValidationError: AssetWorkspacePathValidationError | null = null;
+      let resolvedWithinAnyRoot = false;
+      for (const candidate of candidateRoots) {
+        const normalized = yield* workspacePaths.normalizeWorkspaceRoot(candidate).pipe(
+          Effect.map((workspaceRoot) => ({ _tag: "root", workspaceRoot }) as const),
+          Effect.catch((cause) =>
+            Effect.succeed({
+              _tag: "error",
+              error: new AssetWorkspaceRootNormalizationError({ resource: input.resource, cause }),
+            } as const),
+          ),
+        );
+        if (normalized._tag === "error") {
+          rootNormalizationError ??= normalized.error;
+          continue;
+        }
+        const attempt = yield* finalizeWorkspaceFileAsset({
+          workspaceRoot: normalized.workspaceRoot,
+          requestedPath: input.resource.path,
+          resource: input.resource,
+          expiresAt,
+        }).pipe(
+          Effect.map((value) => ({ _tag: "found", value }) as const),
+          Effect.catchTags({
+            AssetWorkspacePathValidationError: (error) =>
+              Effect.succeed({ _tag: "outside", error } as const),
+            AssetWorkspaceAssetNotFoundError: () => Effect.succeed({ _tag: "missing" } as const),
+          }),
+        );
+        if (attempt._tag === "found") {
+          finalized = attempt.value;
+          break;
+        }
+        if (attempt._tag === "outside") {
+          pathValidationError ??= attempt.error;
+        } else {
+          resolvedWithinAnyRoot = true;
+        }
+      }
+      if (!finalized) {
+        // Path sat outside every candidate root: keep the precise reason.
+        // Otherwise it resolved within a root but no file exists there.
+        if (!resolvedWithinAnyRoot && pathValidationError) {
+          return yield* pathValidationError;
+        }
+        if (!resolvedWithinAnyRoot && rootNormalizationError) {
+          return yield* rootNormalizationError;
+        }
+        return yield* new AssetWorkspaceAssetNotFoundError({
+          resource: input.resource,
+        });
+      }
       claims = finalized.claims;
       fileName = finalized.fileName;
       imageDimensions = finalized.imageDimensions;

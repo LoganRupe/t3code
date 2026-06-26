@@ -13,13 +13,18 @@ interface FileSaveOptions {
   environmentId: EnvironmentId;
   cwd: string;
   relativePath: string;
-  onPendingChange: (relativePath: string, pending: boolean) => void;
+  // Multi-repo workspaces (#923): the repo root that owns this file, forwarded
+  // to `onPendingChange` so the pending state lands on the surface that opened
+  // it in a non-anchor repo. Absent for single-repo projects.
+  root?: string | undefined;
+  onPendingChange: (relativePath: string, pending: boolean, root?: string | undefined) => void;
 }
 
 export function useFileSaveCoordinator({
   environmentId,
   cwd,
   relativePath,
+  root,
   onPendingChange,
 }: FileSaveOptions): Pick<FileSaveCoordinator, "change"> {
   const writeFile = useAtomCommand(projectEnvironment.writeFile);
@@ -30,7 +35,7 @@ export function useFileSaveCoordinator({
       setup: () => {
         const coordinator = new FileSaveCoordinator({
           debounceMs: FILE_SAVE_DEBOUNCE_MS,
-          onPendingChange: (pending) => onPendingChange(relativePath, pending),
+          onPendingChange: (pending) => onPendingChange(relativePath, pending, root),
           persist: (nextContents) =>
             writeFile({
               environmentId,
@@ -47,7 +52,7 @@ export function useFileSaveCoordinator({
         };
       },
     };
-  }, [cwd, environmentId, onPendingChange, relativePath, writeFile]);
+  }, [cwd, environmentId, onPendingChange, relativePath, root, writeFile]);
 
   // StrictMode replays effect setup. Retired file sessions stay inert, while the
   // replay gets a fresh coordinator instead of reusing a disposed one.

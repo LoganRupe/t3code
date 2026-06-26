@@ -258,6 +258,8 @@ interface TimelineRowSharedState {
   routeThreadKey: string;
   threadRef: ScopedThreadRef | null;
   markdownCwd: string | undefined;
+  // Multi-repo workspaces (#923): repo roots for resolving file-link previews.
+  markdownRepoRoots: readonly string[] | undefined;
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
@@ -406,6 +408,7 @@ interface MessagesTimelineProps {
   onFileDownload?: (attachment: ChatFileAttachment) => void;
   activeThreadEnvironmentId: EnvironmentId;
   markdownCwd: string | undefined;
+  markdownRepoRoots: readonly string[] | undefined;
   resolvedTheme: "light" | "dark";
   timestampFormat: TimestampFormat;
   workspaceRoot: string | undefined;
@@ -469,6 +472,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onFileDownload = NOOP_OPEN_ATTACHMENT,
   activeThreadEnvironmentId,
   markdownCwd,
+  markdownRepoRoots,
   resolvedTheme,
   timestampFormat,
   workspaceRoot,
@@ -893,6 +897,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     };
   }, [timelineViewportElement, rows.length, reportContentOverflow]);
 
+  // Stable dep for the roots array: NUL-joined (paths never contain NUL).
+  const markdownRepoRootsKey = markdownRepoRoots ? markdownRepoRoots.join("\0") : "";
   const sharedState = useMemo<TimelineRowSharedState>(
     () => ({
       citationRequest: readyCitationRequest,
@@ -902,6 +908,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       // Keep Markdown callbacks memoized during unrelated activity updates.
       threadRef: citationThreadRef,
       markdownCwd,
+      markdownRepoRoots: markdownRepoRootsKey ? markdownRepoRootsKey.split("\0") : undefined,
       resolvedTheme,
       workspaceRoot,
       skills,
@@ -932,6 +939,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       routeThreadKey,
       citationThreadRef,
       markdownCwd,
+      markdownRepoRootsKey,
       resolvedTheme,
       workspaceRoot,
       skills,
@@ -1943,6 +1951,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           <ChatMarkdown
             text={messageText}
             cwd={ctx.markdownCwd}
+            repoRoots={ctx.markdownRepoRoots}
             threadRef={ctx.threadRef ?? undefined}
             isStreaming={Boolean(row.message.streaming)}
             lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
@@ -2069,6 +2078,7 @@ function ProposedPlanTimelineRow({
         environmentId={ctx.activeThreadEnvironmentId}
         threadRef={ctx.threadRef ?? undefined}
         cwd={ctx.markdownCwd}
+        repoRoots={ctx.markdownRepoRoots}
         workspaceRoot={ctx.workspaceRoot}
       />
     </div>
@@ -3297,6 +3307,7 @@ const UserMessageBody = memo(function UserMessageBody(props: {
     <ChatMarkdown
       text={props.text}
       cwd={props.markdownCwd}
+      repoRoots={ctx.markdownRepoRoots}
       threadRef={ctx.threadRef ?? undefined}
       skills={props.skills}
       className="text-message-foreground"
@@ -3335,6 +3346,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
         <ChatMarkdown
           text={formatReviewCommentFence(fenceLanguage, comment.diff)}
           cwd={ctx.markdownCwd}
+          repoRoots={ctx.markdownRepoRoots}
           threadRef={ctx.threadRef ?? undefined}
           skills={ctx.skills}
           className="text-message-foreground"

@@ -389,6 +389,7 @@ describe("OrchestrationEngine", () => {
           branch: null,
           worktreePath: null,
           pullRequests: [],
+          worktrees: [],
           latestTurn: null,
           createdAt: "2026-03-03T00:00:02.000Z",
           updatedAt: "2026-03-03T00:00:03.000Z",
@@ -1026,19 +1027,20 @@ describe("OrchestrationEngine", () => {
   it.each(["unlink", "relink", "branch", "worktree", "project", "delete"] as const)(
     "rejects PR discovery completed after a newer %s command",
     async (change) => {
+      const identityFor = (workspaceRoot: string) => ({
+        canonicalKey: "example.test/owner/repository",
+        provider: "github",
+        displayName: "owner/repository",
+        rootPath: workspaceRoot,
+        locator: {
+          source: "git-remote" as const,
+          remoteName: "origin",
+          remoteUrl: "https://example.test/owner/repository.git",
+        },
+      });
       const system = await createOrchestrationSystem(undefined, {
-        resolve: (workspaceRoot) =>
-          Effect.succeed({
-            canonicalKey: "example.test/owner/repository",
-            provider: "github",
-            displayName: "owner/repository",
-            rootPath: workspaceRoot,
-            locator: {
-              source: "git-remote",
-              remoteName: "origin",
-              remoteUrl: "https://example.test/owner/repository.git",
-            },
-          }),
+        resolve: (workspaceRoot) => Effect.succeed(identityFor(workspaceRoot)),
+        resolveMany: (workspaceRoots) => Effect.succeed(workspaceRoots.map(identityFor)),
       });
       // Same-tick links must replace the old PR, not rely on timestamp ordering.
       const clock = vi.spyOn(Date, "now").mockReturnValue(Date.parse(now()));

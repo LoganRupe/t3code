@@ -245,6 +245,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           title: command.title,
           workspaceRoot: command.workspaceRoot,
+          ...(command.workspaceFile !== undefined ? { workspaceFile: command.workspaceFile } : {}),
+          ...(command.repoRoots && command.repoRoots.length > 0
+            ? { repoRoots: command.repoRoots }
+            : {}),
           // Project creation has no user model choice. Older clients sent an
           // automatic seed here, but only a metadata update records an
           // explicit project default.
@@ -298,6 +302,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
+          ...(command.workspaceFile !== undefined ? { workspaceFile: command.workspaceFile } : {}),
+          ...(command.repoRoots !== undefined ? { repoRoots: command.repoRoots } : {}),
           ...(command.defaultModelSelection !== undefined
             ? { defaultModelSelection: command.defaultModelSelection }
             : {}),
@@ -393,6 +399,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          worktrees: command.worktrees ?? [],
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -1004,6 +1011,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           ...(command.linkedPullRequest !== undefined
             ? { linkedPullRequest: command.linkedPullRequest }
             : {}),
+          ...(command.worktrees !== undefined ? { worktrees: command.worktrees } : {}),
           updatedAt: occurredAt,
         },
       };
@@ -1937,6 +1945,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           turnId: command.turnId,
           checkpointTurnCount: command.checkpointTurnCount,
           checkpointRef: command.checkpointRef,
+          ...(command.checkpointRefs !== undefined
+            ? { checkpointRefs: command.checkpointRefs }
+            : {}),
           status: command.status,
           files: command.files,
           assistantMessageId: command.assistantMessageId ?? null,

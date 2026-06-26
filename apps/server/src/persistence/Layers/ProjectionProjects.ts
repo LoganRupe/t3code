@@ -18,6 +18,7 @@ import {
 
 const ProjectionProjectDbRow = ProjectionProject.mapFields(
   Struct.assign({
+    repoRoots: Schema.fromJsonString(Schema.Array(Schema.String)),
     defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
     autoPull: Schema.Number,
     projectIcon: Schema.NullOr(Schema.fromJsonString(ProjectIconOverride)),
@@ -37,6 +38,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           project_id,
           title,
           workspace_root,
+          workspace_file,
+          repo_roots,
           default_model_selection_json,
           default_thread_env_mode,
           auto_pull,
@@ -51,6 +54,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           ${row.projectId},
           ${row.title},
           ${row.workspaceRoot},
+          ${row.workspaceFile ?? null},
+          ${JSON.stringify(row.repoRoots)},
           ${row.defaultModelSelection !== null ? JSON.stringify(row.defaultModelSelection) : null},
           ${row.defaultThreadEnvMode},
           ${row.autoPull ? 1 : 0},
@@ -65,6 +70,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
         DO UPDATE SET
           title = excluded.title,
           workspace_root = excluded.workspace_root,
+          workspace_file = excluded.workspace_file,
+          repo_roots = excluded.repo_roots,
           default_model_selection_json = excluded.default_model_selection_json,
           default_thread_env_mode = excluded.default_thread_env_mode,
           auto_pull = excluded.auto_pull,
@@ -86,6 +93,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           workspace_root AS "workspaceRoot",
+          workspace_file AS "workspaceFile",
+          repo_roots AS "repoRoots",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
           auto_pull AS "autoPull",
@@ -109,6 +118,8 @@ const makeProjectionProjectRepository = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           workspace_root AS "workspaceRoot",
+          workspace_file AS "workspaceFile",
+          repo_roots AS "repoRoots",
           default_model_selection_json AS "defaultModelSelection",
           default_thread_env_mode AS "defaultThreadEnvMode",
           auto_pull AS "autoPull",
