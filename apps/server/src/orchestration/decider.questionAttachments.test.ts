@@ -27,6 +27,7 @@ const readModel: OrchestrationReadModel = {
       runtimeMode: "full-access",
       interactionMode: "default",
       pullRequests: [],
+      worktrees: [],
       branch: null,
       worktreePath: null,
       latestTurn: null,

@@ -9,6 +9,10 @@ interface OpenDiffFilePrimaryActionInput {
   readonly filePath: string;
   readonly activeCwd: string | undefined;
   readonly repositoryRoot?: string | undefined;
+  // Owning repo root in a multi-repo diff, so the preview reads `filePath`
+  // against that repo instead of the workspace anchor (#923). Undefined =
+  // single-repo / anchor.
+  readonly repoRoot?: string | undefined;
   readonly openInEditor: (targetPath: string) => void;
 }
 
@@ -82,6 +86,7 @@ export function openDiffFilePrimaryAction({
   filePath,
   activeCwd,
   repositoryRoot,
+  repoRoot,
   openInEditor,
 }: OpenDiffFilePrimaryActionInput): void {
   const workspaceFilePath = resolveDiffPathForWorkspace({
@@ -92,7 +97,7 @@ export function openDiffFilePrimaryAction({
   if (!workspaceFilePath) return;
 
   if (threadRef) {
-    useRightPanelStore.getState().openFile(threadRef, workspaceFilePath);
+    useRightPanelStore.getState().openFile(threadRef, workspaceFilePath, undefined, repoRoot);
     return;
   }
 

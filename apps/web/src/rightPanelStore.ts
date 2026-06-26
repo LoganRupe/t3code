@@ -58,6 +58,7 @@ export type RightPanelSurface =
       kind: "file";
       /** Workspace-relative, or absolute for a host file outside the workspace. */
       relativePath: string;
+      root?: string;
       revealLine: number | null;
       revealRequestId: number;
       /** Present when the file lives in the thread's attachment store rather
@@ -134,7 +135,7 @@ interface RightPanelStoreState {
   openDevice: (ref: ScopedThreadRef, target: DeviceTabTarget, automatic?: boolean) => void;
   renameDevice: (ref: ScopedThreadRef, surfaceId: string, title: string) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
-  openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
+  openFile: (ref: ScopedThreadRef, relativePath: string, line?: number, root?: string) => void;
   openAttachment: (ref: ScopedThreadRef, attachment: ChatFileAttachment) => void;
   openPullRequest: (
     ref: ScopedThreadRef,
@@ -201,14 +202,23 @@ const browserSurface = (tabId: string | null): RightPanelSurface =>
     ? { id: `browser:${tabId}`, kind: "preview", resourceId: tabId }
     : { id: "browser:new", kind: "preview", resourceId: null };
 
+/**
+ * Stable id for a file surface. Keyed by root too so the same relative path in
+ * two repos maps to distinct surfaces (multi-repo workspaces, #923).
+ */
+export const fileSurfaceId = (relativePath: string, root?: string): `file:${string}` =>
+  `file:${root ? `${root}::` : ""}${relativePath}`;
+
 const fileSurface = (
   relativePath: string,
   revealLine: number | null,
   revealRequestId: number,
+  root?: string,
 ): RightPanelSurface => ({
-  id: `file:${relativePath}`,
+  id: fileSurfaceId(relativePath, root),
   kind: "file",
   relativePath,
+  ...(root ? { root } : {}),
   revealLine,
   revealRequestId,
 });
@@ -575,7 +585,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               : next;
           }),
         ),
-      openFile: (ref, requestedPath, line) =>
+      openFile: (ref, requestedPath, line, root) =>
         set((state) =>
           userAction(state, scopedThreadKey(ref), (current) => {
             // Workspace entry paths use '/', including on Windows.
@@ -585,7 +595,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             const withoutStandaloneExplorer = current.surfaces.filter(
               (surface) => surface.kind !== "files",
             );
-            const surfaceId = `file:${relativePath}` as const;
+            // Root-keyed id so the same relative path in two repos maps to
+            // distinct surfaces (multi-repo workspaces, #923).
+            const surfaceId = fileSurfaceId(relativePath, root);
             const existing = withoutStandaloneExplorer.find(
               (surface): surface is Extract<RightPanelSurface, { kind: "file" }> =>
                 surface.id === surfaceId && surface.kind === "file",
@@ -594,6 +606,7 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               relativePath,
               normalizeRevealLine(line),
               (existing?.revealRequestId ?? 0) + 1,
+              root,
             );
             return {
               isOpen: true,

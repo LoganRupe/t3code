@@ -128,6 +128,7 @@ const makeProjectedThread = (input: {
     pullRequests: [],
     branch: null,
     worktreePath: null,
+    worktrees: [],
     latestTurn: null,
     createdAt: sourceThread.createdAt,
     updatedAt: sourceThread.updatedAt,
@@ -730,6 +731,7 @@ it.layer(integrationLayer)("AgentSessionImporter integration", (it) => {
           interactionMode: "default",
           branch: null,
           worktreePath: null,
+          worktrees: [],
           createdAt: "2026-08-24T10:00:00.000Z",
           historyImport: true,
         });
@@ -1166,6 +1168,7 @@ it.layer(integrationLayer)("AgentSessionImporter integration", (it) => {
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        worktrees: [],
         createdAt: "2026-08-24T10:00:00.000Z",
       });
 
