@@ -36,6 +36,7 @@ function makeReadModel(overrides: Partial<OrchestrationThread> = {}): Orchestrat
         pullRequests: [],
         branch: null,
         worktreePath: null,
+        worktrees: [],
         latestTurn: null,
         createdAt: NOW,
         updatedAt: NOW,

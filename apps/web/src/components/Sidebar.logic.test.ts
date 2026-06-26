@@ -2143,6 +2143,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     worktreePath: null,
     checkpoints: [],
     pullRequests: [],
+    worktrees: [],
     activities: [],
     ...overrides,
   };

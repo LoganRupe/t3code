@@ -117,6 +117,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
+import { useVcsStatusGroups } from "~/lib/vcsStatusState";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
@@ -181,6 +182,7 @@ import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
   pullRequestSurface,
+  fileSurfaceId,
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
   selectThreadRightPanelState,
@@ -335,6 +337,7 @@ import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnect
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
+import { vcsEnvironment } from "../state/vcs";
 import {
   environmentServerConfigsAtom,
   primaryServerAvailableEditorsAtom,
@@ -348,7 +351,6 @@ import {
   threadHasOlderTurns,
 } from "@t3tools/client-runtime/state/threads";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
-import { vcsEnvironment } from "../state/vcs";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
 import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
@@ -2293,11 +2295,11 @@ export default function ChatView(props: ChatViewProps) {
     ? (pendingFileSurfaceIdsByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS)
     : EMPTY_PENDING_FILE_SURFACE_IDS;
   const handleFilePendingChange = useCallback(
-    (relativePath: string, pending: boolean) => {
+    (relativePath: string, pending: boolean, root?: string) => {
       if (!activeProjectKey) return;
       setPendingFileSurfaceIdsByProject((currentByProject) => {
         const current = currentByProject.get(activeProjectKey) ?? EMPTY_PENDING_FILE_SURFACE_IDS;
-        const surfaceId = `file:${relativePath}`;
+        const surfaceId = fileSurfaceId(relativePath, root);
         if (current.has(surfaceId) === pending) return currentByProject;
         const next = new Set(current);
         if (pending) next.add(surfaceId);
@@ -3640,7 +3642,25 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
+  // For a multi-repo `.code-workspace` project, fan git status out over every
+  // repo root. For a single-repo project keep the worktree-aware status cwd so
+  // isolated runs report on the worktree (Phase 4 will make multi-repo
+  // worktree-aware too).
+  const isMultiRepo = (activeProject?.repoRoots?.length ?? 0) > 1;
   const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
+  const gitStatusRoots = useMemo(
+    () => (isMultiRepo ? (activeProject?.repoRoots ?? null) : gitStatusCwd ? [gitStatusCwd] : null),
+    [isMultiRepo, activeProject?.repoRoots, gitStatusCwd],
+  );
+  // @-mention file search spans every repo root for a multi-repo workspace
+  // (#923); single-repo projects search the worktree-aware `gitCwd` alone.
+  const mentionRoots = useMemo(
+    () => (isMultiRepo ? (activeProject?.repoRoots ?? null) : null),
+    [isMultiRepo, activeProject?.repoRoots],
+  );
+  // Single-repo git query scoped to the anchor root, backing the branch-sync,
+  // PR-checkout, and refresh flows; the multi-repo status/diff surfaces use
+  // `vcsStatusGroups` below.
   const gitStatusQuery = useEnvironmentQuery(
     gitStatusCwd === null
       ? null
@@ -3655,6 +3675,33 @@ export default function ChatView(props: ChatViewProps) {
     refresh: gitStatusQuery.refresh,
     resourceKey: `git-status:${activeThreadKey ?? ""}:${gitStatusCwd ?? ""}`,
   });
+  const vcsStatusGroups = useVcsStatusGroups({ environmentId, repoRoots: gitStatusRoots });
+  // Roots that are git repos (or still loading — default in so we don't flash).
+  const gitRepoGroups = useMemo(
+    () => vcsStatusGroups.filter((group) => group.state.data?.isRepo !== false),
+    [vcsStatusGroups],
+  );
+  const repoStatusGroups = useMemo(
+    () =>
+      gitRepoGroups.map((group) => ({
+        repoRoot: group.repoRoot,
+        displayName: group.displayName,
+        state: group.state,
+      })),
+    [gitRepoGroups],
+  );
+  // Per-root targets for the terminal surface picker; undefined for single-repo
+  // projects so the Terminal action opens directly (no dropdown).
+  const terminalRoots = useMemo(
+    () =>
+      isMultiRepo
+        ? repoStatusGroups.map((group) => ({
+            repoRoot: group.repoRoot,
+            displayName: group.displayName,
+          }))
+        : undefined,
+    [isMultiRepo, repoStatusGroups],
+  );
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
   const manualCompactionProviderAvailable = useMemo(
@@ -3746,7 +3793,11 @@ export default function ChatView(props: ChatViewProps) {
       rememberCheckoutIsRepo(environmentId, gitStatusCwd, liveIsGitRepo);
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
-  const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
+  // A multi-repo workspace is a repo if any root is (loading roots count, so
+  // the toolbar does not flicker).
+  const isGitRepo = isMultiRepo
+    ? vcsStatusGroups.length === 0 || gitRepoGroups.length > 0
+    : (liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true);
   // Keep a hidden, off-flow strip mounted for existing threads so the composer
   // can measure whether its relocated controls fit. The visible chrome remains
   // content-driven: Git/environment context or controls that actually fit.
@@ -4657,9 +4708,9 @@ export default function ChatView(props: ChatViewProps) {
     if (!sessionStillExists) usePreviewMiniPlayerStore.getState().close(activeThreadRef);
   }, [activePreviewMiniPlayer, activeThreadRef, deviceState.sessions, deviceStateLoaded]);
   const openFileSurface = useCallback(
-    (relativePath: string) => {
+    (relativePath: string, root?: string) => {
       if (!activeThreadRef || !activeProject) return;
-      useRightPanelStore.getState().openFile(activeThreadRef, relativePath);
+      useRightPanelStore.getState().openFile(activeThreadRef, relativePath, undefined, root);
     },
     [activeProject, activeThreadRef],
   );
@@ -4879,34 +4930,49 @@ export default function ChatView(props: ChatViewProps) {
     createBrowserSurface,
     previewPanelOpen,
   ]);
-  const addTerminalSurface = useCallback(() => {
-    if (!activeThreadRef || !activeThreadId || !activeProject) return;
-    const cwd = gitCwd ?? activeProject.workspaceRoot;
-    const terminalId = nextTerminalId(allocatableActiveTerminalIds);
-    useRightPanelStore.getState().openTerminal(activeThreadRef, terminalId);
-    setTerminalFocusRequestId((value) => value + 1);
-    void openTerminal({
-      environmentId: activeThreadRef.environmentId,
-      input: {
-        threadId: activeThreadId,
-        terminalId,
-        cwd,
-        ...(activeThreadWorktreePath != null ? { worktreePath: activeThreadWorktreePath } : {}),
-        env: projectScriptRuntimeEnv({
-          project: { cwd: activeProject.workspaceRoot },
-          worktreePath: activeThreadWorktreePath,
-        }),
-      },
-    });
-  }, [
-    activeProject,
-    activeThreadId,
-    activeThreadRef,
-    activeThreadWorktreePath,
-    allocatableActiveTerminalIds,
-    gitCwd,
-    openTerminal,
-  ]);
+  const addTerminalSurface = useCallback(
+    (rootOverride?: string) => {
+      if (!activeThreadRef || !activeThreadId || !activeProject) return;
+      // A multi-repo workspace can target a specific repo root. Each repo
+      // carries its own isolated-run worktree in `worktrees` (keyed by repo
+      // root), so an explicit root opens in that repo's worktree when one
+      // exists, falling back to the plain repo root otherwise.
+      const worktreePath = rootOverride
+        ? (activeThread?.worktrees.find((entry) => entry.repoRoot === rootOverride)?.worktreePath ??
+          null)
+        : activeThreadWorktreePath;
+      const cwd = rootOverride
+        ? (worktreePath ?? rootOverride)
+        : (gitCwd ?? activeProject.workspaceRoot);
+      if (!cwd) return;
+      const terminalId = nextTerminalId(allocatableActiveTerminalIds);
+      useRightPanelStore.getState().openTerminal(activeThreadRef, terminalId);
+      setTerminalFocusRequestId((value) => value + 1);
+      void openTerminal({
+        environmentId: activeThreadRef.environmentId,
+        input: {
+          threadId: activeThreadId,
+          terminalId,
+          cwd,
+          ...(worktreePath != null ? { worktreePath } : {}),
+          env: projectScriptRuntimeEnv({
+            project: { cwd: activeProject.workspaceRoot },
+            worktreePath,
+          }),
+        },
+      });
+    },
+    [
+      activeProject,
+      activeThread,
+      activeThreadId,
+      activeThreadRef,
+      activeThreadWorktreePath,
+      allocatableActiveTerminalIds,
+      gitCwd,
+      openTerminal,
+    ],
+  );
   const splitPanelTerminal = useCallback(
     (direction: "horizontal" | "vertical" = "horizontal") => {
       if (
@@ -9143,6 +9209,7 @@ export default function ChatView(props: ChatViewProps) {
         interactionMode: "default",
         branch: activeThreadBranch,
         worktreePath: activeThread.worktreePath,
+        worktrees: activeThread.worktrees,
         createdAt,
       },
     });
@@ -9702,6 +9769,7 @@ export default function ChatView(props: ChatViewProps) {
           composerDraftTarget={composerDraftTarget}
           keybindings={keybindings}
           availableEditors={availableEditors}
+          repoRoots={isMultiRepo ? (activeProject?.repoRoots ?? undefined) : undefined}
           relativePath={
             renderedRightPanelSurface.kind === "file"
               ? renderedRightPanelSurface.relativePath
@@ -9719,6 +9787,11 @@ export default function ChatView(props: ChatViewProps) {
             renderedRightPanelSurface.kind === "file"
               ? renderedRightPanelSurface.revealRequestId
               : 0
+          }
+          fileRoot={
+            renderedRightPanelSurface.kind === "file"
+              ? (renderedRightPanelSurface.root ?? null)
+              : null
           }
           onOpenFile={openFileSurface}
           onPendingChange={handleFilePendingChange}
@@ -9808,6 +9881,7 @@ export default function ChatView(props: ChatViewProps) {
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
+            repoStatusGroups={repoStatusGroups}
             onRunProjectScript={runProjectScript}
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
@@ -9909,6 +9983,9 @@ export default function ChatView(props: ChatViewProps) {
                   paintOnlyDisplayedTimeline
                     ? (heldPaintContext?.markdownCwd ?? undefined)
                     : (gitCwd ?? undefined)
+                }
+                markdownRepoRoots={
+                  !paintOnlyDisplayedTimeline && isMultiRepo ? activeProject?.repoRoots : undefined
                 }
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
@@ -10117,6 +10194,7 @@ export default function ChatView(props: ChatViewProps) {
                             timelineOverflows={timelineOverflows}
                             onComposerOverlayHeightChange={publishComposerOverlayHeight}
                             onRestingChange={onComposerRestingChange}
+                            mentionRoots={mentionRoots}
                             promptRef={promptRef}
                             composerImagesRef={composerImagesRef}
                             composerFilesRef={composerFilesRef}
@@ -10321,6 +10399,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddBrowser={() => createBrowserSurface()}
           onAddBrowserInProfile={createBrowserSurface}
           onAddTerminal={addTerminalSurface}
+          {...(terminalRoots ? { terminalRoots } : {})}
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           onAddPullRequest={addPullRequestSurface}
@@ -10379,6 +10458,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddBrowser={() => createBrowserSurface()}
             onAddBrowserInProfile={createBrowserSurface}
             onAddTerminal={addTerminalSurface}
+            {...(terminalRoots ? { terminalRoots } : {})}
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             onAddPullRequest={addPullRequestSurface}

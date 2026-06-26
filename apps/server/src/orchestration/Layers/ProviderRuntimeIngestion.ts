@@ -2670,7 +2670,11 @@ const make = Effect.gen(function* () {
     const checkpointContext = yield* projectionSnapshotQuery
       .getThreadCheckpointContext(event.threadId)
       .pipe(Effect.map(Option.getOrUndefined));
-    const workspaceCwd = checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot;
+    const workspaceCwd =
+      checkpointContext?.worktrees[0]?.worktreePath ??
+      checkpointContext?.worktreePath ??
+      checkpointContext?.repoRoots[0] ??
+      checkpointContext?.workspaceRoot;
     if (!workspaceCwd || !(yield* checkpointStore.isGitRepository(workspaceCwd))) return;
     yield* worker.enqueue({ source: "diff", event });
   });

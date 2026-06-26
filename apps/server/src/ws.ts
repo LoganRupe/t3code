@@ -68,6 +68,9 @@ import {
   AssetWorkspaceContextResolutionError,
   RpcClientId,
   EnvironmentAuthorizationError,
+  FilesystemScanGitReposError,
+  FilesystemReadWorkspaceFileError,
+  FilesystemWriteWorkspaceFileError,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -130,9 +133,12 @@ import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration/workflowScriptQuery.ts";
+import * as WorkspaceFile from "./workspace/WorkspaceFile.ts";
+import * as WorkspaceGitScan from "./workspace/WorkspaceGitScan.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
+import { createThreadWorktrees, type WorktreeFanoutTarget } from "./vcs/WorktreeFanout.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
@@ -609,6 +615,8 @@ const makeWsRpcLayer = (
         }
         return true;
       });
+      const workspaceGitScan = yield* WorkspaceGitScan.WorkspaceGitScan;
+      const workspaceFile = yield* WorkspaceFile.WorkspaceFile;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
@@ -1054,6 +1062,8 @@ const makeWsRpcLayer = (
           let targetProjectId = bootstrap?.createThread?.projectId;
           let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
           let targetWorktreePath = bootstrap?.createThread?.worktreePath ?? null;
+          // Extra per-repo worktrees of a multi-repo fan-out, removed on cancel.
+          const claimedCousinWorktrees: Array<{ repoRoot: string; worktreePath: string }> = [];
           // The setup script's terminal, once started. Cancel closes only this
           // one so terminals the user opened meanwhile survive.
           let setupTerminalId: string | null = null;
@@ -1460,68 +1470,157 @@ const makeWsRpcLayer = (
                 });
                 preparingSessionSet = true;
               }
+
+              const anchorBaseRef = worktreeBaseRef;
+              // Multi-repo projects fan the isolated run out to one worktree per
+              // repo root. The anchor (project cwd) goes first so the thread's
+              // `worktreePath` stays `worktrees[0]` and carries the setup
+              // progress; the other roots branch off their current HEAD.
+              const worktreeProjectId =
+                targetProjectId ??
+                (yield* projectionSnapshotQuery.getThreadShellById(threadId).pipe(
+                  Effect.map((shell) => (Option.isSome(shell) ? shell.value.projectId : undefined)),
+                  Effect.orElseSucceed(() => undefined),
+                ));
+              const projectShell = worktreeProjectId
+                ? yield* projectionSnapshotQuery.getProjectShellById(worktreeProjectId).pipe(
+                    Effect.map(Option.getOrUndefined),
+                    Effect.orElseSucceed(() => undefined),
+                  )
+                : undefined;
+              const cousinRepoRoots = (projectShell?.repoRoots ?? []).filter(
+                (repoRoot) => repoRoot !== prepareWorktree.projectCwd,
+              );
+
               yield* worktreeSetupTracker.stageStatus(threadId, "checkout", "running");
               let checkoutTotal: number | null = null;
-              const worktree = yield* gitWorkflow.createWorktree(
-                {
-                  cwd: prepareWorktree.projectCwd,
-                  refName: worktreeBaseRef,
-                  newRefName: prepareWorktree.branch,
-                  baseRefName: prepareWorktree.baseBranch,
-                  path: null,
-                },
-                {
-                  progress: {
-                    // Git has registered the directory at this point, so a
-                    // cancel during the submodule step can still remove it.
-                    onWorktreeClaimed: (path) =>
-                      Effect.sync(() => {
-                        targetWorktreePath = path;
-                      }),
-                    onCheckoutProgress: ({ percent, completed, total }) => {
-                      checkoutTotal = total;
-                      return worktreeSetupTracker.stage(threadId, "checkout", {
-                        percent,
-                        detail: `${completed.toLocaleString("en-US")} / ${total.toLocaleString("en-US")} files`,
-                      });
-                    },
-                    onSubmodulesStarted: () =>
-                      worktreeSetupTracker
-                        .stageStatus(
-                          threadId,
-                          "checkout",
-                          "done",
-                          checkoutTotal === null
-                            ? null
-                            : `${checkoutTotal.toLocaleString("en-US")} files`,
-                        )
-                        .pipe(
-                          Effect.andThen(
-                            worktreeSetupTracker.stageStatus(threadId, "submodules", "running"),
-                          ),
-                        ),
-                    onSubmoduleLine: (line) => {
-                      const submodulePath = /Submodule path '([^']+)'/.exec(line)?.[1];
-                      return submodulePath === undefined
-                        ? Effect.void
-                        : worktreeSetupTracker.stage(threadId, "submodules", {
-                            detail: submodulePath,
-                          });
-                    },
-                    onSubmodulesFinished: ({ ok, detail }) =>
-                      worktreeSetupTracker.stageStatus(
-                        threadId,
-                        "submodules",
-                        ok ? "done" : "warning",
-                        ok ? undefined : (detail ?? "submodule checkout failed"),
-                      ),
+              const anchorOptions: GitVcsDriver.CreateWorktreeOptions = {
+                progress: {
+                  // Git has registered the directory at this point, so a
+                  // cancel during the submodule step can still remove it.
+                  onWorktreeClaimed: (path) =>
+                    Effect.sync(() => {
+                      targetWorktreePath = path;
+                    }),
+                  onCheckoutProgress: ({ percent, completed, total }) => {
+                    checkoutTotal = total;
+                    return worktreeSetupTracker.stage(threadId, "checkout", {
+                      percent,
+                      detail: `${completed.toLocaleString("en-US")} / ${total.toLocaleString("en-US")} files`,
+                    });
                   },
+                  onSubmodulesStarted: () =>
+                    worktreeSetupTracker
+                      .stageStatus(
+                        threadId,
+                        "checkout",
+                        "done",
+                        checkoutTotal === null
+                          ? null
+                          : `${checkoutTotal.toLocaleString("en-US")} files`,
+                      )
+                      .pipe(
+                        Effect.andThen(
+                          worktreeSetupTracker.stageStatus(threadId, "submodules", "running"),
+                        ),
+                      ),
+                  onSubmoduleLine: (line) => {
+                    const submodulePath = /Submodule path '([^']+)'/.exec(line)?.[1];
+                    return submodulePath === undefined
+                      ? Effect.void
+                      : worktreeSetupTracker.stage(threadId, "submodules", {
+                          detail: submodulePath,
+                        });
+                  },
+                  onSubmodulesFinished: ({ ok, detail }) =>
+                    worktreeSetupTracker.stageStatus(
+                      threadId,
+                      "submodules",
+                      ok ? "done" : "warning",
+                      ok ? undefined : (detail ?? "submodule checkout failed"),
+                    ),
                 },
-              );
+              };
+
+              const created =
+                cousinRepoRoots.length === 0
+                  ? yield* gitWorkflow
+                      .createWorktree(
+                        {
+                          cwd: prepareWorktree.projectCwd,
+                          refName: worktreeBaseRef,
+                          newRefName: prepareWorktree.branch,
+                          baseRefName: prepareWorktree.baseBranch,
+                          path: null,
+                        },
+                        anchorOptions,
+                      )
+                      .pipe(
+                        Effect.map(({ worktree }) => [
+                          {
+                            repoRoot: prepareWorktree.projectCwd,
+                            worktreePath: worktree.path,
+                            refName: worktree.refName,
+                          },
+                        ]),
+                      )
+                  : yield* Effect.forEach(
+                      cousinRepoRoots,
+                      (repoRoot): Effect.Effect<WorktreeFanoutTarget> =>
+                        gitWorkflow.localStatus({ cwd: repoRoot }).pipe(
+                          Effect.map((status) => status.refName ?? "HEAD"),
+                          Effect.orElseSucceed(() => "HEAD"),
+                          Effect.map((baseRef) => ({
+                            repoRoot,
+                            baseRef,
+                            newBranch: prepareWorktree.branch ?? null,
+                            options: {
+                              progress: {
+                                // Recorded so a cancel after this point also
+                                // removes the cousin worktrees.
+                                onWorktreeClaimed: (path) =>
+                                  Effect.sync(() => {
+                                    claimedCousinWorktrees.push({ repoRoot, worktreePath: path });
+                                  }),
+                              },
+                            },
+                          })),
+                        ),
+                    ).pipe(
+                      Effect.flatMap((cousinTargets) =>
+                        createThreadWorktrees(
+                          {
+                            createWorktree: gitWorkflow.createWorktree,
+                            removeWorktree: gitWorkflow.removeWorktree,
+                          },
+                          {
+                            worktreesDir: config.worktreesDir,
+                            projectId: worktreeProjectId ?? threadId,
+                            threadId,
+                            targets: [
+                              {
+                                repoRoot: prepareWorktree.projectCwd,
+                                baseRef: anchorBaseRef,
+                                baseRefName: prepareWorktree.baseBranch,
+                                newBranch: prepareWorktree.branch ?? null,
+                                options: anchorOptions,
+                              },
+                              ...cousinTargets,
+                            ],
+                          },
+                        ),
+                      ),
+                    );
+              const anchorWorktree = created[0]!;
+              const worktrees = created.map((entry) => ({
+                repoRoot: entry.repoRoot,
+                worktreePath: entry.worktreePath,
+              }));
+
               const checkoutEndedAt = yield* nowIso;
               yield* worktreeSetupTracker.update(threadId, (snapshot) => ({
                 ...snapshot,
-                worktreePath: worktree.worktree.path,
+                worktreePath: anchorWorktree.worktreePath,
                 stages: snapshot.stages.map((stage) => {
                   if (stage.id === "checkout" && stage.status === "running") {
                     return {
@@ -1541,15 +1640,19 @@ const makeWsRpcLayer = (
                   return stage;
                 }),
               }));
-              targetWorktreePath = worktree.worktree.path;
+              targetWorktreePath = anchorWorktree.worktreePath;
               yield* dispatchFromClient({
                 type: "thread.meta.update",
                 commandId: yield* serverCommandId("bootstrap-thread-meta-update"),
                 threadId,
-                branch: worktree.worktree.refName,
+                branch: anchorWorktree.refName,
                 worktreePath: targetWorktreePath,
+                worktrees,
               });
-              yield* refreshGitStatus(targetWorktreePath);
+
+              yield* Effect.forEach(created, (entry) => refreshGitStatus(entry.worktreePath), {
+                discard: true,
+              });
             }
 
             const pendingSetupScript = yield* runSetupProgram();
@@ -1651,17 +1754,31 @@ const makeWsRpcLayer = (
                     ? closeSetupTerminal.pipe(
                         Effect.ignoreCause({ log: true }),
                         Effect.andThen(
-                          gitWorkflow
-                            .removeWorktree({
-                              cwd: bootstrap.prepareWorktree.projectCwd,
-                              path: targetWorktreePath,
-                              force: true,
-                            })
-                            .pipe(
-                              Effect.retry({ times: 4, schedule: Schedule.spaced("500 millis") }),
-                            ),
+                          Effect.forEach(
+                            [
+                              {
+                                repoRoot: bootstrap.prepareWorktree.projectCwd,
+                                worktreePath: targetWorktreePath,
+                              },
+                              ...claimedCousinWorktrees,
+                            ],
+                            (worktree) =>
+                              gitWorkflow
+                                .removeWorktree({
+                                  cwd: worktree.repoRoot,
+                                  path: worktree.worktreePath,
+                                  force: true,
+                                })
+                                .pipe(
+                                  Effect.retry({
+                                    times: 4,
+                                    schedule: Schedule.spaced("500 millis"),
+                                  }),
+                                  Effect.ignoreCause({ log: true }),
+                                ),
+                            { discard: true },
+                          ),
                         ),
-                        Effect.ignoreCause({ log: true }),
                         Effect.uninterruptible,
                       )
                     : Effect.void;
@@ -1827,6 +1944,30 @@ const makeWsRpcLayer = (
         vcsStatusBroadcaster
           .refreshStatus(cwd)
           .pipe(Effect.ignoreCause({ log: true }), Effect.forkDetach, Effect.asVoid);
+
+      // Multi-repo `.code-workspace` projects diff repos that live outside the
+      // server's configured workspace root, so surface every active project's
+      // repo + workspace roots as allowed diff cwds (mirrors how vcs status and
+      // asset previews already span repoRoots). Both review RPCs must agree on
+      // this set: the preview establishes the cwd a diff is rendered from, and
+      // file-contents expansion is then called back with that same cwd, so a
+      // root allowed by one and rejected by the other renders a diff whose
+      // files cannot be opened. A failed snapshot read falls back to the
+      // configured root only.
+      const resolveAllowedDiffRepoRoots = Effect.fn("ws.resolveAllowedDiffRepoRoots")(function* () {
+        const shell = yield* projectionSnapshotQuery
+          .getShellSnapshot()
+          .pipe(Effect.orElseSucceed(() => null));
+        if (!shell) return [];
+        return [
+          ...new Set(
+            shell.projects.flatMap((project) => [
+              project.workspaceRoot,
+              ...(project.repoRoots ?? []),
+            ]),
+          ),
+        ];
+      });
 
       return WsRpcGroup.of({
         [ORCHESTRATION_WS_METHODS.dispatchCommand]: (command) =>
@@ -3177,11 +3318,108 @@ const makeWsRpcLayer = (
                   resource: input.resource,
                 });
               }
+              // Multi-repo workspaces (#923): a previewable file may live in any
+              // repo root, so offer every candidate root (worktree, repo roots,
+              // anchor) and let AssetAccess pick whichever contains the file.
+              const workspaceRoots = [
+                ...new Set(
+                  [
+                    thread.value.worktreePath ?? undefined,
+                    ...(project.value.repoRoots ?? []),
+                    project.value.workspaceRoot,
+                  ].filter((root): root is string => typeof root === "string" && root.length > 0),
+                ),
+              ];
               return yield* issueAssetUrl({
                 resource: input.resource,
                 workspaceRoot: thread.value.worktreePath ?? project.value.workspaceRoot,
+                workspaceRoots,
               });
             }),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.filesystemScanGitRepos]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.filesystemScanGitRepos,
+            workspaceGitScan.scan(input).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new FilesystemScanGitReposError({
+                    message: cause.detail,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.filesystemReadWorkspaceFile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.filesystemReadWorkspaceFile,
+            workspaceFile.read(input.workspaceFilePath).pipe(
+              Effect.map((resolved) => ({
+                workspaceFilePath: resolved.workspaceFilePath,
+                anchorDir: resolved.anchorDir,
+                folders: resolved.folders.map((folder) => ({
+                  rawPath: folder.rawPath,
+                  name: folder.name,
+                  absolutePath: folder.absolutePath,
+                  exists: folder.exists,
+                  isGit: folder.isGit,
+                })),
+                repoRoots: resolved.repoRoots,
+              })),
+              Effect.mapError(
+                (cause) =>
+                  new FilesystemReadWorkspaceFileError({
+                    message: cause.detail,
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.filesystemWriteWorkspaceFile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.filesystemWriteWorkspaceFile,
+            Effect.gen(function* () {
+              // Read first so we round-trip unknown top-level keys (e.g. `settings`)
+              // rather than clobbering them, then re-read so callers get the freshly
+              // resolved folders/repoRoots after the edit.
+              const current = yield* workspaceFile.read(input.workspaceFilePath);
+              const nextDocument = workspaceFile.withFolders(
+                current.document,
+                input.folders.map((folder) =>
+                  folder.name === undefined
+                    ? { path: folder.path }
+                    : { path: folder.path, name: folder.name },
+                ),
+              );
+              yield* workspaceFile.write({
+                workspaceFilePath: input.workspaceFilePath,
+                document: nextDocument,
+              });
+              const resolved = yield* workspaceFile.read(input.workspaceFilePath);
+              return {
+                workspaceFilePath: resolved.workspaceFilePath,
+                anchorDir: resolved.anchorDir,
+                folders: resolved.folders.map((folder) => ({
+                  rawPath: folder.rawPath,
+                  name: folder.name,
+                  absolutePath: folder.absolutePath,
+                  exists: folder.exists,
+                  isGit: folder.isGit,
+                })),
+                repoRoots: resolved.repoRoots,
+              };
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new FilesystemWriteWorkspaceFileError({
+                    message: cause.detail,
+                    cause,
+                  }),
+              ),
+            ),
             { "rpc.aggregate": "workspace" },
           ),
         [WS_METHODS.subscribeVcsStatus]: (input) =>
@@ -3321,13 +3559,23 @@ const makeWsRpcLayer = (
             { "rpc.aggregate": "vcs" },
           ),
         [WS_METHODS.reviewGetDiffPreview]: (input) =>
-          observeRpcEffect(WS_METHODS.reviewGetDiffPreview, review.getDiffPreview(input), {
-            "rpc.aggregate": "review",
-          }),
+          observeRpcEffect(
+            WS_METHODS.reviewGetDiffPreview,
+            Effect.gen(function* () {
+              const allowedRepoRoots = yield* resolveAllowedDiffRepoRoots();
+              return yield* review.getDiffPreview(input, allowedRepoRoots);
+            }),
+            {
+              "rpc.aggregate": "review",
+            },
+          ),
         [WS_METHODS.reviewGetDiffFileContents]: (input) =>
           observeRpcEffect(
             WS_METHODS.reviewGetDiffFileContents,
-            review.getDiffFileContents(input),
+            Effect.gen(function* () {
+              const allowedRepoRoots = yield* resolveAllowedDiffRepoRoots();
+              return yield* review.getDiffFileContents(input, allowedRepoRoots);
+            }),
             { "rpc.aggregate": "review" },
           ),
         [WS_METHODS.terminalOpen]: (input) =>

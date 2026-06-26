@@ -92,6 +92,7 @@ function thread(
     pullRequests: [],
     branch: "feature",
     worktreePath: null,
+    worktrees: [],
     latestTurn: null,
     createdAt: NOW,
     updatedAt: NOW,
