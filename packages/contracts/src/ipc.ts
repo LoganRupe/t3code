@@ -19,7 +19,16 @@ import type {
   VcsStatusResult,
 } from "./git.ts";
 import type { ReviewDiffPreviewInput, ReviewDiffPreviewResult } from "./review.ts";
-import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
+import type {
+  FilesystemBrowseInput,
+  FilesystemBrowseResult,
+  FilesystemScanGitReposInput,
+  FilesystemScanGitReposResult,
+  FilesystemReadWorkspaceFileInput,
+  FilesystemReadWorkspaceFileResult,
+  FilesystemWriteWorkspaceFileInput,
+  FilesystemWriteWorkspaceFileResult,
+} from "./filesystem.ts";
 import type { AssetCreateUrlInput, AssetCreateUrlResult } from "./assets.ts";
 import type {
   ProjectListEntriesInput,
@@ -1162,6 +1171,13 @@ export interface EnvironmentApi {
   };
   filesystem: {
     browse: (input: FilesystemBrowseInput) => Promise<FilesystemBrowseResult>;
+    scanGitRepos: (input: FilesystemScanGitReposInput) => Promise<FilesystemScanGitReposResult>;
+    readWorkspaceFile: (
+      input: FilesystemReadWorkspaceFileInput,
+    ) => Promise<FilesystemReadWorkspaceFileResult>;
+    writeWorkspaceFile: (
+      input: FilesystemWriteWorkspaceFileInput,
+    ) => Promise<FilesystemWriteWorkspaceFileResult>;
   };
   assets: {
     createUrl: (input: AssetCreateUrlInput) => Promise<AssetCreateUrlResult>;

@@ -72,8 +72,13 @@ interface FilePreviewPanelProps {
   availableEditors: ReadonlyArray<EditorId>;
   revealLine: number | null;
   revealRequestId: number;
-  onOpenFile: (relativePath: string) => void;
-  onPendingChange: (relativePath: string, pending: boolean) => void;
+  // Multi-repo workspaces (#923): repo roots to list/group in the file tree.
+  repoRoots?: readonly string[] | undefined;
+  // Owning root of the currently-open file. Reads/writes resolve against this
+  // root (it may be a different repo than the anchor `cwd`). Null = anchor.
+  fileRoot?: string | null | undefined;
+  onOpenFile: (relativePath: string, root?: string) => void;
+  onPendingChange: (relativePath: string, pending: boolean, root?: string) => void;
 }
 
 const FILE_EXPLORER_STORAGE_KEY = "t3code.fileExplorerOpen";
@@ -246,12 +251,14 @@ interface EditableFileSurfaceProps {
   cwd: string;
   relativePath: string;
   composerDraftTarget: ScopedThreadRef | DraftId;
+  // Owning repo root, forwarded to onPendingChange so the surface id matches.
+  root?: string | undefined;
   contents: string;
   resolvedTheme: "light" | "dark";
   revealRequestId: number;
   wordWrap: boolean;
   onPostRender: FilePostRender;
-  onPendingChange: (relativePath: string, pending: boolean) => void;
+  onPendingChange: (relativePath: string, pending: boolean, root?: string) => void;
 }
 
 interface FileSelectionOverride {
@@ -263,17 +270,20 @@ function useFileSaveCoordinator({
   environmentId,
   cwd,
   relativePath,
+  root,
   onPendingChange,
 }: Pick<
   EditableFileSurfaceProps,
-  "environmentId" | "cwd" | "relativePath" | "onPendingChange"
+  "environmentId" | "cwd" | "relativePath" | "root" | "onPendingChange"
 >): FileSaveCoordinator {
   const writeFile = useAtomCommand(projectEnvironment.writeFile);
   const coordinator = useMemo(
     () =>
       new FileSaveCoordinator({
         debounceMs: FILE_SAVE_DEBOUNCE_MS,
-        onPendingChange: (pending) => onPendingChange(relativePath, pending),
+        // Multi-repo (#923): forward the owning `root` so the pending-state id
+        // matches the surface that opened this file in a non-anchor repo.
+        onPendingChange: (pending) => onPendingChange(relativePath, pending, root),
         persist: (nextContents) =>
           writeFile({
             environmentId,
@@ -283,7 +293,7 @@ function useFileSaveCoordinator({
           confirmProjectFileQueryData(environmentId, cwd, relativePath, confirmedContents);
         },
       }),
-    [cwd, environmentId, onPendingChange, relativePath, writeFile],
+    [cwd, environmentId, onPendingChange, relativePath, root, writeFile],
   );
 
   useEffect(() => () => coordinator.dispose(), [coordinator]);
@@ -295,6 +305,7 @@ function EditableFileSurface({
   cwd,
   relativePath,
   composerDraftTarget,
+  root,
   contents,
   resolvedTheme,
   revealRequestId,
@@ -320,6 +331,7 @@ function EditableFileSurface({
     environmentId,
     cwd,
     relativePath,
+    root,
     onPendingChange,
   });
   const editor = useMemo(
@@ -555,6 +567,7 @@ function RenderedMarkdownSurface({
   environmentId,
   cwd,
   relativePath,
+  root,
   contents,
   threadRef,
   onPendingChange,
@@ -573,6 +586,7 @@ function RenderedMarkdownSurface({
     environmentId,
     cwd,
     relativePath,
+    root,
     onPendingChange,
   });
 
@@ -617,6 +631,8 @@ export default function FilePreviewPanel({
   availableEditors,
   revealLine,
   revealRequestId,
+  repoRoots,
+  fileRoot,
   onOpenFile,
   onPendingChange,
 }: FilePreviewPanelProps) {
@@ -630,7 +646,9 @@ export default function FilePreviewPanel({
   const openPreview = useAtomCommand(previewEnvironment.open, {
     reportFailure: false,
   });
-  const file = useProjectFileQuery(environmentId, cwd, relativePath);
+  // The open file may live in a non-anchor repo; read/write against its root.
+  const fileCwd = fileRoot ?? cwd;
+  const file = useProjectFileQuery(environmentId, fileCwd, relativePath);
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
   const [markdownView, setMarkdownView] = useState<{
     path: string | null;
@@ -830,8 +848,9 @@ export default function FilePreviewPanel({
             isMarkdown && renderMarkdown ? (
               <RenderedMarkdownSurface
                 environmentId={environmentId}
-                cwd={cwd}
+                cwd={fileCwd}
                 relativePath={relativePath}
+                root={fileRoot ?? undefined}
                 threadRef={threadRef}
                 contents={file.data.contents}
                 onPendingChange={onPendingChange}
@@ -849,7 +868,7 @@ export default function FilePreviewPanel({
                   file={{
                     name: relativePath,
                     contents: file.data.contents,
-                    cacheKey: projectFileCacheKey(cwd, relativePath, file.data.contents),
+                    cacheKey: projectFileCacheKey(fileCwd, relativePath, file.data.contents),
                   }}
                   options={{
                     disableFileHeader: true,
@@ -864,11 +883,12 @@ export default function FilePreviewPanel({
               </Virtualizer>
             ) : (
               <EditableFileSurface
-                key={`${relativePath}:${resolvedTheme}`}
+                key={`${fileCwd}:${relativePath}:${resolvedTheme}`}
                 environmentId={environmentId}
-                cwd={cwd}
+                cwd={fileCwd}
                 relativePath={relativePath}
                 composerDraftTarget={composerDraftTarget}
+                root={fileRoot ?? undefined}
                 contents={file.data.contents}
                 resolvedTheme={resolvedTheme}
                 revealRequestId={revealRequestId}
@@ -893,6 +913,7 @@ export default function FilePreviewPanel({
               environmentId={environmentId}
               cwd={cwd}
               projectName={projectName}
+              repoRoots={repoRoots}
               onOpenFile={onOpenFile}
             />
           </aside>

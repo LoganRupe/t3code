@@ -15,6 +15,7 @@ import type {
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadShell,
+  OrchestrationThreadWorktree,
   ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
@@ -37,7 +38,9 @@ export interface ProjectionThreadCheckpointContext {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly workspaceRoot: string;
+  readonly repoRoots: ReadonlyArray<string>;
   readonly worktreePath: string | null;
+  readonly worktrees: ReadonlyArray<OrchestrationThreadWorktree>;
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
 }
 
@@ -45,7 +48,9 @@ export interface ProjectionFullThreadDiffContext {
   readonly threadId: ThreadId;
   readonly projectId: ProjectId;
   readonly workspaceRoot: string;
+  readonly repoRoots: ReadonlyArray<string>;
   readonly worktreePath: string | null;
+  readonly worktrees: ReadonlyArray<OrchestrationThreadWorktree>;
   readonly latestCheckpointTurnCount: number;
   readonly toCheckpointRef: CheckpointRef | null;
 }

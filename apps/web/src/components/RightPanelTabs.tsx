@@ -16,7 +16,15 @@ import type { RightPanelSurface } from "~/rightPanelStore";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "~/components/ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "~/components/ui/menu";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { faviconUrlForOrigin } from "~/lib/favicon";
 import { useTheme } from "~/hooks/useTheme";
@@ -41,7 +49,13 @@ interface RightPanelTabsProps {
   onCloseAllSurfaces: () => void;
   onCopyFilePath: (relativePath: string) => void;
   onAddBrowser: () => void;
-  onAddTerminal: () => void;
+  /** Opens a terminal; pass a repo root to start the shell there (multi-repo). */
+  onAddTerminal: (root?: string) => void;
+  /**
+   * Repo roots to choose between when opening a terminal in a multi-repo
+   * workspace. Undefined/single-entry = open directly with no picker.
+   */
+  terminalRoots?: ReadonlyArray<{ readonly repoRoot: string; readonly displayName: string }>;
   onAddDiff: () => void;
   onAddFiles: () => void;
   browserAvailable: boolean;
@@ -86,15 +100,20 @@ function SurfaceMenuItem(props: {
   return <DisabledReasonTooltip reason={props.disabledReason} trigger={item} />;
 }
 
+const EMPTY_STATE_CARD_CLASS =
+  "flex min-h-28 w-full flex-col items-start rounded-lg border border-border/80 bg-card/40 p-4 text-left transition hover:border-border hover:bg-accent/60";
+
 function RightPanelEmptyState(props: {
   onAddBrowser: () => void;
-  onAddTerminal: () => void;
+  onAddTerminal: (root?: string) => void;
+  terminalRoots?: ReadonlyArray<{ readonly repoRoot: string; readonly displayName: string }>;
   onAddDiff: () => void;
   onAddFiles: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
 }) {
+  const multiRepoTerminal = (props.terminalRoots?.length ?? 0) > 1;
   const actions = [
     {
       label: "Browser",
@@ -106,11 +125,13 @@ function RightPanelEmptyState(props: {
     },
     {
       label: "Terminal",
-      description: "Start a shell in this workspace.",
+      description: multiRepoTerminal
+        ? "Start a shell — pick which repo."
+        : "Start a shell in this workspace.",
       icon: TerminalSquare,
       available: true,
       disabledReason: null,
-      onClick: props.onAddTerminal,
+      onClick: () => props.onAddTerminal(),
     },
     {
       label: "Files",
@@ -151,13 +172,33 @@ function RightPanelEmptyState(props: {
                 </span>
               </>
             );
+            if (action.label === "Terminal" && multiRepoTerminal && props.terminalRoots) {
+              return (
+                <Menu key={action.label}>
+                  <MenuTrigger className={EMPTY_STATE_CARD_CLASS} aria-label="Open terminal in a repo">
+                    {content}
+                  </MenuTrigger>
+                  <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
+                    {props.terminalRoots.map((root) => (
+                      <MenuItem
+                        key={root.repoRoot}
+                        onClick={() => props.onAddTerminal(root.repoRoot)}
+                      >
+                        <TerminalSquare />
+                        {root.displayName}
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+              );
+            }
             if (action.available) {
               return (
                 <button
                   key={action.label}
                   type="button"
                   onClick={action.onClick}
-                  className="flex min-h-28 w-full flex-col items-start rounded-lg border border-border/80 bg-card/40 p-4 text-left transition hover:border-border hover:bg-accent/60"
+                  className={EMPTY_STATE_CARD_CLASS}
                 >
                   {content}
                 </button>
@@ -435,10 +476,30 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <Globe2 />
                     Browser
                   </SurfaceMenuItem>
-                  <SurfaceMenuItem available onClick={props.onAddTerminal}>
-                    <TerminalSquare />
-                    Terminal
-                  </SurfaceMenuItem>
+                  {props.terminalRoots && props.terminalRoots.length > 1 ? (
+                    <MenuSub>
+                      <MenuSubTrigger>
+                        <TerminalSquare />
+                        Terminal
+                      </MenuSubTrigger>
+                      <MenuSubPopup className="min-w-44">
+                        {props.terminalRoots.map((root) => (
+                          <MenuItem
+                            key={root.repoRoot}
+                            onClick={() => props.onAddTerminal(root.repoRoot)}
+                          >
+                            <TerminalSquare />
+                            {root.displayName}
+                          </MenuItem>
+                        ))}
+                      </MenuSubPopup>
+                    </MenuSub>
+                  ) : (
+                    <SurfaceMenuItem available onClick={() => props.onAddTerminal()}>
+                      <TerminalSquare />
+                      Terminal
+                    </SurfaceMenuItem>
+                  )}
                   <SurfaceMenuItem
                     available={props.filesAvailable}
                     disabledReason={SURFACE_DISABLED_REASONS.files}
@@ -467,6 +528,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           <RightPanelEmptyState
             onAddBrowser={props.onAddBrowser}
             onAddTerminal={props.onAddTerminal}
+            {...(props.terminalRoots ? { terminalRoots: props.terminalRoots } : {})}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             browserAvailable={props.browserAvailable}

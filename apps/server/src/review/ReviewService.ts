@@ -22,6 +22,11 @@ export class ReviewService extends Context.Service<
   {
     readonly getDiffPreview: (
       input: ReviewDiffPreviewInput,
+      // Extra repo roots that the cwd is allowed to fall within, beyond the
+      // server's configured workspace root. Multi-repo `.code-workspace`
+      // projects diff repos that live anywhere on disk, so the caller (the WS
+      // handler, which knows the projects) passes their repo/workspace roots.
+      allowedRepoRoots?: readonly string[],
     ) => Effect.Effect<ReviewDiffPreviewResult, ReviewDiffPreviewError>;
   }
 >()("t3/review/ReviewService") {}
@@ -59,14 +64,17 @@ export const make = Effect.gen(function* () {
 
   const assertWorkspaceBoundCwd = Effect.fn("ReviewService.assertWorkspaceBoundCwd")(function* (
     cwd: string,
+    allowedRepoRoots: readonly string[],
   ) {
-    const [candidate, workspaceRoot, worktreesRoot] = yield* Effect.all([
+    const [candidate, workspaceRoot, worktreesRoot, repoRoots] = yield* Effect.all([
       canonicalizePath(cwd),
       canonicalizePath(config.cwd),
       canonicalizePath(config.worktreesDir),
+      Effect.forEach(allowedRepoRoots, canonicalizePath),
     ]);
 
-    if (isWithinRoot(candidate, workspaceRoot) || isWithinRoot(candidate, worktreesRoot)) {
+    const allowedRoots = [workspaceRoot, worktreesRoot, ...repoRoots];
+    if (allowedRoots.some((root) => isWithinRoot(candidate, root))) {
       return;
     }
 
@@ -79,8 +87,8 @@ export const make = Effect.gen(function* () {
 
   const getDiffPreview: ReviewService["Service"]["getDiffPreview"] = Effect.fn(
     "ReviewService.getDiffPreview",
-  )(function* (input) {
-    yield* assertWorkspaceBoundCwd(input.cwd);
+  )(function* (input, allowedRepoRoots = []) {
+    yield* assertWorkspaceBoundCwd(input.cwd, allowedRepoRoots);
 
     const handle = yield* vcsRegistry.detect({ cwd: input.cwd, requestedKind: "auto" });
     if (!handle) {

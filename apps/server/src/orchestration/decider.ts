@@ -124,6 +124,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           title: command.title,
           workspaceRoot: command.workspaceRoot,
+          ...(command.workspaceFile !== undefined ? { workspaceFile: command.workspaceFile } : {}),
+          ...(command.repoRoots && command.repoRoots.length > 0
+            ? { repoRoots: command.repoRoots }
+            : {}),
           defaultModelSelection: command.defaultModelSelection ?? null,
           scripts: [],
           createdAt: command.createdAt,
@@ -151,6 +155,8 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           projectId: command.projectId,
           ...(command.title !== undefined ? { title: command.title } : {}),
           ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
+          ...(command.workspaceFile !== undefined ? { workspaceFile: command.workspaceFile } : {}),
+          ...(command.repoRoots !== undefined ? { repoRoots: command.repoRoots } : {}),
           ...(command.defaultModelSelection !== undefined
             ? { defaultModelSelection: command.defaultModelSelection }
             : {}),
@@ -239,6 +245,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          worktrees: command.worktrees ?? [],
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -335,6 +342,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             : {}),
           ...(command.branch !== undefined ? { branch: command.branch } : {}),
           ...(command.worktreePath !== undefined ? { worktreePath: command.worktreePath } : {}),
+          ...(command.worktrees !== undefined ? { worktrees: command.worktrees } : {}),
           updatedAt: occurredAt,
         },
       };
@@ -694,6 +702,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           turnId: command.turnId,
           checkpointTurnCount: command.checkpointTurnCount,
           checkpointRef: command.checkpointRef,
+          ...(command.checkpointRefs !== undefined
+            ? { checkpointRefs: command.checkpointRefs }
+            : {}),
           status: command.status,
           files: command.files,
           assistantMessageId: command.assistantMessageId ?? null,

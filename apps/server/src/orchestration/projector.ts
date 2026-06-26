@@ -202,10 +202,19 @@ export function projectEvent(
       return decodeForEvent(ProjectCreatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {
           const existing = nextBase.projects.find((entry) => entry.id === payload.projectId);
+          const nextRepoRoots =
+            payload.repoRoots && payload.repoRoots.length > 0
+              ? payload.repoRoots
+              : [payload.workspaceRoot];
           const nextProject = {
             id: payload.projectId,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
+            ...(payload.workspaceFile !== undefined
+              ? { workspaceFile: payload.workspaceFile }
+              : {}),
+            repoRoots: nextRepoRoots,
+            repositoryIdentities: [],
             defaultModelSelection: payload.defaultModelSelection,
             scripts: payload.scripts,
             createdAt: payload.createdAt,
@@ -236,6 +245,10 @@ export function projectEvent(
                   ...(payload.workspaceRoot !== undefined
                     ? { workspaceRoot: payload.workspaceRoot }
                     : {}),
+                  ...(payload.workspaceFile !== undefined
+                    ? { workspaceFile: payload.workspaceFile }
+                    : {}),
+                  ...(payload.repoRoots !== undefined ? { repoRoots: payload.repoRoots } : {}),
                   ...(payload.defaultModelSelection !== undefined
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
@@ -282,6 +295,7 @@ export function projectEvent(
             interactionMode: payload.interactionMode,
             branch: payload.branch,
             worktreePath: payload.worktreePath,
+            worktrees: payload.worktrees,
             latestTurn: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -348,6 +362,7 @@ export function projectEvent(
               : {}),
             ...(payload.branch !== undefined ? { branch: payload.branch } : {}),
             ...(payload.worktreePath !== undefined ? { worktreePath: payload.worktreePath } : {}),
+            ...(payload.worktrees !== undefined ? { worktrees: payload.worktrees } : {}),
             updatedAt: payload.updatedAt,
           }),
         })),

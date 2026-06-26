@@ -14,6 +14,7 @@ import * as DesktopClientSettings from "./DesktopClientSettings.ts";
 
 const clientSettings: ClientSettings = {
   autoOpenPlanSidebar: false,
+  browseShowWorkspaceFiles: false,
   confirmThreadArchive: true,
   confirmThreadDelete: false,
   dismissedProviderUpdateNotificationKeys: [],

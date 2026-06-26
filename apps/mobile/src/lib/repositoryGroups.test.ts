@@ -10,7 +10,9 @@ function makeProject(
 ): EnvironmentProject {
   return {
     workspaceRoot: `/workspaces/${input.id}`,
+    repoRoots: [`/workspaces/${input.id}`],
     repositoryIdentity: null,
+    repositoryIdentities: [],
     defaultModelSelection: null,
     scripts: [],
     createdAt: "2026-04-01T00:00:00.000Z",
@@ -28,6 +30,7 @@ function makeThread(
     interactionMode: "default",
     branch: null,
     worktreePath: null,
+    worktrees: [],
     latestTurn: null,
     createdAt: "2026-04-01T00:00:00.000Z",
     updatedAt: "2026-04-01T00:00:00.000Z",

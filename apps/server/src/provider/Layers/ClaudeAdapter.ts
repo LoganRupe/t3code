@@ -3440,6 +3440,12 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(ultracode ? { ultracode: true } : {}),
       };
       const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
+      // Multi-repo workspaces (D1): grant Claude every workspace root via the
+      // native `--add-dir` mechanism. The cwd is implicitly accessible; the
+      // extra roots are the cousin repos the agent can read and edit.
+      const claudeAdditionalDirectories = [
+        ...new Set([...(input.cwd ? [input.cwd] : []), ...(input.additionalRoots ?? [])]),
+      ];
       const queryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -3463,7 +3469,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         includePartialMessages: true,
         canUseTool,
         env: claudeEnvironment,
-        ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
+        ...(claudeAdditionalDirectories.length > 0
+          ? { additionalDirectories: claudeAdditionalDirectories }
+          : {}),
         ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
         ...(mcpSession
           ? {
@@ -3498,7 +3506,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         "claude.query.resume": existingResumeSessionId ?? "",
         "claude.query.session_id": newSessionId ?? "",
         "claude.query.include_partial_messages": true,
-        "claude.query.additional_directories": input.cwd ? [input.cwd] : [],
+        "claude.query.additional_directories": claudeAdditionalDirectories,
         "claude.query.setting_sources": [...CLAUDE_SETTING_SOURCES],
         "claude.query.settings_json": encodeJsonStringForDiagnostics(settings) ?? "",
         "claude.query.extra_args_json": encodeJsonStringForDiagnostics(extraArgs) ?? "",

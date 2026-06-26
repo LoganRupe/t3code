@@ -7,6 +7,9 @@ const PROJECT_READ_FILE_PATH_MAX_LENGTH = 512;
 
 export const ProjectSearchEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
+  // Multi-repo workspaces (#923): search the union of these roots instead of
+  // just `cwd`. When omitted, falls back to a single-root search of `cwd`.
+  roots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   query: TrimmedNonEmptyString.check(Schema.isMaxLength(256)),
   limit: PositiveInt.check(Schema.isLessThanOrEqualTo(PROJECT_SEARCH_ENTRIES_MAX_LIMIT)),
 });
@@ -17,6 +20,11 @@ const ProjectEntryKind = Schema.Literals(["file", "directory"]);
 export const ProjectEntry = Schema.Struct({
   path: TrimmedNonEmptyString,
   kind: ProjectEntryKind,
+  parentPath: Schema.optional(TrimmedNonEmptyString),
+  // Absolute root this entry's `path` is relative to. Set when a list/search
+  // spans multiple repo roots so the caller can disambiguate same-named files
+  // and resolve previews against the owning root. Omitted in single-root mode.
+  root: Schema.optional(TrimmedNonEmptyString),
 });
 export type ProjectEntry = typeof ProjectEntry.Type;
 
@@ -28,6 +36,9 @@ export type ProjectSearchEntriesResult = typeof ProjectSearchEntriesResult.Type;
 
 export const ProjectListEntriesInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
+  // Multi-repo workspaces (#923): list the union of these roots instead of just
+  // `cwd`. When omitted, falls back to a single-root listing of `cwd`.
+  roots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
 });
 export type ProjectListEntriesInput = typeof ProjectListEntriesInput.Type;
 
