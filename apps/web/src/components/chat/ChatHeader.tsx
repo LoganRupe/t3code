@@ -8,6 +8,7 @@ import {
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
+import { MultiRepoGitControl, type MultiRepoGitGroup } from "./MultiRepoGitControl";
 import { type DraftId } from "~/composerDraftStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, {
@@ -35,6 +36,12 @@ interface ChatHeaderProps {
   rightPanelOpen: boolean;
   gitCwd: string | null;
   onNewThreadInProject: () => void;
+  /**
+   * Git repo roots to surface status/actions for. When more than one, render a
+   * single consolidated {@link MultiRepoGitControl} (multi-repo workspace);
+   * otherwise the single `gitCwd` control is shown unchanged.
+   */
+  repoStatusGroups: ReadonlyArray<MultiRepoGitGroup>;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -71,6 +78,7 @@ export const ChatHeader = memo(function ChatHeader({
   rightPanelOpen,
   gitCwd,
   onNewThreadInProject,
+  repoStatusGroups,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -160,13 +168,21 @@ export const ChatHeader = memo(function ChatHeader({
             openInCwd={openInCwd}
           />
         )}
-        {activeProjectName && (
-          <GitActionsControl
-            gitCwd={gitCwd}
-            activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
-            {...(draftId ? { draftId } : {})}
-          />
-        )}
+        {activeProjectName &&
+          (repoStatusGroups.length > 1 ? (
+            <MultiRepoGitControl
+              groups={repoStatusGroups}
+              environmentId={activeThreadEnvironmentId}
+              activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
+              {...(draftId ? { draftId } : {})}
+            />
+          ) : (
+            <GitActionsControl
+              gitCwd={gitCwd}
+              activeThreadRef={scopeThreadRef(activeThreadEnvironmentId, activeThreadId)}
+              {...(draftId ? { draftId } : {})}
+            />
+          ))}
       </div>
     </div>
   );

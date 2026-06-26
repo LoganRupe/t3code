@@ -62,6 +62,8 @@ interface PlanSidebarProps {
   environmentId: EnvironmentId;
   threadRef?: ScopedThreadRef | undefined;
   markdownCwd: string | undefined;
+  // Multi-repo workspaces (#923): repo roots for resolving file-link previews.
+  markdownRepoRoots?: readonly string[] | undefined;
   workspaceRoot: string | undefined;
   timestampFormat: TimestampFormat;
   mode?: "sheet" | "sidebar" | "embedded";
@@ -74,6 +76,7 @@ const PlanSidebar = memo(function PlanSidebar({
   environmentId,
   threadRef,
   markdownCwd,
+  markdownRepoRoots,
   workspaceRoot,
   timestampFormat,
   mode = "sidebar",
@@ -257,6 +260,7 @@ const PlanSidebar = memo(function PlanSidebar({
                   <ChatMarkdown
                     text={displayedPlanMarkdown ?? ""}
                     cwd={markdownCwd}
+                    repoRoots={markdownRepoRoots}
                     threadRef={threadRef}
                     isStreaming={false}
                   />
