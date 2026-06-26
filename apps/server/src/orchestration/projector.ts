@@ -242,10 +242,19 @@ export function projectEvent(
       return decodeForEvent(ProjectCreatedPayload, event.payload, event.type, "payload").pipe(
         Effect.map((payload) => {
           const existing = nextBase.projects.find((entry) => entry.id === payload.projectId);
+          const nextRepoRoots =
+            payload.repoRoots && payload.repoRoots.length > 0
+              ? payload.repoRoots
+              : [payload.workspaceRoot];
           const nextProject = {
             id: payload.projectId,
             title: payload.title,
             workspaceRoot: payload.workspaceRoot,
+            ...(payload.workspaceFile !== undefined
+              ? { workspaceFile: payload.workspaceFile }
+              : {}),
+            repoRoots: nextRepoRoots,
+            repositoryIdentities: [],
             defaultModelSelection: payload.defaultModelSelection,
             defaultThreadEnvMode: null,
             autoPull: false,
@@ -280,6 +289,10 @@ export function projectEvent(
                   ...(payload.workspaceRoot !== undefined
                     ? { workspaceRoot: payload.workspaceRoot }
                     : {}),
+                  ...(payload.workspaceFile !== undefined
+                    ? { workspaceFile: payload.workspaceFile }
+                    : {}),
+                  ...(payload.repoRoots !== undefined ? { repoRoots: payload.repoRoots } : {}),
                   ...(payload.defaultModelSelection !== undefined
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
@@ -337,6 +350,7 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             branchPullRequest: null,
+            worktrees: payload.worktrees,
             latestTurn: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
@@ -519,6 +533,7 @@ export function projectEvent(
             ...(payload.branchPullRequest !== undefined
               ? { branchPullRequest: payload.branchPullRequest }
               : {}),
+            ...(payload.worktrees !== undefined ? { worktrees: payload.worktrees } : {}),
             updatedAt: payload.updatedAt,
           }),
         })),

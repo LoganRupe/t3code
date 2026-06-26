@@ -100,7 +100,13 @@ interface RightPanelTabsProps {
    * accept the MouseEvent as a profile id.
    */
   onAddBrowserInProfile: (profileId: string) => void;
-  onAddTerminal: () => void;
+  /** Opens a terminal; pass a repo root to start the shell there (multi-repo). */
+  onAddTerminal: (root?: string) => void;
+  /**
+   * Repo roots to choose between when opening a terminal in a multi-repo
+   * workspace. Undefined/single-entry = open directly with no picker.
+   */
+  terminalRoots?: ReadonlyArray<{ readonly repoRoot: string; readonly displayName: string }>;
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddPullRequest: () => void;
@@ -294,7 +300,8 @@ function RightPanelEmptyState(props: {
   onAddBrowser: () => void;
   onAddBrowserInProfile: (profileId: string) => void;
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
-  onAddTerminal: () => void;
+  onAddTerminal: (root?: string) => void;
+  terminalRoots?: ReadonlyArray<{ readonly repoRoot: string; readonly displayName: string }>;
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddPullRequest: () => void;
@@ -309,6 +316,7 @@ function RightPanelEmptyState(props: {
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
+  const multiRepoTerminal = (props.terminalRoots?.length ?? 0) > 1;
 
   const actions = [
     {
@@ -323,12 +331,14 @@ function RightPanelEmptyState(props: {
     },
     {
       label: "Terminal",
-      description: "Start a shell in this workspace.",
+      description: multiRepoTerminal
+        ? "Start a shell — pick which repo."
+        : "Start a shell in this workspace.",
       icon: TerminalSquare,
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
-      onClick: props.onAddTerminal,
+      onClick: () => props.onAddTerminal(),
       badgeCount: 0,
     },
     {
@@ -482,49 +492,100 @@ function RightPanelEmptyState(props: {
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {actions.map((action) =>
-            action.available ? (
-              // The card is itself a button, so the profile chooser sits beside
-              // it in a wrapper rather than inside it. Hover lives on the
-              // wrapper: the chooser overlays the card, and a pointer moving
-              // onto it must not read as leaving the card.
-              <div
-                key={action.label}
-                className="group relative"
-                onMouseEnter={() => setHighlight(availableActions.indexOf(action))}
-                onMouseLeave={() =>
-                  setHighlight((current) =>
-                    current === availableActions.indexOf(action) ? -1 : current,
-                  )
-                }
-              >
-                <button
-                  type="button"
-                  onClick={action.onClick}
+          {actions.map((action) => {
+            const cardBody = (
+              <>
+                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
+                <span className="flex items-center gap-2 pe-8">
+                  {actionIcon(action)}
+                  <span className="font-medium text-sm">{action.label}</span>
+                </span>
+                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
+                  {action.available ? action.description : action.disabledReason}
+                </span>
+              </>
+            );
+            if (!action.available) {
+              return (
+                <div
+                  key={action.label}
                   className={cn(
-                    // Full height: the wrapper is the grid item that stretches
-                    // to the row, so the button must fill it to stay level with
-                    // its neighbour and keep the chooser anchored inside.
-                    "relative flex h-full w-full cursor-pointer flex-col items-start p-4 text-left transition group-hover:border-border group-hover:bg-accent/60",
+                    "relative flex w-full flex-col items-start p-4 opacity-40",
                     cardShellClass,
-                    isHighlighted(action) && highlightedCardClass,
                   )}
                 >
-                  <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
-                  <span className="flex items-center gap-2 pe-8">
-                    {actionIcon(action)}
-                    <span className="font-medium text-sm">{action.label}</span>
-                  </span>
-                  <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
-                    {action.description}
-                  </span>
-                </button>
-                {/*
-                  Same choice the tab bar's "+" menu offers: the card opens the
-                  default profile, the chevron picks another. Only worth showing
-                  once there is something to choose between.
-                */}
-                {action.label === "Browser" && props.browserProfiles.length > 1 ? (
+                  {cardBody}
+                </div>
+              );
+            }
+            const cardClassName = cn(
+              "relative flex w-full cursor-pointer flex-col items-start p-4 text-left transition hover:border-border hover:bg-accent/60",
+              cardShellClass,
+              isHighlighted(action) && highlightedCardClass,
+            );
+            const highlightOnEnter = () => setHighlight(availableActions.indexOf(action));
+            const clearHighlightOnLeave = () =>
+              setHighlight((current) =>
+                current === availableActions.indexOf(action) ? -1 : current,
+              );
+            // Multi-repo workspaces (#923): the terminal card asks which repo to
+            // open in rather than always landing on the anchor root. The "T"
+            // shortcut still opens the anchor directly.
+            if (action.label === "Terminal" && multiRepoTerminal && props.terminalRoots) {
+              return (
+                <Menu key={action.label}>
+                  <MenuTrigger
+                    className={cardClassName}
+                    aria-label="Open terminal in a repo"
+                    onMouseEnter={highlightOnEnter}
+                    onMouseLeave={clearHighlightOnLeave}
+                  >
+                    {cardBody}
+                  </MenuTrigger>
+                  <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
+                    {props.terminalRoots.map((root) => (
+                      <MenuItem
+                        key={root.repoRoot}
+                        onClick={() => props.onAddTerminal(root.repoRoot)}
+                      >
+                        <TerminalSquare />
+                        {root.displayName}
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+              );
+            }
+            // The card is itself a button, so the profile chooser sits beside it
+            // in a wrapper rather than inside it. Hover lives on the wrapper: the
+            // chooser overlays the card, and a pointer moving onto it must not
+            // read as leaving the card.
+            if (action.label === "Browser" && props.browserProfiles.length > 1) {
+              return (
+                <div
+                  key={action.label}
+                  className="group relative"
+                  onMouseEnter={highlightOnEnter}
+                  onMouseLeave={clearHighlightOnLeave}
+                >
+                  <button
+                    type="button"
+                    onClick={action.onClick}
+                    className={cn(
+                      // Full height: the wrapper is the grid item that stretches
+                      // to the row, so the button must fill it to stay level with
+                      // its neighbour and keep the chooser anchored inside.
+                      "relative flex h-full w-full cursor-pointer flex-col items-start p-4 text-left transition group-hover:border-border group-hover:bg-accent/60",
+                      cardShellClass,
+                      isHighlighted(action) && highlightedCardClass,
+                    )}
+                  >
+                    {cardBody}
+                  </button>
+                  {/*
+                    Same choice the tab bar's "+" menu offers: the card opens the
+                    default profile, the chevron picks another.
+                  */}
                   <Menu>
                     <MenuTrigger
                       render={
@@ -554,27 +615,22 @@ function RightPanelEmptyState(props: {
                       ))}
                     </MenuPopup>
                   </Menu>
-                ) : null}
-              </div>
-            ) : (
-              <div
+                </div>
+              );
+            }
+            return (
+              <button
                 key={action.label}
-                className={cn(
-                  "relative flex w-full flex-col items-start p-4 opacity-40",
-                  cardShellClass,
-                )}
+                type="button"
+                onClick={action.onClick}
+                onMouseEnter={highlightOnEnter}
+                onMouseLeave={clearHighlightOnLeave}
+                className={cardClassName}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
-                <span className="flex items-center gap-2 pe-8">
-                  {actionIcon(action)}
-                  <span className="font-medium text-sm">{action.label}</span>
-                </span>
-                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
-                  {action.disabledReason}
-                </span>
-              </div>
-            ),
-          )}
+                {cardBody}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -764,6 +820,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       behavior: reduceMotion ? "auto" : "smooth",
     });
   }, []);
+  const multiRepoTerminal = (props.terminalRoots?.length ?? 0) > 1;
 
   const addSurfaceActions = [
     {
@@ -1121,10 +1178,33 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 >
                   {addSurfaceActions.map((action) => {
                     const Icon = action.icon;
+                    // Multi-repo workspaces (#923): the terminal entry asks which
+                    // repo to open in. The "T" shortcut still takes the anchor.
+                    if (action.label === "Terminal" && multiRepoTerminal && props.terminalRoots) {
+                      return (
+                        <MenuSub key={action.label}>
+                          <MenuSubTrigger>
+                            <Icon />
+                            {action.label}
+                          </MenuSubTrigger>
+                          <MenuSubPopup className="min-w-44">
+                            {props.terminalRoots.map((root) => (
+                              <MenuItem
+                                key={root.repoRoot}
+                                onClick={() => props.onAddTerminal(root.repoRoot)}
+                              >
+                                <TerminalSquare />
+                                {root.displayName}
+                              </MenuItem>
+                            ))}
+                          </MenuSubPopup>
+                        </MenuSub>
+                      );
+                    }
                     // Browser collapses into one row: clicking the trigger opens
                     // the default profile (the common case stays one click),
                     // while hover or arrow reveals the profiles. The choice
-                    // lives at open time because a tab's profile is fixed then —
+                    // lives at open time because a tab's profile is fixed then:
                     // Electron only honours a partition before attach.
                     if (action.label === "Browser" && action.available) {
                       return (
@@ -1247,6 +1327,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddBrowserInProfile={props.onAddBrowserInProfile}
             browserProfiles={browserProfiles}
             onAddTerminal={props.onAddTerminal}
+            {...(props.terminalRoots ? { terminalRoots: props.terminalRoots } : {})}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}

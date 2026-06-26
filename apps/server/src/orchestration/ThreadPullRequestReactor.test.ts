@@ -89,6 +89,7 @@ function thread(
     interactionMode: "default",
     branch: "feature",
     worktreePath: null,
+    worktrees: [],
     latestTurn: null,
     createdAt: NOW,
     updatedAt: NOW,

@@ -34,13 +34,54 @@ interface FileBrowserPanelProps {
   selectedPath: string | null;
   /** Bumped when the same path should be revealed again (e.g. re-opened from search). */
   selectedPathRevealId: number;
-  onOpenFile: (relativePath: string) => void;
+  // Multi-repo workspaces (#923): when set, list the union of these repo roots
+  // and group the tree by repo. Omitted/single-entry keeps single-root behavior.
+  repoRoots?: readonly string[] | undefined;
+  onOpenFile: (relativePath: string, root?: string) => void;
   onRefreshSelectedFile?: () => void;
   workspaceMutationId: string | null;
 }
 
-function treePath(entry: ProjectEntry): string {
-  return entry.kind === "directory" ? `${entry.path}/` : entry.path;
+interface TreeEntryInfo {
+  readonly relativePath: string;
+  readonly root?: string;
+}
+
+/**
+ * Assign each repo root a unique, human-readable label for the tree's top-level
+ * grouping. Prefer the folder basename (matching the per-repo git controls);
+ * when two roots share a basename, grow the label by parent segments until the
+ * labels are distinct.
+ */
+function buildRootLabels(roots: readonly string[]): Map<string, string> {
+  const segments = new Map<string, string[]>();
+  for (const root of roots) {
+    segments.set(
+      root,
+      root
+        .replaceAll("\\", "/")
+        .replace(/\/+$/, "")
+        .split("/")
+        .filter((segment) => segment.length > 0),
+    );
+  }
+
+  const labels = new Map<string, string>();
+  for (const root of roots) {
+    const parts = segments.get(root) ?? [];
+    let depth = 1;
+    let label = parts.slice(-depth).join("/") || root;
+    const collidesAtDepth = () =>
+      roots.some(
+        (other) => other !== root && (segments.get(other) ?? []).slice(-depth).join("/") === label,
+      );
+    while (collidesAtDepth() && depth < parts.length) {
+      depth += 1;
+      label = parts.slice(-depth).join("/");
+    }
+    labels.set(root, label);
+  }
+  return labels;
 }
 
 function RefreshFilesButton(props: { isPending: boolean; onRefresh: () => void }) {
@@ -98,24 +139,52 @@ export default function FileBrowserPanel({
   projectName,
   selectedPath,
   selectedPathRevealId,
+  repoRoots,
   onOpenFile,
   onRefreshSelectedFile,
   workspaceMutationId,
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
   const composerRef = useComposerHandleContext();
-  const entriesQuery = useProjectEntriesQuery(environmentId, cwd);
+  const entriesQuery = useProjectEntriesQuery(environmentId, cwd, repoRoots);
   const entries = entriesQuery.data?.entries ?? [];
-  const entryKinds = useMemo(
-    () => new Map(entries.map((entry) => [entry.path, entry.kind] as const)),
-    [entries],
-  );
+
+  // Build the tree paths and a lookup from each path back to its repo-relative
+  // path + owning root. In multi-repo mode every entry is prefixed with its
+  // repo label so same-named files across repos don't collide and each repo
+  // renders as its own top-level node.
+  const { treePaths, directoryPaths, entryKinds, entryInfo } = useMemo(() => {
+    const distinctRoots = [
+      ...new Set(
+        entries.map((entry) => entry.root).filter((root): root is string => Boolean(root)),
+      ),
+    ];
+    const labels = distinctRoots.length > 0 ? buildRootLabels(distinctRoots) : null;
+
+    const treePaths: string[] = [];
+    const directoryPaths: string[] = [];
+    const entryKinds = new Map<string, ProjectEntry["kind"]>();
+    const entryInfo = new Map<string, TreeEntryInfo>();
+    for (const entry of entries) {
+      const prefix = entry.root && labels ? `${labels.get(entry.root)}/` : "";
+      const treeRelativePath = `${prefix}${entry.path}`;
+      entryKinds.set(treeRelativePath, entry.kind);
+      entryInfo.set(treeRelativePath, {
+        relativePath: entry.path,
+        ...(entry.root ? { root: entry.root } : {}),
+      });
+      if (entry.kind === "directory") {
+        directoryPaths.push(`${treeRelativePath}/`);
+        treePaths.push(`${treeRelativePath}/`);
+      } else {
+        treePaths.push(treeRelativePath);
+      }
+    }
+    return { treePaths, directoryPaths, entryKinds, entryInfo };
+  }, [entries]);
+
   const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry["kind"]>>(entryKinds);
-  const treePaths = useMemo(() => entries.map(treePath), [entries]);
-  const directoryPaths = useMemo(
-    () => entries.filter((entry) => entry.kind === "directory").map(treePath),
-    [entries],
-  );
+  const entryInfoRef = useRef<ReadonlyMap<string, TreeEntryInfo>>(entryInfo);
   const previousTreePathsRef = useRef<readonly string[] | null>(null);
   const syncingSelectionRef = useRef(false);
   const treeSelectionPathRef = useRef<string | null>(null);
@@ -237,9 +306,13 @@ export default function FileBrowserPanel({
         return;
       }
       const selectedPath = selectedPaths.at(-1)?.replace(/\/$/, "");
-      if (selectedPath && entryKindsRef.current.get(selectedPath) === "file") {
-        treeSelectionPathRef.current = selectedPath;
-        onOpenFile(selectedPath);
+      if (!selectedPath || entryKindsRef.current.get(selectedPath) !== "file") {
+        return;
+      }
+      treeSelectionPathRef.current = selectedPath;
+      const info = entryInfoRef.current.get(selectedPath);
+      if (info) {
+        onOpenFile(info.relativePath, info.root);
       }
     },
     paths: [],
@@ -274,6 +347,7 @@ export default function FileBrowserPanel({
     if (entriesQuery.data === null) return;
     if (previousTreePathsRef.current === treePaths) return;
     entryKindsRef.current = entryKinds;
+    entryInfoRef.current = entryInfo;
     const previousTreePaths = previousTreePathsRef.current;
     previousTreePathsRef.current = treePaths;
     if (previousTreePaths === null) {
@@ -282,7 +356,7 @@ export default function FileBrowserPanel({
     }
     const updates = buildFileTreePathUpdates(previousTreePaths, treePaths);
     if (updates.length > 0) model.batch(updates);
-  }, [entriesQuery.data, entryKinds, model, treePaths]);
+  }, [entriesQuery.data, entryInfo, entryKinds, model, treePaths]);
 
   useEffect(() => {
     if (!selectedPath) {
@@ -324,7 +398,7 @@ export default function FileBrowserPanel({
       model.getItem(path)?.deselect();
     }
 
-    // Directory rows are registered with a trailing slash (see treePath), so
+    // Directory rows are registered with a trailing slash, so
     // ancestor lookups must use the same form to expand them.
     const segments = selectedPath.split("/");
     let ancestorPath = "";

@@ -391,6 +391,7 @@ describe("streaming row projection", () => {
       interactionMode: "default",
       branch: null,
       worktreePath: null,
+      worktrees: [],
       latestTurn: {
         ...initial.input.latestTurn,
         requestedAt: initial.time(5),

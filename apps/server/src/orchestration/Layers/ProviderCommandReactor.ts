@@ -30,6 +30,7 @@ import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { buildWorkspaceManifest, manifestExtraRoots } from "../../workspace/WorkspaceManifest.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import {
   ProviderAdapterRequestError,
@@ -708,10 +709,24 @@ const make = Effect.gen(function* () {
       }
     }
     const project = yield* resolveProject(thread.projectId);
-    const effectiveCwd = resolveThreadWorkspaceCwd({
-      thread,
-      projects: project ? [project] : [],
-    });
+    // Multi-repo workspaces (D1): launch with a resolved manifest. The session
+    // anchors at the `.code-workspace` dir (or the single repo / worktree) and
+    // the agent is handed every repo root as an additional visible directory.
+    const manifest = project
+      ? buildWorkspaceManifest({
+          worktreePath: thread.worktreePath ?? null,
+          worktrees: thread.worktrees,
+          workspaceRoot: project.workspaceRoot,
+          repoRoots: project.repoRoots ?? [],
+        })
+      : undefined;
+    const effectiveCwd =
+      manifest?.anchor ??
+      resolveThreadWorkspaceCwd({
+        thread,
+        projects: project ? [project] : [],
+      });
+    const additionalRoots = manifest ? manifestExtraRoots(manifest) : [];
     const refreshWorkspaceSnapshot = effectiveCwd
       ? providerRegistry
           .refreshWorkspaceSnapshot({ instanceId: desiredInstanceId, cwd: effectiveCwd })
@@ -729,6 +744,7 @@ const make = Effect.gen(function* () {
           providerInstanceId: desiredInstanceId,
           ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
           ...(thread.title ? { title: thread.title } : {}),
+          ...(additionalRoots.length > 0 ? { additionalRoots } : {}),
           modelSelection: desiredModelSelection,
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
           runtimeMode: desiredRuntimeMode,

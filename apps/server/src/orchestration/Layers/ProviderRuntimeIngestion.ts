@@ -1962,7 +1962,11 @@ const make = Effect.gen(function* () {
               .pipe(Effect.map(Option.getOrUndefined))
           : undefined;
         const workspaceCwd =
-          checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined;
+          checkpointContext?.worktrees[0]?.worktreePath ??
+          checkpointContext?.worktreePath ??
+          checkpointContext?.repoRoots[0] ??
+          checkpointContext?.workspaceRoot ??
+          undefined;
         if (
           turnId &&
           checkpointContext &&
