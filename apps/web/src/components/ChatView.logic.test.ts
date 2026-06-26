@@ -248,6 +248,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     latestTurn: null,
     branch: null,
     worktreePath: null,
+    worktrees: [],
     ...overrides,
   };
 }
@@ -287,6 +288,7 @@ describe("buildLoadingThreadFromShell", () => {
       interactionMode: "default",
       branch: "main",
       worktreePath: null,
+      worktrees: [],
       latestTurn: null,
       createdAt: now,
       updatedAt: now,

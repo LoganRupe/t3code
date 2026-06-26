@@ -102,6 +102,20 @@ interface GitActionsControlProps {
    * place it against, in which case it still opens in the browser.
    */
   onOpenPullRequest?: ((number: number) => void) | undefined;
+  /**
+   * Whether this control should keep the thread's single `branch` field in sync
+   * with its repo's live branch. Defaults to true. Disabled for the per-repo
+   * controls of a multi-repo workspace, where one shared `branch` field cannot
+   * represent N repos (and would otherwise flap between them).
+   */
+  syncThreadBranch?: boolean;
+  /**
+   * Visibility of the quick-action button label. `"auto"` (default) keeps the
+   * header's responsive behaviour (label hidden until the `@container/header-actions`
+   * is wide enough). `"always"` shows the label unconditionally — used when the
+   * control is rendered outside that container, e.g. the multi-repo popover rows.
+   */
+  quickActionLabel?: "auto" | "always";
 }
 
 interface PendingDefaultBranchAction {
@@ -980,11 +994,17 @@ export default function GitActionsControl({
   activeThreadRef,
   draftId,
   onOpenPullRequest,
+  syncThreadBranch = true,
+  quickActionLabel = "auto",
 }: GitActionsControlProps) {
   const updateThreadMetadata = useAtomCommand(
     threadEnvironment.updateMetadata,
     "thread branch metadata update",
   );
+  const quickActionLabelClassName =
+    quickActionLabel === "always"
+      ? "ml-0.5"
+      : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5";
   const activeEnvironmentId = activeThreadRef?.environmentId ?? null;
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(activeEnvironmentId));
   const openInPreferredEditor = useOpenInPreferredEditor(
@@ -1077,6 +1097,9 @@ export default function GitActionsControl({
 
   const syncThreadBranchAfterGitAction = useCallback(
     (result: GitRunStackedActionResult) => {
+      if (!syncThreadBranch) {
+        return;
+      }
       const branchUpdate = resolveThreadBranchUpdate(result);
       if (!branchUpdate) {
         return;
@@ -1084,7 +1107,7 @@ export default function GitActionsControl({
 
       persistThreadBranchSync(branchUpdate.branch);
     },
-    [persistThreadBranchSync],
+    [persistThreadBranchSync, syncThreadBranch],
   );
 
   const gitStatusQuery = useEnvironmentQuery(
@@ -1128,7 +1151,7 @@ export default function GitActionsControl({
     activeDraftThread.worktreePath === null;
 
   useEffect(() => {
-    if (isGitActionRunning || isSelectingWorktreeBase || activeServerThread) {
+    if (!syncThreadBranch || isGitActionRunning || isSelectingWorktreeBase || activeServerThread) {
       return;
     }
 
@@ -1148,6 +1171,7 @@ export default function GitActionsControl({
     isGitActionRunning,
     isSelectingWorktreeBase,
     persistThreadBranchSync,
+    syncThreadBranch,
   ]);
 
   const isDefaultRef = useMemo(() => {
@@ -1719,9 +1743,7 @@ export default function GitActionsControl({
                   quickAction={quickAction}
                   SourceControlIcon={SourceControlIcon}
                 />
-                <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                  {quickAction.label}
-                </span>
+                <span className={quickActionLabelClassName}>{quickAction.label}</span>
               </PopoverTrigger>
               <PopoverPopup tooltipStyle side="bottom" align="start">
                 {quickActionDisabledReason}
@@ -1736,9 +1758,7 @@ export default function GitActionsControl({
               onClick={runQuickAction}
             >
               <GitQuickActionIcon quickAction={quickAction} SourceControlIcon={SourceControlIcon} />
-              <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
-                {quickAction.label}
-              </span>
+              <span className={quickActionLabelClassName}>{quickAction.label}</span>
             </Button>
           )}
           <GroupSeparator className="hidden @3xl/header-actions:block" />

@@ -45,6 +45,7 @@ function makeReadModel(
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        worktrees: [],
         latestTurn: null,
         createdAt: NOW,
         updatedAt: NOW,

@@ -30,7 +30,16 @@ import { readLocalApi } from "~/localApi";
 import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { Kbd } from "~/components/ui/kbd";
-import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "~/components/ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuPopup,
+  MenuShortcut,
+  MenuSub,
+  MenuSubPopup,
+  MenuSubTrigger,
+  MenuTrigger,
+} from "~/components/ui/menu";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { PanelTabCloseButton } from "~/components/ui/panel-tab-close-button";
 import { faviconUrlForOrigin } from "~/lib/favicon";
@@ -69,7 +78,13 @@ interface RightPanelTabsProps {
   onCloseAllSurfaces: () => void;
   onCopyFilePath: (relativePath: string) => void;
   onAddBrowser: () => void;
-  onAddTerminal: () => void;
+  /** Opens a terminal; pass a repo root to start the shell there (multi-repo). */
+  onAddTerminal: (root?: string) => void;
+  /**
+   * Repo roots to choose between when opening a terminal in a multi-repo
+   * workspace. Undefined/single-entry = open directly with no picker.
+   */
+  terminalRoots?: ReadonlyArray<{ readonly repoRoot: string; readonly displayName: string }>;
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddPullRequest: () => void;
@@ -247,7 +262,8 @@ function SurfaceMenuItem(props: {
  */
 function RightPanelEmptyState(props: {
   onAddBrowser: () => void;
-  onAddTerminal: () => void;
+  onAddTerminal: (root?: string) => void;
+  terminalRoots?: ReadonlyArray<{ readonly repoRoot: string; readonly displayName: string }>;
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddPullRequest: () => void;
@@ -262,6 +278,7 @@ function RightPanelEmptyState(props: {
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
+  const multiRepoTerminal = (props.terminalRoots?.length ?? 0) > 1;
 
   const actions = [
     {
@@ -276,12 +293,14 @@ function RightPanelEmptyState(props: {
     },
     {
       label: "Terminal",
-      description: "Start a shell in this workspace.",
+      description: multiRepoTerminal
+        ? "Start a shell — pick which repo."
+        : "Start a shell in this workspace.",
       icon: TerminalSquare,
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
-      onClick: props.onAddTerminal,
+      onClick: () => props.onAddTerminal(),
       badgeCount: 0,
     },
     {
@@ -435,52 +454,83 @@ function RightPanelEmptyState(props: {
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          {actions.map((action) =>
-            action.available ? (
+          {actions.map((action) => {
+            const cardBody = (
+              <>
+                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
+                <span className="flex items-center gap-2 pe-8">
+                  {actionIcon(action)}
+                  <span className="font-medium text-sm">{action.label}</span>
+                </span>
+                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
+                  {action.available ? action.description : action.disabledReason}
+                </span>
+              </>
+            );
+            if (!action.available) {
+              return (
+                <div
+                  key={action.label}
+                  className={cn(
+                    "relative flex w-full flex-col items-start p-4 opacity-40",
+                    cardShellClass,
+                  )}
+                >
+                  {cardBody}
+                </div>
+              );
+            }
+            const cardClassName = cn(
+              "relative flex w-full cursor-pointer flex-col items-start p-4 text-left transition hover:border-border hover:bg-accent/60",
+              cardShellClass,
+              isHighlighted(action) && highlightedCardClass,
+            );
+            const highlightOnEnter = () => setHighlight(availableActions.indexOf(action));
+            const clearHighlightOnLeave = () =>
+              setHighlight((current) =>
+                current === availableActions.indexOf(action) ? -1 : current,
+              );
+            // Multi-repo workspaces (#923): the terminal card asks which repo to
+            // open in rather than always landing on the anchor root. The "T"
+            // shortcut still opens the anchor directly.
+            if (action.label === "Terminal" && multiRepoTerminal && props.terminalRoots) {
+              return (
+                <Menu key={action.label}>
+                  <MenuTrigger
+                    className={cardClassName}
+                    aria-label="Open terminal in a repo"
+                    onMouseEnter={highlightOnEnter}
+                    onMouseLeave={clearHighlightOnLeave}
+                  >
+                    {cardBody}
+                  </MenuTrigger>
+                  <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
+                    {props.terminalRoots.map((root) => (
+                      <MenuItem
+                        key={root.repoRoot}
+                        onClick={() => props.onAddTerminal(root.repoRoot)}
+                      >
+                        <TerminalSquare />
+                        {root.displayName}
+                      </MenuItem>
+                    ))}
+                  </MenuPopup>
+                </Menu>
+              );
+            }
+            return (
               <button
                 key={action.label}
                 type="button"
                 onClick={action.onClick}
-                onMouseEnter={() => setHighlight(availableActions.indexOf(action))}
-                onMouseLeave={() =>
-                  setHighlight((current) =>
-                    current === availableActions.indexOf(action) ? -1 : current,
-                  )
-                }
-                className={cn(
-                  "relative flex w-full cursor-pointer flex-col items-start p-4 text-left transition hover:border-border hover:bg-accent/60",
-                  cardShellClass,
-                  isHighlighted(action) && highlightedCardClass,
-                )}
+                onMouseEnter={highlightOnEnter}
+                onMouseLeave={clearHighlightOnLeave}
+                className={cardClassName}
               >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
-                <span className="flex items-center gap-2 pe-8">
-                  {actionIcon(action)}
-                  <span className="font-medium text-sm">{action.label}</span>
-                </span>
-                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
-                  {action.description}
-                </span>
+                {cardBody}
               </button>
-            ) : (
-              <div
-                key={action.label}
-                className={cn(
-                  "relative flex w-full flex-col items-start p-4 opacity-40",
-                  cardShellClass,
-                )}
-              >
-                <Kbd className="absolute top-3 right-3">{action.shortcut}</Kbd>
-                <span className="flex items-center gap-2 pe-8">
-                  {actionIcon(action)}
-                  <span className="font-medium text-sm">{action.label}</span>
-                </span>
-                <span className="mt-1.5 text-muted-foreground text-xs leading-relaxed">
-                  {action.disabledReason}
-                </span>
-              </div>
-            ),
-          )}
+            );
+          })}
         </div>
       </div>
     </div>
@@ -601,6 +651,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
   const { resolvedTheme } = useTheme();
   const tabListRef = useRef<HTMLDivElement>(null);
   const [addSurfaceMenuOpen, setAddSurfaceMenuOpen] = useState(false);
+  const multiRepoTerminal = (props.terminalRoots?.length ?? 0) > 1;
 
   const addSurfaceActions = [
     {
@@ -909,6 +960,29 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 >
                   {addSurfaceActions.map((action) => {
                     const Icon = action.icon;
+                    // Multi-repo workspaces (#923): the terminal entry asks which
+                    // repo to open in. The "T" shortcut still takes the anchor.
+                    if (action.label === "Terminal" && multiRepoTerminal && props.terminalRoots) {
+                      return (
+                        <MenuSub key={action.label}>
+                          <MenuSubTrigger>
+                            <Icon />
+                            {action.label}
+                          </MenuSubTrigger>
+                          <MenuSubPopup className="min-w-44">
+                            {props.terminalRoots.map((root) => (
+                              <MenuItem
+                                key={root.repoRoot}
+                                onClick={() => props.onAddTerminal(root.repoRoot)}
+                              >
+                                <TerminalSquare />
+                                {root.displayName}
+                              </MenuItem>
+                            ))}
+                          </MenuSubPopup>
+                        </MenuSub>
+                      );
+                    }
                     return (
                       <SurfaceMenuItem
                         key={action.label}
@@ -934,6 +1008,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           <RightPanelEmptyState
             onAddBrowser={props.onAddBrowser}
             onAddTerminal={props.onAddTerminal}
+            {...(props.terminalRoots ? { terminalRoots: props.terminalRoots } : {})}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}
