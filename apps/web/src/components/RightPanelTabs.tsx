@@ -116,7 +116,13 @@ interface RightPanelTabsProps {
    * accept the MouseEvent as a profile id.
    */
   onAddBrowserInProfile: (profileId: string) => void;
-  onAddTerminal: () => void;
+  /** Opens a terminal; pass a repo root to start the shell there (multi-repo). */
+  onAddTerminal: (root?: string) => void;
+  /**
+   * Repo roots to choose between when opening a terminal in a multi-repo
+   * workspace. Undefined/single-entry = open directly with no picker.
+   */
+  terminalRoots?: ReadonlyArray<{ readonly repoRoot: string; readonly displayName: string }>;
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddPullRequest: () => void;
@@ -319,7 +325,8 @@ function RightPanelEmptyState(props: {
   onAddBrowser: () => void;
   onAddBrowserInProfile: (profileId: string) => void;
   browserProfiles: ReadonlyArray<{ readonly id: string; readonly name: string }>;
-  onAddTerminal: () => void;
+  onAddTerminal: (root?: string) => void;
+  terminalRoots?: ReadonlyArray<{ readonly repoRoot: string; readonly displayName: string }>;
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddPullRequest: () => void;
@@ -338,6 +345,7 @@ function RightPanelEmptyState(props: {
 }) {
   // -1 means no highlight: it only appears on hover or arrow use.
   const [highlight, setHighlight] = useState(-1);
+  const multiRepoTerminal = (props.terminalRoots?.length ?? 0) > 1;
 
   const actions = [
     {
@@ -355,7 +363,7 @@ function RightPanelEmptyState(props: {
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_UNAVAILABLE_HINTS.terminal,
-      onClick: props.onAddTerminal,
+      onClick: () => props.onAddTerminal(),
       badgeCount: 0,
     },
     {
@@ -530,25 +538,56 @@ function RightPanelEmptyState(props: {
                   )
                 }
               >
-                <button
-                  type="button"
-                  onClick={action.onClick}
-                  className={cn(
-                    "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 text-left text-sm transition-colors group-hover:bg-accent/60",
-                    isHighlighted(action) && "bg-accent/60",
-                  )}
-                >
-                  {actionIcon(action, "size-4")}
-                  <span
+                {/*
+                  Multi-repo workspaces (#923): the terminal row asks which repo
+                  to open in. The "T" shortcut still opens the anchor directly.
+                */}
+                {action.label === "Terminal" && multiRepoTerminal && props.terminalRoots ? (
+                  <Menu>
+                    <MenuTrigger
+                      aria-label="Open terminal in a repo"
+                      className={cn(
+                        "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 text-left text-sm transition-colors group-hover:bg-accent/60",
+                        isHighlighted(action) && "bg-accent/60",
+                      )}
+                    >
+                      {actionIcon(action, "size-4")}
+                      <span className="min-w-0 flex-1 truncate">{action.label}</span>
+                      <Kbd>{action.shortcut}</Kbd>
+                    </MenuTrigger>
+                    <MenuPopup align="start" side="bottom" sideOffset={6} className="min-w-44">
+                      {props.terminalRoots.map((root) => (
+                        <MenuItem
+                          key={root.repoRoot}
+                          onClick={() => props.onAddTerminal(root.repoRoot)}
+                        >
+                          <TerminalSquare />
+                          {root.displayName}
+                        </MenuItem>
+                      ))}
+                    </MenuPopup>
+                  </Menu>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={action.onClick}
                     className={cn(
-                      "min-w-0 flex-1 truncate",
-                      action.label === "Browser" && props.browserProfiles.length > 1 && "pr-7",
+                      "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 text-left text-sm transition-colors group-hover:bg-accent/60",
+                      isHighlighted(action) && "bg-accent/60",
                     )}
                   >
-                    {action.label}
-                  </span>
-                  <Kbd>{action.shortcut}</Kbd>
-                </button>
+                    {actionIcon(action, "size-4")}
+                    <span
+                      className={cn(
+                        "min-w-0 flex-1 truncate",
+                        action.label === "Browser" && props.browserProfiles.length > 1 && "pr-7",
+                      )}
+                    >
+                      {action.label}
+                    </span>
+                    <Kbd>{action.shortcut}</Kbd>
+                  </button>
+                )}
                 {/*
                   Same choice the tab bar's "+" menu offers: the row opens the
                   default profile, the chevron picks another. Only worth showing
@@ -867,6 +906,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       behavior: reduceMotion ? "auto" : "smooth",
     });
   }, []);
+  const multiRepoTerminal = (props.terminalRoots?.length ?? 0) > 1;
 
   const addSurfaceActions = [
     {
@@ -883,7 +923,8 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
       shortcut: "T",
       available: props.terminalAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.terminal,
-      onClick: props.onAddTerminal,
+      // Wrapped: a MenuItem click would pass its MouseEvent as the repo root.
+      onClick: () => props.onAddTerminal(),
     },
     {
       label: "Files",
@@ -1283,10 +1324,33 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                 >
                   {addSurfaceActions.map((action) => {
                     const Icon = action.icon;
+                    // Multi-repo workspaces (#923): the terminal entry asks which
+                    // repo to open in. The "T" shortcut still takes the anchor.
+                    if (action.label === "Terminal" && multiRepoTerminal && props.terminalRoots) {
+                      return (
+                        <MenuSub key={action.label}>
+                          <MenuSubTrigger>
+                            <Icon />
+                            {action.label}
+                          </MenuSubTrigger>
+                          <MenuSubPopup className="min-w-44">
+                            {props.terminalRoots.map((root) => (
+                              <MenuItem
+                                key={root.repoRoot}
+                                onClick={() => props.onAddTerminal(root.repoRoot)}
+                              >
+                                <TerminalSquare />
+                                {root.displayName}
+                              </MenuItem>
+                            ))}
+                          </MenuSubPopup>
+                        </MenuSub>
+                      );
+                    }
                     // Browser collapses into one row: clicking the trigger opens
                     // the default profile (the common case stays one click),
                     // while hover or arrow reveals the profiles. The choice
-                    // lives at open time because a tab's profile is fixed then —
+                    // lives at open time because a tab's profile is fixed then:
                     // Electron only honours a partition before attach.
                     if (action.label === "Browser" && action.available) {
                       return (
@@ -1409,6 +1473,7 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddBrowserInProfile={props.onAddBrowserInProfile}
             browserProfiles={browserProfiles}
             onAddTerminal={props.onAddTerminal}
+            {...(props.terminalRoots ? { terminalRoots: props.terminalRoots } : {})}
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddPullRequest={props.onAddPullRequest}

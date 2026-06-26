@@ -123,6 +123,7 @@ export function applyThreadDetailEvent(
           branch: event.payload.branch,
           worktreePath: event.payload.worktreePath,
           branchPullRequest: null,
+          worktrees: event.payload.worktrees,
           latestTurn: null,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
@@ -278,6 +279,7 @@ export function applyThreadDetailEvent(
           ...(event.payload.activeOrderKey !== undefined
             ? { activeOrderKey: event.payload.activeOrderKey }
             : {}),
+          ...(event.payload.worktrees !== undefined ? { worktrees: event.payload.worktrees } : {}),
           updatedAt: event.payload.updatedAt,
         },
       };

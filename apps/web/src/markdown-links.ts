@@ -24,6 +24,10 @@ export interface MarkdownFileLinkMeta {
   targetPath: string;
   displayPath: string;
   workspaceRelativePath: string | null;
+  // Multi-repo workspaces (#923): the repo root that owns this file, when the
+  // absolute path falls under one of the workspace's roots. Lets the preview
+  // read `workspaceRelativePath` against the owning repo instead of the anchor.
+  fileRoot?: string;
   basename: string;
   line?: number;
   column?: number;
@@ -89,30 +93,64 @@ export function resolveInlineCodeFileLinkMeta(
   codeText: string,
   cwd?: string,
   baseDir: string | undefined = cwd,
+  repoRoots?: readonly string[],
 ): MarkdownFileLinkMeta | null {
   const candidate = inlineCodeFilePathCandidate(codeText);
   if (candidate === null) return null;
 
-  return resolveMarkdownFileLinkMeta(candidate, cwd, baseDir);
+  return resolveMarkdownFileLinkMeta(candidate, cwd, baseDir, repoRoots);
+}
+
+/**
+ * Find which repo root (if any) owns an absolute path, returning the root and
+ * the path relative to it. The most specific (longest) matching root wins so
+ * nested roots resolve correctly. Multi-repo workspaces (#923).
+ */
+function resolveOwningRoot(
+  path: string,
+  repoRoots: readonly string[] | undefined,
+): { root: string; relativePath: string } | null {
+  if (!repoRoots || repoRoots.length === 0) return null;
+  let best: { root: string; relativePath: string } | null = null;
+  for (const root of repoRoots) {
+    const relativePath = workspaceRelativeFilePath(path, root);
+    if (relativePath === null) continue;
+    if (!best || root.length > best.root.length) {
+      best = { root, relativePath };
+    }
+  }
+  return best;
 }
 
 export function resolveMarkdownFileLinkMeta(
   href: string | undefined,
   cwd?: string,
   baseDir: string | undefined = cwd,
+  repoRoots?: readonly string[],
 ): MarkdownFileLinkMeta | null {
   const targetPath = resolveMarkdownFileLinkTarget(href, cwd, baseDir);
   if (!targetPath) return null;
-  return buildFileLinkMetaFromTarget(targetPath, cwd);
+  return buildFileLinkMetaFromTarget(targetPath, cwd, repoRoots);
 }
 
-function buildFileLinkMetaFromTarget(targetPath: string, cwd?: string): MarkdownFileLinkMeta {
+function buildFileLinkMetaFromTarget(
+  targetPath: string,
+  cwd?: string,
+  repoRoots?: readonly string[],
+): MarkdownFileLinkMeta {
   const { path, line, column } = splitFilePathPosition(targetPath);
+
+  // In a multi-repo workspace the path may live in a non-anchor repo; resolve
+  // its owning root so the preview reads it from the right place. Fall back to
+  // the anchor `cwd` resolution when no root claims it.
+  const owning = resolveOwningRoot(path, repoRoots);
+
   return {
     filePath: path,
     targetPath,
     displayPath: formatWorkspaceRelativePath(targetPath, cwd),
-    workspaceRelativePath: workspaceRelativeFilePath(path, cwd),
+    workspaceRelativePath: owning?.relativePath ?? workspaceRelativeFilePath(path, cwd),
+    ...(owning ? { fileRoot: owning.root } : {}),
     basename: fileBasename(path),
     ...(line !== undefined ? { line } : {}),
     ...(column !== undefined ? { column } : {}),
