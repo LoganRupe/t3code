@@ -29,6 +29,15 @@ import {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
   FilesystemBrowseError,
+  FilesystemScanGitReposInput,
+  FilesystemScanGitReposResult,
+  FilesystemScanGitReposError,
+  FilesystemReadWorkspaceFileInput,
+  FilesystemReadWorkspaceFileResult,
+  FilesystemReadWorkspaceFileError,
+  FilesystemWriteWorkspaceFileInput,
+  FilesystemWriteWorkspaceFileResult,
+  FilesystemWriteWorkspaceFileError,
 } from "./filesystem.ts";
 import {
   AgentSessionImportInput,
@@ -292,6 +301,9 @@ export const WS_METHODS = {
   filesystemBrowse: "filesystem.browse",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
+  filesystemScanGitRepos: "filesystem.scanGitRepos",
+  filesystemReadWorkspaceFile: "filesystem.readWorkspaceFile",
+  filesystemWriteWorkspaceFile: "filesystem.writeWorkspaceFile",
   assetsCreateUrl: "assets.createUrl",
   attachmentsCreateUploadUrl: "attachments.createUploadUrl",
   attachmentsDelete: "attachments.delete",
@@ -1006,6 +1018,24 @@ const WsProviderUploadFeedbackRpc = Rpc.make(WS_METHODS.providerUploadFeedback, 
   error: Schema.Union([ProviderUploadFeedbackError, EnvironmentAuthorizationError]),
 });
 
+export const WsFilesystemScanGitReposRpc = Rpc.make(WS_METHODS.filesystemScanGitRepos, {
+  payload: FilesystemScanGitReposInput,
+  success: FilesystemScanGitReposResult,
+  error: Schema.Union([FilesystemScanGitReposError, EnvironmentAuthorizationError]),
+});
+
+export const WsFilesystemReadWorkspaceFileRpc = Rpc.make(WS_METHODS.filesystemReadWorkspaceFile, {
+  payload: FilesystemReadWorkspaceFileInput,
+  success: FilesystemReadWorkspaceFileResult,
+  error: Schema.Union([FilesystemReadWorkspaceFileError, EnvironmentAuthorizationError]),
+});
+
+export const WsFilesystemWriteWorkspaceFileRpc = Rpc.make(WS_METHODS.filesystemWriteWorkspaceFile, {
+  payload: FilesystemWriteWorkspaceFileInput,
+  success: FilesystemWriteWorkspaceFileResult,
+  error: Schema.Union([FilesystemWriteWorkspaceFileError, EnvironmentAuthorizationError]),
+});
+
 const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
   payload: VcsStatusInput,
   success: VcsStatusStreamEvent,
@@ -1473,6 +1503,9 @@ export const WsRpcGroup = RpcGroup.make(
   WsFilesystemBrowseRpc,
   WsAgentSessionsScanRpc,
   WsAgentSessionsImportRpc,
+  WsFilesystemScanGitReposRpc,
+  WsFilesystemReadWorkspaceFileRpc,
+  WsFilesystemWriteWorkspaceFileRpc,
   WsAssetsCreateUrlRpc,
   WsAttachmentsCreateUploadUrlRpc,
   WsAttachmentsDeleteRpc,

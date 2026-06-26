@@ -207,6 +207,8 @@ export function usePaginatedBranches(target: VcsRefTarget) {
 type ProjectPathSearchTarget = ComposerPathSearchTarget & {
   readonly kind?: ProjectEntryKind | undefined;
   readonly imageOnly?: boolean | undefined;
+  // Multi-repo workspaces (#923): search the union of these roots; entries come back tagged.
+  readonly roots?: readonly string[] | undefined;
 };
 
 export function areProjectPathSearchTargetsEqual(
@@ -218,7 +220,8 @@ export function areProjectPathSearchTargetsEqual(
     left.cwd === right.cwd &&
     left.query === right.query &&
     left.kind === right.kind &&
-    left.imageOnly === right.imageOnly
+    left.imageOnly === right.imageOnly &&
+    (left.roots ?? []).join("\0") === (right.roots ?? []).join("\0")
   );
 }
 
@@ -235,8 +238,9 @@ export function useProjectPathSearch(
       query: target.query == null ? null : target.query.trim(),
       kind: target.kind,
       imageOnly: target.imageOnly,
+      roots: target.roots,
     }),
-    [target.cwd, target.environmentId, target.imageOnly, target.kind, target.query],
+    [target.cwd, target.environmentId, target.imageOnly, target.kind, target.query, target.roots],
   );
   const debouncedTarget = useDebouncedValue(normalizedTarget, PROJECT_PATH_SEARCH_DEBOUNCE_MS);
   const result = useEnvironmentQuery(
@@ -252,6 +256,9 @@ export function useProjectPathSearch(
             limit,
             ...(debouncedTarget.kind ? { kind: debouncedTarget.kind } : {}),
             ...(debouncedTarget.imageOnly ? { imageOnly: true } : {}),
+            ...(debouncedTarget.roots && debouncedTarget.roots.length > 0
+              ? { roots: debouncedTarget.roots }
+              : {}),
           },
         })
       : null,

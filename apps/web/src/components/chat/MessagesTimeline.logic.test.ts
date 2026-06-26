@@ -395,6 +395,7 @@ describe("streaming row projection", () => {
       branch: null,
       pullRequests: [],
       worktreePath: null,
+      worktrees: [],
       latestTurn: {
         ...initial.input.latestTurn,
         requestedAt: initial.time(5),

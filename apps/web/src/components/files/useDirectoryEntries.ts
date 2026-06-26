@@ -6,8 +6,24 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 
-/** Loads only requested directories; collapsing a folder keeps its children cached. */
-export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
+/** A repo root shown as its own top-level tree node in multi-repo workspaces (#923). */
+export interface DirectoryEntriesRoot {
+  readonly root: string;
+  readonly label: string;
+}
+
+/**
+ * Loads only requested directories; collapsing a folder keeps its children cached.
+ *
+ * Directory keys and entry paths are tree paths. With `roots`, the top level is
+ * one directory per repo (its label) and `label/sub` loads `sub` from that repo;
+ * entries come back tagged with `root` so callers can strip the label again.
+ */
+export function useDirectoryEntries(
+  environmentId: EnvironmentId,
+  cwd: string,
+  roots?: readonly DirectoryEntriesRoot[],
+) {
   const [directories, setDirectories] = useState(new Map<string, readonly ProjectEntry[]>());
   const [errors, setErrors] = useState(new Map<string, string>());
   const [pending, setPending] = useState(0);
@@ -17,16 +33,58 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
   const active = useRef(true);
   const running = useRef(0);
   const waiting = useRef<Array<() => void>>([]);
+  const syncedSources = useRef<readonly DirectoryEntriesRoot[] | null>(null);
+  const rootsKey = roots?.map((entry) => `${entry.label}\0${entry.root}`).join("\0\0") ?? "";
+  // Longest label first so a label containing "/" wins over a shorter one it extends.
+  const sources = useMemo(
+    () =>
+      rootsKey
+        ? rootsKey
+            .split("\0\0")
+            .map((pair) => {
+              const [label = "", root = ""] = pair.split("\0");
+              return { label, root };
+            })
+            .sort((left, right) => right.label.length - left.label.length)
+        : null,
+    [rootsKey],
+  );
 
   const load = useCallback(
     function loadDirectory(directoryPath: string, refresh = false): Promise<void> {
+      if (sources && directoryPath === "") {
+        // The repo nodes are synthesized locally; rebuild only when the roots change.
+        if (syncedSources.current === sources) return Promise.resolve();
+        syncedSources.current = sources;
+        setDirectories((previous) =>
+          new Map(previous).set(
+            "",
+            sources.map(({ label, root }) => ({ path: label, kind: "directory", root })),
+          ),
+        );
+        return Promise.resolve();
+      }
       const existing = requests.current.get(directoryPath);
       if (existing)
         return refresh ? existing.then(() => loadDirectory(directoryPath, true)) : existing;
       if (!refresh && loaded.current.has(directoryPath)) return Promise.resolve();
+      const source = sources
+        ? sources.find(
+            ({ label }) => directoryPath === label || directoryPath.startsWith(`${label}/`),
+          )
+        : { label: "", root: cwd };
+      // Not under any repo label (e.g. an ancestor of a nested label): nothing to load.
+      if (!source) return Promise.resolve();
+      const prefix = sources ? `${source.label}/` : "";
+      const relativeDirectory = sources
+        ? directoryPath.slice(source.label.length + 1)
+        : directoryPath;
       loaded.current.add(directoryPath);
       requested.current.add(directoryPath);
-      const atom = projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath } });
+      const atom = projectEnvironment.listEntries({
+        environmentId,
+        input: { cwd: source.root, directoryPath: relativeDirectory },
+      });
       setPending((count) => count + 1);
       const request = (async () => {
         if (running.current >= 4)
@@ -51,10 +109,17 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
             setDirectories((previous) =>
               new Map(previous).set(
                 directoryPath,
-                result.value.entries.filter(
-                  (entry) =>
-                    entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) === directoryPath,
-                ),
+                result.value.entries
+                  .filter(
+                    (entry) =>
+                      entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) ===
+                      relativeDirectory,
+                  )
+                  .map((entry) =>
+                    sources
+                      ? { ...entry, path: `${prefix}${entry.path}`, root: source.root }
+                      : entry,
+                  ),
               ),
             );
             setErrors((previous) => {
@@ -80,7 +145,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
       requests.current.set(directoryPath, request);
       return request;
     },
-    [cwd, environmentId],
+    [cwd, environmentId, sources],
   );
 
   useEffect(() => {

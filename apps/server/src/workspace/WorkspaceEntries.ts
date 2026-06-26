@@ -106,6 +106,48 @@ export class WorkspaceEntries extends Context.Service<
   }
 >()("t3/workspace/WorkspaceEntries") {}
 
+function parentPathOf(input: string): string | undefined {
+  const separatorIndex = input.lastIndexOf("/");
+  return separatorIndex === -1 ? undefined : input.slice(0, separatorIndex);
+}
+
+/**
+ * Whether a directory entry name should be hidden from list/search results.
+ * The search index already drops the common ignore set, but bare-repo /
+ * worktree-origin directories whose name merely *ends* in `.git` (e.g.
+ * `.frontend-origin.git`) slip through an exact `.git` match, so we filter
+ * those here (multi-repo workspaces, #923).
+ */
+function isIgnoredDirectoryName(name: string): boolean {
+  return name.endsWith(".git");
+}
+
+/** Whether any segment of a relative posix path is an ignored directory. */
+function isInIgnoredDirectory(relativePath: string): boolean {
+  return relativePath.split("/").some(isIgnoredDirectoryName);
+}
+
+/**
+ * Tag a project entry with the absolute repo root its `path` is relative to
+ * (multi-repo workspaces, #923). The `root` lets callers disambiguate
+ * same-named files across cousin roots and resolve previews against the owning
+ * root. When `root` is undefined (single-root mode) the entry is returned
+ * unchanged so single-root callers keep their existing shape.
+ */
+function withRoot(entry: ProjectEntry, root: string | undefined): ProjectEntry {
+  if (!root) {
+    return entry;
+  }
+  const parentPath = entry.parentPath ?? parentPathOf(entry.path);
+  return {
+    path: entry.path,
+    kind: entry.kind,
+    ...(entry.ignored ? { ignored: true } : {}),
+    ...(parentPath ? { parentPath } : {}),
+    root,
+  };
+}
+
 const resolveBrowseTarget = Effect.fn("WorkspaceEntries.resolveBrowseTarget")(function* (
   input: FilesystemBrowseInput,
   path: Path.Path,
@@ -211,43 +253,120 @@ export const make = Effect.gen(function* () {
 
       const showHidden = endsWithSeparator || prefix.startsWith(".");
       const lowerPrefix = prefix.toLowerCase();
-      const entries: Array<{ readonly name: string; readonly fullPath: string }> = [];
+      const entries: Array<{
+        readonly name: string;
+        readonly fullPath: string;
+        readonly kind: "directory" | "workspaceFile";
+      }> = [];
       for (const dirent of dirents) {
-        if (
-          dirent.isDirectory() &&
-          dirent.name.toLowerCase().startsWith(lowerPrefix) &&
-          (showHidden || !dirent.name.startsWith("."))
+        if (!dirent.name.toLowerCase().startsWith(lowerPrefix)) {
+          continue;
+        }
+        if (!showHidden && dirent.name.startsWith(".")) {
+          continue;
+        }
+        if (dirent.isDirectory()) {
+          entries.push({
+            name: dirent.name,
+            fullPath: path.join(parentPath, dirent.name),
+            kind: "directory",
+          });
+        } else if (
+          input.includeWorkspaceFiles &&
+          dirent.isFile() &&
+          dirent.name.toLowerCase().endsWith(".code-workspace")
         ) {
           entries.push({
             name: dirent.name,
             fullPath: path.join(parentPath, dirent.name),
+            kind: "workspaceFile",
           });
         }
       }
 
       return {
         parentPath,
-        entries: entries.toSorted((left, right) => left.name.localeCompare(right.name)),
+        // Directories first, then workspace files; alphabetical within each group.
+        entries: entries.toSorted((left, right) => {
+          if (left.kind !== right.kind) {
+            return left.kind === "directory" ? -1 : 1;
+          }
+          return left.name.localeCompare(right.name);
+        }),
       };
+    },
+  );
+
+  /**
+   * Resolve the set of roots a list/search should span (multi-repo, #923).
+   *
+   * When `roots` is provided we union across them and tag each entry with its
+   * owning root so callers can disambiguate same-named files and resolve
+   * previews; a root that fails to normalize (missing/renamed folder) is
+   * skipped rather than crashing the whole query. When `roots` is absent we
+   * preserve single-root behavior exactly: query `cwd` and surface its errors.
+   */
+  const resolveEffectiveRoots = Effect.fn("WorkspaceEntries.resolveEffectiveRoots")(
+    function* (input: {
+      readonly cwd: string;
+      readonly roots?: ReadonlyArray<string> | undefined;
+    }): Effect.fn.Return<
+      ReadonlyArray<{ readonly normalized: string; readonly tag: string | undefined }>,
+      WorkspaceEntriesError
+    > {
+      const multiRoot = (input.roots?.length ?? 0) > 0;
+      const requested = multiRoot ? input.roots! : [input.cwd];
+      const seen = new Set<string>();
+      const resolved: Array<{ normalized: string; tag: string | undefined }> = [];
+      for (const root of requested) {
+        const normalized = multiRoot
+          ? yield* normalizeWorkspaceRoot(root).pipe(Effect.orElseSucceed(() => null))
+          : yield* normalizeWorkspaceRoot(root);
+        if (normalized === null || seen.has(normalized)) {
+          continue;
+        }
+        seen.add(normalized);
+        resolved.push({ normalized, tag: multiRoot ? normalized : undefined });
+      }
+      return resolved;
     },
   );
 
   const search: WorkspaceEntries["Service"]["search"] = Effect.fn("WorkspaceEntries.search")(
     function* (input) {
-      const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+      const roots = yield* resolveEffectiveRoots(input);
       const normalizedQuery = normalizeSearchQuery(input.query, {
         trimLeadingPattern: /^[@./]+/,
       });
-      return yield* Effect.gen(function* () {
-        const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
-        return yield* searchIndex.search(normalizedQuery, input.limit, input.kind, input.imageOnly);
-      }).pipe(
-        Effect.provide(
-          workspaceSearchIndexes.get(
-            WorkspaceSearchIndex.workspaceSearchIndexKey(normalizedCwd, "paths"),
+      const limit = Math.max(0, Math.floor(input.limit));
+      const entries: ProjectEntry[] = [];
+      let truncated = false;
+
+      for (const root of roots) {
+        const result = yield* Effect.gen(function* () {
+          const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
+          return yield* searchIndex.search(normalizedQuery, limit, input.kind, input.imageOnly);
+        }).pipe(
+          Effect.provide(
+            workspaceSearchIndexes.get(
+              WorkspaceSearchIndex.workspaceSearchIndexKey(root.normalized, "paths"),
+            ),
           ),
-        ),
-      );
+        );
+        truncated = truncated || result.truncated;
+        for (const entry of result.entries) {
+          if (isInIgnoredDirectory(entry.path)) {
+            continue;
+          }
+          entries.push(withRoot(entry, root.tag));
+        }
+      }
+
+      // Unioning across roots can exceed the caller's limit; cap and flag it.
+      if (entries.length > limit) {
+        return { entries: entries.slice(0, limit), truncated: true };
+      }
+      return { entries, truncated };
     },
   );
 
@@ -267,91 +386,120 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  /** Immediate filesystem children of `directoryPath` under one root, tagged with git ignore state. */
+  const listDirectory = Effect.fn("WorkspaceEntries.listDirectory")(function* (
+    normalizedCwd: string,
+    directoryPath: string,
+  ) {
+    const toError = (cause: unknown) =>
+      new WorkspaceEntriesReadDirectoryError({
+        cwd: normalizedCwd,
+        partialPath: directoryPath,
+        parentPath: path.resolve(normalizedCwd, directoryPath),
+        cause,
+      });
+    const target =
+      directoryPath === ""
+        ? { absolutePath: normalizedCwd, relativePath: "" }
+        : yield* workspacePaths
+            .resolveRelativePathWithinRoot({
+              workspaceRoot: normalizedCwd,
+              relativePath: directoryPath,
+            })
+            .pipe(Effect.mapError(toError));
+    const entries = yield* Effect.tryPromise({
+      try: async () => {
+        const root = await NodeFSP.realpath(normalizedCwd);
+        const directory = await NodeFSP.realpath(target.absolutePath);
+        const relative = path.relative(root, directory);
+        if (
+          relative === ".." ||
+          relative.startsWith(`..${path.sep}`) ||
+          path.isAbsolute(relative) ||
+          relative.split(path.sep).includes(".git") ||
+          target.relativePath.split("/").includes(".git")
+        ) {
+          throw new Error("Directory must be inside the workspace and outside .git.");
+        }
+        const children = await NodeFSP.readdir(directory, { withFileTypes: true });
+        return children.flatMap((child): ProjectEntry[] => {
+          if (child.name === ".git" || (!child.isDirectory() && !child.isFile())) return [];
+          // Bare-repo / worktree-origin dirs like `.frontend-origin.git` stay hidden (#923).
+          if (child.isDirectory() && isIgnoredDirectoryName(child.name)) return [];
+          return [
+            {
+              path: target.relativePath ? `${target.relativePath}/${child.name}` : child.name,
+              kind: child.isDirectory() ? "directory" : "file",
+            },
+          ];
+        });
+      },
+      catch: toError,
+    });
+    // Use stdin so large directories cannot exceed the command-line argument limit.
+    // Ignore classification is optional in non-git workspaces or when git is unavailable.
+    const ignored = new Set<string>();
+    for (let offset = 0; offset < entries.length; offset += 1000) {
+      const chunk = entries.slice(offset, offset + 1000);
+      const result = yield* vcsProcess
+        .run({
+          operation: "WorkspaceEntries.list",
+          command: "git",
+          args: ["-c", "core.fsmonitor=false", "check-ignore", "-z", "--stdin"],
+          cwd: normalizedCwd,
+          stdin: `${chunk.map((entry) => entry.path).join("\0")}\0`,
+          allowNonZeroExit: true,
+          timeoutMs: 10_000,
+          maxOutputBytes: 16 * 1024 * 1024,
+        })
+        .pipe(Effect.orElseSucceed(() => undefined));
+      if (!result || (result.exitCode !== 0 && result.exitCode !== 1)) break;
+      for (const ignoredPath of result.stdout.split("\0")) ignored.add(ignoredPath);
+    }
+    return entries.map((entry): ProjectEntry =>
+      ignored.has(entry.path) ? { ...entry, ignored: true } : entry,
+    );
+  });
+
   const list: WorkspaceEntries["Service"]["list"] = Effect.fn("WorkspaceEntries.list")(
     function* (input) {
-      const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+      const roots = yield* resolveEffectiveRoots(input);
       if (input.directoryPath !== undefined) {
-        const directoryPath = input.directoryPath;
-        const toError = (cause: unknown) =>
-          new WorkspaceEntriesReadDirectoryError({
-            cwd: normalizedCwd,
-            partialPath: directoryPath,
-            parentPath: path.resolve(normalizedCwd, directoryPath),
-            cause,
-          });
-        const target =
-          directoryPath === ""
-            ? { absolutePath: normalizedCwd, relativePath: "" }
-            : yield* workspacePaths
-                .resolveRelativePathWithinRoot({
-                  workspaceRoot: normalizedCwd,
-                  relativePath: directoryPath,
-                })
-                .pipe(Effect.mapError(toError));
-        const entries = yield* Effect.tryPromise({
-          try: async () => {
-            const root = await NodeFSP.realpath(normalizedCwd);
-            const directory = await NodeFSP.realpath(target.absolutePath);
-            const relative = path.relative(root, directory);
-            if (
-              relative === ".." ||
-              relative.startsWith(`..${path.sep}`) ||
-              path.isAbsolute(relative) ||
-              relative.split(path.sep).includes(".git") ||
-              target.relativePath.split("/").includes(".git")
-            ) {
-              throw new Error("Directory must be inside the workspace and outside .git.");
-            }
-            const children = await NodeFSP.readdir(directory, { withFileTypes: true });
-            return children.flatMap((child): ProjectEntry[] => {
-              if (child.name === ".git" || (!child.isDirectory() && !child.isFile())) return [];
-              return [
-                {
-                  path: target.relativePath ? `${target.relativePath}/${child.name}` : child.name,
-                  kind: child.isDirectory() ? "directory" : "file",
-                },
-              ];
-            });
-          },
-          catch: toError,
-        });
-        // Use stdin so large directories cannot exceed the command-line argument limit.
-        // Ignore classification is optional in non-git workspaces or when git is unavailable.
-        const ignored = new Set<string>();
-        for (let offset = 0; offset < entries.length; offset += 1000) {
-          const chunk = entries.slice(offset, offset + 1000);
-          const result = yield* vcsProcess
-            .run({
-              operation: "WorkspaceEntries.list",
-              command: "git",
-              args: ["-c", "core.fsmonitor=false", "check-ignore", "-z", "--stdin"],
-              cwd: normalizedCwd,
-              stdin: `${chunk.map((entry) => entry.path).join("\0")}\0`,
-              allowNonZeroExit: true,
-              timeoutMs: 10_000,
-              maxOutputBytes: 16 * 1024 * 1024,
-            })
-            .pipe(Effect.orElseSucceed(() => undefined));
-          if (!result || (result.exitCode !== 0 && result.exitCode !== 1)) break;
-          for (const ignoredPath of result.stdout.split("\0")) ignored.add(ignoredPath);
+        const entries: ProjectEntry[] = [];
+        for (const root of roots) {
+          // In multi-root mode the folder may exist in only some roots; skip the rest.
+          const children =
+            root.tag === undefined
+              ? yield* listDirectory(root.normalized, input.directoryPath)
+              : yield* listDirectory(root.normalized, input.directoryPath).pipe(
+                  Effect.orElseSucceed((): ReadonlyArray<ProjectEntry> => []),
+                );
+          for (const entry of children) entries.push(withRoot(entry, root.tag));
         }
-        return {
-          entries: entries.map((entry) =>
-            ignored.has(entry.path) ? { ...entry, ignored: true } : entry,
-          ),
-          truncated: false,
-        };
+        return { entries, truncated: false };
       }
-      return yield* Effect.gen(function* () {
-        const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
-        return yield* searchIndex.list();
-      }).pipe(
-        Effect.provide(
-          workspaceSearchIndexes.get(
-            WorkspaceSearchIndex.workspaceSearchIndexKey(normalizedCwd, "paths"),
+      const entries: ProjectEntry[] = [];
+      let truncated = false;
+      for (const root of roots) {
+        const result = yield* Effect.gen(function* () {
+          const searchIndex = yield* WorkspaceSearchIndex.WorkspaceSearchIndex;
+          return yield* searchIndex.list();
+        }).pipe(
+          Effect.provide(
+            workspaceSearchIndexes.get(
+              WorkspaceSearchIndex.workspaceSearchIndexKey(root.normalized, "paths"),
+            ),
           ),
-        ),
-      );
+        );
+        truncated = truncated || result.truncated;
+        for (const entry of result.entries) {
+          if (isInIgnoredDirectory(entry.path)) {
+            continue;
+          }
+          entries.push(withRoot(entry, root.tag));
+        }
+      }
+      return { entries, truncated };
     },
   );
 
