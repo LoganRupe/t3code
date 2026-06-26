@@ -41,14 +41,21 @@ interface ProjectFileQueryState extends ProjectQueryState<ProjectReadFileResult>
   readonly isNotFile: boolean;
 }
 
-function getProjectEntriesQueryAtom(
+export function getProjectEntriesQueryAtom(
   environmentId: EnvironmentId,
   cwd: string,
   directoryPath?: string,
+  roots?: readonly string[],
 ) {
+  // Multi-repo workspaces (#923): when `roots` are provided, the listing spans
+  // the union of those repo roots. Absent/empty keeps the single-root listing.
   return projectEnvironment.listEntries({
     environmentId,
-    input: { cwd, ...(directoryPath !== undefined ? { directoryPath } : {}) },
+    input: {
+      cwd,
+      ...(directoryPath !== undefined ? { directoryPath } : {}),
+      ...(roots && roots.length > 0 ? { roots } : {}),
+    },
   });
 }
 
@@ -149,8 +156,9 @@ export function useProjectEntriesQuery(
   environmentId: EnvironmentId,
   cwd: string,
   directoryPath?: string,
+  roots?: readonly string[],
 ): ProjectQueryState<ProjectListEntriesResult> {
-  const atom = getProjectEntriesQueryAtom(environmentId, cwd, directoryPath);
+  const atom = getProjectEntriesQueryAtom(environmentId, cwd, directoryPath, roots);
   const result = useAtomValue(atom);
   const refreshAtom = useAtomRefresh(atom);
   const refresh = useCallback(() => refreshAtom(), [refreshAtom]);
