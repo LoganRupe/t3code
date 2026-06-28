@@ -22,7 +22,11 @@ import {
   resolveSelectableProvider,
 } from "./providerModels";
 import { ModelEsque } from "./components/chat/providerIconUtils";
-import { type ProviderInstanceEntry, deriveProviderInstanceEntries } from "./providerInstances";
+import {
+  type ProviderInstanceEntry,
+  applyProviderInstanceSettings,
+  deriveProviderInstanceEntries,
+} from "./providerInstances";
 import { sortModelsForProviderInstance } from "./modelOrdering";
 
 const MAX_CUSTOM_MODEL_COUNT = 32;
@@ -324,4 +328,89 @@ export function resolveAppModelSelectionState(
   });
 
   return createModelSelection(defaultInstanceIdForDriver(provider), model, modelOptionsForDispatch);
+}
+
+/**
+ * Resolve a usable default model selection for a NEW thread, honoring the
+ * user's settings and the providers that are currently enabled *and*
+ * available (authenticated / ready) — not just toggled on. This is what a
+ * fresh draft should default to so we never seed a thread with a provider
+ * that can't actually run (e.g. codex on a remote connection where it was
+ * never authenticated).
+ *
+ * Preference order:
+ *   1. `preferred` (e.g. the project's `defaultModelSelection`) when its
+ *      instance is still enabled + available — keeping its model when that
+ *      model still exists, otherwise the instance's first available model.
+ *   2. The first enabled + available instance, with its first available model.
+ *   3. `null` when nothing is enabled + available, so callers can decide to
+ *      refuse the turn (and tell the user to configure a provider) rather
+ *      than guess at a broken default.
+ */
+export function resolveDefaultThreadModelSelection(
+  settings: UnifiedSettings,
+  providers: ReadonlyArray<ServerProvider>,
+  preferred?: ModelSelection | null,
+): ModelSelection | null {
+  const entries = applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings);
+  const isUsable = (entry: ProviderInstanceEntry): boolean => entry.enabled && entry.isAvailable;
+
+  const preferredEntry = preferred
+    ? entries.find((entry) => entry.instanceId === preferred.instanceId && isUsable(entry))
+    : undefined;
+  const entry = preferredEntry ?? entries.find(isUsable);
+  if (!entry) {
+    return null;
+  }
+
+  // Only carry the preferred model forward when we kept the preferred
+  // instance; a fallback instance gets its own default model.
+  const requestedModel = preferredEntry ? (preferred?.model ?? null) : null;
+  const model =
+    resolveAppModelSelectionForInstance(entry.instanceId, settings, providers, requestedModel) ??
+    entry.models[0]?.slug ??
+    null;
+  if (!model) {
+    return null;
+  }
+
+  const { modelOptionsForDispatch } = getComposerProviderState({
+    provider: entry.driverKind,
+    model,
+    models: entry.models,
+    modelOptions: preferredEntry ? preferred?.options : undefined,
+  });
+  return createModelSelection(entry.instanceId, model, modelOptionsForDispatch);
+}
+
+/**
+ * Whether `selection` can actually run right now: its instance must be
+ * enabled + available and its model must be one the instance currently
+ * offers (built-in or a settings-configured custom model). Used as a
+ * send-time guard so a stale or unauthenticated selection surfaces a clear
+ * error instead of starting a turn that immediately fails.
+ *
+ * When the instance is usable but advertises no models yet (e.g. still
+ * loading its catalog) we give the benefit of the doubt and let the server
+ * arbitrate, rather than block on a transient empty list.
+ */
+export function isModelSelectionRunnable(
+  settings: UnifiedSettings,
+  providers: ReadonlyArray<ServerProvider>,
+  selection: Pick<ModelSelection, "instanceId" | "model">,
+): boolean {
+  const entries = applyProviderInstanceSettings(deriveProviderInstanceEntries(providers), settings);
+  const entry = entries.find((candidate) => candidate.instanceId === selection.instanceId);
+  if (!entry || !entry.enabled || !entry.isAvailable) {
+    return false;
+  }
+  const options = getAppModelOptionsForInstance(settings, entry);
+  if (options.length === 0) {
+    return true;
+  }
+  const target = normalizeModelSlug(selection.model, entry.driverKind);
+  if (!target) {
+    return false;
+  }
+  return options.some((option) => normalizeModelSlug(option.slug, entry.driverKind) === target);
 }

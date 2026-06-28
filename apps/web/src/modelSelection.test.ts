@@ -4,9 +4,15 @@ import { describe, expect, it } from "vite-plus/test";
 import { deriveProviderInstanceEntries } from "./providerInstances";
 import {
   getAppModelOptionsForInstance,
+  isModelSelectionRunnable,
   resolveAppModelSelectionForInstance,
   resolveAppModelSelectionState,
+  resolveDefaultThreadModelSelection,
 } from "./modelSelection";
+
+function unavailable(snapshot: ServerProvider): ServerProvider {
+  return { ...snapshot, availability: "unavailable", unavailableReason: "Not authenticated" };
+}
 
 function provider(input: {
   provider?: ProviderDriverKind;
@@ -268,5 +274,83 @@ describe("instance-scoped model selection", () => {
       instanceId: ProviderInstanceId.make("claude_openrouter"),
       model: "openai/gpt-5.5",
     });
+  });
+});
+
+describe("resolveDefaultThreadModelSelection", () => {
+  it("keeps the project default when its instance is enabled and available", () => {
+    const providers = [
+      provider({ instanceId: "codex", models: ["gpt-5.4", "gpt-5.5"] }),
+      provider({ instanceId: "claudeAgent", models: ["claude-sonnet-4-6"] }),
+    ];
+    expect(
+      resolveDefaultThreadModelSelection(DEFAULT_UNIFIED_SETTINGS, providers, {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.5",
+      }),
+    ).toMatchObject({ instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.5" });
+  });
+
+  it("falls back to the first usable provider when the preferred one is unavailable", () => {
+    const providers = [
+      unavailable(provider({ instanceId: "codex", models: ["gpt-5.4"] })),
+      provider({ instanceId: "claudeAgent", models: ["claude-sonnet-4-6"] }),
+    ];
+    expect(
+      resolveDefaultThreadModelSelection(settingsWithProviderInstances(), providers, {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      }),
+    ).toMatchObject({
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "claude-sonnet-4-6",
+    });
+  });
+
+  it("returns null when no provider is enabled and available", () => {
+    const providers = [unavailable(provider({ instanceId: "codex", models: ["gpt-5.4"] }))];
+    expect(resolveDefaultThreadModelSelection(DEFAULT_UNIFIED_SETTINGS, providers, null)).toBeNull();
+  });
+});
+
+describe("isModelSelectionRunnable", () => {
+  it("accepts an enabled, available instance that offers the model", () => {
+    const providers = [provider({ instanceId: "codex", models: ["gpt-5.4"] })];
+    expect(
+      isModelSelectionRunnable(DEFAULT_UNIFIED_SETTINGS, providers, {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects a selection whose instance is unavailable", () => {
+    const providers = [unavailable(provider({ instanceId: "codex", models: ["gpt-5.4"] }))];
+    expect(
+      isModelSelectionRunnable(DEFAULT_UNIFIED_SETTINGS, providers, {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5.4",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects a model the instance no longer offers", () => {
+    const providers = [provider({ instanceId: "codex", models: ["gpt-5.4"] })];
+    expect(
+      isModelSelectionRunnable(DEFAULT_UNIFIED_SETTINGS, providers, {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-9-imaginary",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects an unknown instance", () => {
+    const providers = [provider({ instanceId: "codex", models: ["gpt-5.4"] })];
+    expect(
+      isModelSelectionRunnable(DEFAULT_UNIFIED_SETTINGS, providers, {
+        instanceId: ProviderInstanceId.make("ghost"),
+        model: "gpt-5.4",
+      }),
+    ).toBe(false);
   });
 });

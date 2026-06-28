@@ -152,7 +152,11 @@ import {
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useEnvironmentSettings } from "../hooks/useSettings";
-import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import {
+  isModelSelectionRunnable,
+  resolveAppModelSelectionForInstance,
+  resolveDefaultThreadModelSelection,
+} from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
@@ -1222,20 +1226,35 @@ function ChatViewContent(props: ChatViewProps) {
       ? null
       : ((draftId ? localDraftErrorsByDraftId[draftId] : null) ?? null);
   const localServerError = localServerErrorsByThreadKey[routeThreadKey] ?? null;
-  const localDraftThread = useMemo(
-    () =>
-      draftThread
-        ? buildLocalDraftThread(
-            threadId,
-            draftThread,
-            fallbackDraftProject?.defaultModelSelection ?? {
-              instanceId: ProviderInstanceId.make("codex"),
-              model: DEFAULT_MODEL,
-            },
-          )
-        : undefined,
-    [draftThread, fallbackDraftProject?.defaultModelSelection, threadId],
-  );
+  const localDraftThread = useMemo(() => {
+    if (!draftThread) {
+      return undefined;
+    }
+    // Seed a fresh draft with a model that can actually run: prefer the
+    // project default, but only when its provider is enabled + available on
+    // this environment, otherwise fall back to the first usable provider.
+    // The hardcoded codex/DEFAULT_MODEL is a last resort for when no provider
+    // is reachable yet (the send guard then surfaces a clear error).
+    const draftProviders =
+      environmentById.get(draftThread.environmentId)?.serverConfig?.providers ?? EMPTY_PROVIDERS;
+    const fallbackModelSelection =
+      resolveDefaultThreadModelSelection(
+        settings,
+        draftProviders,
+        fallbackDraftProject?.defaultModelSelection ?? null,
+      ) ??
+      fallbackDraftProject?.defaultModelSelection ?? {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: DEFAULT_MODEL,
+      };
+    return buildLocalDraftThread(threadId, draftThread, fallbackModelSelection);
+  }, [
+    draftThread,
+    environmentById,
+    fallbackDraftProject?.defaultModelSelection,
+    settings,
+    threadId,
+  ]);
   const isServerThread = routeKind === "server" && serverThread !== null;
   const activeThread = isServerThread ? serverThread : localDraftThread;
   const threadError = isServerThread
@@ -3796,6 +3815,16 @@ function ChatViewContent(props: ChatViewProps) {
     }
     if (!activeProject) return;
     const threadIdForSend = activeThread.id;
+    // Guard: never start a turn against a model that can't run (provider
+    // disabled/unauthenticated on this environment, or a model the instance
+    // no longer offers). Surface a clear error instead of failing the turn.
+    if (!isModelSelectionRunnable(settings, providerStatuses, ctxSelectedModelSelection)) {
+      setThreadError(
+        threadIdForSend,
+        "The selected model isn’t available here. Pick a model from the picker, or enable a provider in Settings.",
+      );
+      return;
+    }
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath
