@@ -6,6 +6,7 @@ import type {
 } from "@t3tools/client-runtime/state/shell";
 import { mergeEnvironmentThread } from "@t3tools/client-runtime/state/threads";
 import type {
+  OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationProposedPlan,
   OrchestrationSession,
@@ -27,6 +28,7 @@ const EMPTY_THREAD_REFS: ReadonlyArray<ScopedThreadRef> = Object.freeze([]);
 const EMPTY_MESSAGES: ReadonlyArray<OrchestrationMessage> = Object.freeze([]);
 const EMPTY_ACTIVITIES: ReadonlyArray<OrchestrationThreadActivity> = Object.freeze([]);
 const EMPTY_PROPOSED_PLANS: ReadonlyArray<OrchestrationProposedPlan> = Object.freeze([]);
+const EMPTY_CHECKPOINTS: ReadonlyArray<OrchestrationCheckpointSummary> = Object.freeze([]);
 
 const EMPTY_PROJECT_ATOM = Atom.make<EnvironmentProject | null>(null).pipe(
   Atom.withLabel("web-project:empty"),
@@ -54,6 +56,9 @@ const EMPTY_PROPOSED_PLANS_ATOM = Atom.make(EMPTY_PROPOSED_PLANS).pipe(
 );
 const EMPTY_SESSION_ATOM = Atom.make<OrchestrationSession | null>(null).pipe(
   Atom.withLabel("web-thread-session:empty"),
+);
+const EMPTY_CHECKPOINTS_ATOM = Atom.make(EMPTY_CHECKPOINTS).pipe(
+  Atom.withLabel("web-thread-checkpoints:empty"),
 );
 
 export const activeEnvironmentIdAtom = Atom.make<EnvironmentId | null>(null).pipe(
@@ -169,6 +174,14 @@ export function useThreadProposedPlans(
 export function useThreadSession(ref: ScopedThreadRef | null): OrchestrationSession | null {
   return useAtomValue(
     ref === null ? EMPTY_SESSION_ATOM : environmentThreadDetails.sessionAtom(ref),
+  );
+}
+
+export function useThreadCheckpoints(
+  ref: ScopedThreadRef | null,
+): ReadonlyArray<OrchestrationCheckpointSummary> {
+  return useAtomValue(
+    ref === null ? EMPTY_CHECKPOINTS_ATOM : environmentThreadDetails.checkpointsAtom(ref),
   );
 }
 
