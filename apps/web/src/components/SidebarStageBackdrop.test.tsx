@@ -14,14 +14,21 @@ describe("SidebarStageBackdrop", () => {
     expect(resolveSidebarStageBackdropVariant("Dev")).toBe("dev");
     expect(resolveSidebarStageBackdropVariant("Nightly")).toBe("nightly");
     expect(resolveSidebarStageBackdropVariant("Dev", false)).toBeNull();
-    expect(resolveSidebarStageBackdropVariant("Alpha")).toBeNull();
+    expect(resolveSidebarStageBackdropVariant("Nightly", false)).toBeNull();
   });
 
-  it("resolves supported environment pill labels", () => {
+  it("falls back to the night sky on stages without their own artwork", () => {
+    expect(resolveSidebarStageBackdropVariant("Alpha")).toBe("nightly");
+    expect(resolveSidebarStageBackdropVariant("Latest")).toBe("nightly");
+    expect(resolveSidebarStageBackdropVariant("Alpha", false)).toBeNull();
+  });
+
+  it("resolves environment pill labels", () => {
     expect(resolveEnvironmentIdentificationPillLabel("Dev")).toBe("Dev");
     expect(resolveEnvironmentIdentificationPillLabel("nightly")).toBe("Nightly");
-    expect(resolveEnvironmentIdentificationPillLabel("Latest")).toBeNull();
-    expect(resolveEnvironmentIdentificationPillLabel("Alpha")).toBeNull();
+    expect(resolveEnvironmentIdentificationPillLabel("Latest")).toBe("Latest");
+    expect(resolveEnvironmentIdentificationPillLabel("Alpha")).toBe("Alpha");
+    expect(resolveEnvironmentIdentificationPillLabel("   ")).toBeNull();
   });
 
   it("matches the focus-ring offset to each artwork palette", () => {
