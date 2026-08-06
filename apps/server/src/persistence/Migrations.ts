@@ -9,6 +9,7 @@
  */
 
 import * as Migrator from "effect/unstable/sql/Migrator";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -60,6 +61,7 @@ import Migration0044 from "./Migrations/044_ProjectionProjectsRepoRoots.ts";
 import Migration0045 from "./Migrations/045_ProjectionProjectsWorkspaceFile.ts";
 import Migration0046 from "./Migrations/046_ProjectionCheckpointRefs.ts";
 import Migration0047 from "./Migrations/047_ProjectionThreadsWorktrees.ts";
+import Migration0048 from "./Migrations/048_HealSkippedProjectionThreadColumns.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -70,6 +72,15 @@ import Migration0047 from "./Migrations/047_ProjectionThreadsWorktrees.ts";
  *
  * Uses Migrator.fromRecord which parses the key format and
  * returns migrations sorted by ID.
+ *
+ * Ids are immutable once any build has applied them, including a branch build
+ * a teammate ran locally. The migrator only runs ids greater than the highest
+ * one recorded in `effect_sql_migrations` and never compares names, so
+ * renumbering a migration into a slot another branch has since claimed makes it
+ * silently unrunnable on every database that saw the old numbering. When
+ * rebasing a branch that adds migrations, append after main's highest id rather
+ * than renumbering. `detectMigrationLedgerDrift` reports this if it happens
+ * anyway; 048_HealSkippedProjectionThreadColumns repairs the 033-036 occurrence.
  */
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -119,9 +130,70 @@ export const migrationEntries = [
   [45, "ProjectionProjectsWorkspaceFile", Migration0045],
   [46, "ProjectionCheckpointRefs", Migration0046],
   [47, "ProjectionThreadsWorktrees", Migration0047],
+  [48, "HealSkippedProjectionThreadColumns", Migration0048],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
+
+const migrationNamesById = new Map<number, string>(migrationManifest);
+
+export interface MigrationLedgerDrift {
+  readonly id: number;
+  readonly recorded: string;
+  readonly expected: string;
+}
+
+/**
+ * Compare the recorded ledger against the manifest and report id/name drift.
+ *
+ * The migrator runs any migration whose numeric id exceeds the highest recorded
+ * id and never compares names, so an id recorded under a different name is
+ * silently permanent: the manifest migration for that id has already been
+ * skipped and will never run again. That surfaces much later as a missing
+ * column at query time, which reads like a corrupt database rather than a
+ * migration problem. Drift only happens when a migration is renumbered after a
+ * build has applied it -- see 041_HealSkippedProjectionThreadColumns.
+ *
+ * Reporting is deliberately non-fatal, and a warning rather than an error.
+ * Machines that already have drift need to boot so their healing migrations can
+ * run -- failing here would brick exactly the databases that are recoverable.
+ * Drift is also permanent once healed, because the recorded names cannot be
+ * corrected without rewriting the ledger, so anything louder would fire on
+ * every boot of a database that is actually fine.
+ */
+export const detectMigrationLedgerDrift = Effect.fn("detectMigrationLedgerDrift")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const rows = yield* sql<{
+    readonly migration_id: number;
+    readonly name: string;
+  }>`SELECT migration_id, name FROM effect_sql_migrations ORDER BY migration_id`;
+
+  return rows.flatMap((row): ReadonlyArray<MigrationLedgerDrift> => {
+    const expected = migrationNamesById.get(row.migration_id);
+    // An id past the end of the manifest means the database was written by a
+    // newer build; that is a downgrade, not drift.
+    if (expected === undefined || expected === row.name) return [];
+    return [{ id: row.migration_id, recorded: row.name, expected }];
+  });
+});
+
+const reportMigrationLedgerDrift = Effect.fn("reportMigrationLedgerDrift")(function* () {
+  const drift = yield* detectMigrationLedgerDrift();
+  if (drift.length === 0) return;
+
+  yield* Effect.logWarning(
+    "Migration ledger drift: these ids were recorded under a different migration name, " +
+      "so the manifest migration for each was skipped and will not run again. If a column " +
+      "is missing at query time, add a healing migration rather than renumbering",
+  ).pipe(
+    Effect.annotateLogs({
+      drift: drift.map(
+        ({ id, recorded, expected }) => `${id}: recorded ${recorded}, expected ${expected}`,
+      ),
+      skipped: drift.map(({ id, expected }) => `${id}_${expected}`),
+    }),
+  );
+});
 
 export const makeMigrationLoader = (throughId?: number) =>
   Migrator.fromRecord(
@@ -160,6 +232,17 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
   yield* migrations.length === 0
     ? Effect.logDebug("Database schema is current")
     : Effect.log("Migrations ran successfully").pipe(Effect.annotateLogs({ migrations }));
+
+  // Diagnostic only, and reported after the run so healing migrations have
+  // already applied. Never allowed to fail startup.
+  yield* reportMigrationLedgerDrift().pipe(
+    Effect.catchCause((cause) =>
+      Effect.logDebug("Could not check migration ledger for drift").pipe(
+        Effect.annotateLogs({ cause }),
+      ),
+    ),
+  );
+
   return executedMigrations;
 });
 
