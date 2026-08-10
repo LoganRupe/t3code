@@ -14,6 +14,7 @@ import {
   ExternalLauncherEditorSpawnError,
   ExternalLauncherUnknownEditorError,
   ExternalLauncherUnsupportedEditorError,
+  resolveEditorTarget,
   type EditorId,
   type FileManagerRevealKind,
   type LaunchEditorInput,
@@ -528,6 +529,14 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     return yield* new ExternalLauncherUnknownEditorError({ editor: input.editor });
   }
 
+  // A multi-repo project passes its `.code-workspace` alongside the anchor dir;
+  // only editors that understand workspace files get the file itself.
+  const target = resolveEditorTarget({
+    editor: editorDef,
+    cwd: input.cwd,
+    workspaceFile: input.workspaceFile,
+  });
+
   if (editorDef.commands) {
     const { command, baseArgs } = Option.getOrElse(
       yield* resolveEditorCommand(editorDef, env),
@@ -538,9 +547,9 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     );
     return {
       editor: editorDef.id,
-      target: input.cwd,
+      target,
       command,
-      args: [...baseArgs, ...resolveCommandEditorArgs(editorDef, input.cwd)],
+      args: [...baseArgs, ...resolveCommandEditorArgs(editorDef, target)],
     };
   }
 
@@ -559,12 +568,12 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
 
   return {
     editor: editorDef.id,
-    target: input.cwd,
+    target,
     command,
     args:
       command === "explorer.exe" && env.WSL_DISTRO_NAME !== undefined
-        ? [resolveWslFileManagerPath(input.cwd, env.WSL_DISTRO_NAME)]
-        : [input.cwd],
+        ? [resolveWslFileManagerPath(target, env.WSL_DISTRO_NAME)]
+        : [target],
   };
 });
 
