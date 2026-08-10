@@ -46,13 +46,13 @@ describe("054_HealSkippedProjectionThreadColumns", () => {
             (36, 'ProjectionThreadsWorktrees')
         `;
 
-        yield* runMigrations({ toMigrationInclusive: 40 });
+        yield* runMigrations({ toMigrationInclusive: 44 });
         const beforeHeal = yield* threadColumns;
         for (const column of HEALED_COLUMNS) {
           assert.ok(!beforeHeal.has(column), `expected ${column} to be missing before healing`);
         }
 
-        yield* runMigrations({ toMigrationInclusive: 41 });
+        yield* runMigrations({ toMigrationInclusive: 45 });
         const afterHeal = yield* threadColumns;
         for (const column of HEALED_COLUMNS) {
           assert.ok(afterHeal.has(column), `expected ${column} to be restored`);
@@ -64,13 +64,13 @@ describe("054_HealSkippedProjectionThreadColumns", () => {
   it.effect("is a no-op on a healthy database", () =>
     withDatabase(
       Effect.gen(function* () {
-        yield* runMigrations({ toMigrationInclusive: 40 });
+        yield* runMigrations({ toMigrationInclusive: 44 });
         const beforeHeal = yield* threadColumns;
         for (const column of HEALED_COLUMNS) {
           assert.ok(beforeHeal.has(column), `expected ${column} to already exist`);
         }
 
-        yield* runMigrations({ toMigrationInclusive: 41 });
+        yield* runMigrations({ toMigrationInclusive: 45 });
         const afterHeal = yield* threadColumns;
 
         assert.deepEqual([...afterHeal].sort(), [...beforeHeal].sort());
