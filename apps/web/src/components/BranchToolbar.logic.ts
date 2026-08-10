@@ -10,6 +10,7 @@ import { toSortableTimestamp } from "../lib/threadSort";
 export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
+  resolveAnchorRepoRoot,
 } from "@t3tools/shared/git";
 
 export interface EnvironmentOption {
