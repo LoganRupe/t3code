@@ -919,6 +919,93 @@ it.effect("rescans after an interrupted discovery instead of caching the interru
   );
 });
 
+/** A temp dir on PATH holding executable stubs for the given commands. */
+const makeExecutableStubs = Effect.fn("makeExecutableStubs")(function* (
+  commands: ReadonlyArray<string>,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+  for (const command of commands) {
+    const commandPath = path.join(binDir, command);
+    yield* fileSystem.writeFileString(commandPath, "#!/bin/sh\n");
+    yield* fileSystem.chmod(commandPath, 0o755);
+  }
+  return binDir;
+});
+
+const ANCHOR_DIR = "/workspace/anchor";
+const WORKSPACE_FILE = "/workspace/anchor/project.code-workspace";
+
+it.effect("opens a workspace file in editors that understand one", () =>
+  Effect.gen(function* () {
+    const binDir = yield* makeExecutableStubs(["code"]);
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      yield* launcher.launchEditor({
+        editor: "vscode",
+        cwd: ANCHOR_DIR,
+        workspaceFile: WORKSPACE_FILE,
+      });
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "linux",
+          env: { PATH: binDir },
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
+    );
+
+    assert.ok(spawned);
+    assert.deepEqual(spawned.args, [WORKSPACE_FILE]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+// Zed would show the raw JSON and the file manager would hand it to the OS
+// opener, so both keep getting the directory.
+it.effect.each(["zed", "file-manager"] as const)(
+  "falls back to the anchor directory for %s",
+  (editor) =>
+    Effect.gen(function* () {
+      // The file manager is only usable with a display and an `inode/directory`
+      // handler, so stub `xdg-mime` the way the reveal tests above do.
+      const binDir = yield* makeExecutableStubs(["zed", "xdg-open", "xdg-mime"]);
+
+      const spawnedCommands: ChildProcess.StandardCommand[] = [];
+      yield* Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        yield* launcher.launchEditor({
+          editor,
+          cwd: ANCHOR_DIR,
+          workspaceFile: WORKSPACE_FILE,
+        });
+      }).pipe(
+        Effect.provide(
+          testLayer({
+            platform: "linux",
+            env: { PATH: binDir, DISPLAY: ":0" },
+            onSpawn: (command) => {
+              spawnedCommands.push(command);
+            },
+            spawnResult: (command) =>
+              command.command === "xdg-mime"
+                ? { stdout: "org.gnome.Nautilus.desktop\n" }
+                : undefined,
+          }),
+        ),
+      );
+
+      const launch = spawnedCommands.find((command) => command.command !== "xdg-mime");
+      assert.ok(launch);
+      assert.deepEqual(launch.args, [ANCHOR_DIR]);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("rejects unknown editors through the service API", () =>
   Effect.gen(function* () {
     const launcher = yield* ExternalLauncher.ExternalLauncher;

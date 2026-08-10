@@ -16,6 +16,13 @@ type EditorDefinition = {
    * and forks that ship the Remote-SSH machinery.
    */
   readonly remoteScheme?: string;
+  /**
+   * Whether the editor opens a `.code-workspace` file as a multi-root workspace.
+   * The VS Code family does; everything else would show the raw JSON (Zed,
+   * JetBrains) or hand it to the OS opener (file manager), so those keep getting
+   * the containing directory instead.
+   */
+  readonly supportsWorkspaceFile?: boolean;
 };
 
 export const EDITORS = [
@@ -25,15 +32,30 @@ export const EDITORS = [
     commands: ["cursor"],
     launchStyle: "goto",
     remoteScheme: "cursor",
+    supportsWorkspaceFile: true,
   },
-  { id: "trae", label: "Trae", commands: ["trae"], launchStyle: "goto" },
-  { id: "kiro", label: "Kiro", commands: ["kiro"], baseArgs: ["ide"], launchStyle: "goto" },
+  {
+    id: "trae",
+    label: "Trae",
+    commands: ["trae"],
+    launchStyle: "goto",
+    supportsWorkspaceFile: true,
+  },
+  {
+    id: "kiro",
+    label: "Kiro",
+    commands: ["kiro"],
+    baseArgs: ["ide"],
+    launchStyle: "goto",
+    supportsWorkspaceFile: true,
+  },
   {
     id: "vscode",
     label: "VS Code",
     commands: ["code"],
     launchStyle: "goto",
     remoteScheme: "vscode",
+    supportsWorkspaceFile: true,
   },
   {
     id: "vscode-insiders",
@@ -41,6 +63,7 @@ export const EDITORS = [
     commands: ["code-insiders"],
     launchStyle: "goto",
     remoteScheme: "vscode-insiders",
+    supportsWorkspaceFile: true,
   },
   {
     id: "vscodium",
@@ -48,9 +71,16 @@ export const EDITORS = [
     commands: ["codium"],
     launchStyle: "goto",
     remoteScheme: "vscodium",
+    supportsWorkspaceFile: true,
   },
   { id: "zed", label: "Zed", commands: ["zed", "zeditor"], launchStyle: "direct-path" },
-  { id: "antigravity", label: "Antigravity", commands: ["agy"], launchStyle: "goto" },
+  {
+    id: "antigravity",
+    label: "Antigravity",
+    commands: ["agy"],
+    launchStyle: "goto",
+    supportsWorkspaceFile: true,
+  },
   { id: "idea", label: "IntelliJ IDEA", commands: ["idea"], launchStyle: "line-column" },
   { id: "aqua", label: "Aqua", commands: ["aqua"], launchStyle: "line-column" },
   { id: "clion", label: "CLion", commands: ["clion"], launchStyle: "line-column" },
@@ -79,6 +109,13 @@ export const LaunchEditorInput = Schema.Struct({
       honored by the "file-manager" editor; clients must check the server's
       `shellRevealInFileManager` config flag before sending this. */
   reveal: Schema.optional(Schema.Boolean),
+  /**
+   * Absolute path to the project's `.code-workspace` file, when it has one. It
+   * is preferred over `cwd` for editors that understand workspace files, so a
+   * multi-repo project opens with every repo root in the tree instead of as the
+   * plain anchor folder.
+   */
+  workspaceFile: Schema.optional(TrimmedNonEmptyString),
 });
 export type LaunchEditorInput = typeof LaunchEditorInput.Type;
 
@@ -129,6 +166,20 @@ export const RemoteOpenTarget = Schema.Struct({
   host: TrimmedNonEmptyString,
 });
 export type RemoteOpenTarget = typeof RemoteOpenTarget.Type;
+
+/**
+ * The path to hand the editor: the `.code-workspace` file when one was supplied
+ * and the editor can open it as a multi-root workspace, else the directory.
+ */
+export function resolveEditorTarget(input: {
+  readonly editor: EditorDefinition;
+  readonly cwd: string;
+  readonly workspaceFile?: string | undefined;
+}): string {
+  const supportsWorkspaceFile =
+    "supportsWorkspaceFile" in input.editor && input.editor.supportsWorkspaceFile === true;
+  return input.workspaceFile && supportsWorkspaceFile ? input.workspaceFile : input.cwd;
+}
 
 export class ExternalLauncherUnknownEditorError extends Schema.TaggedErrorClass<ExternalLauncherUnknownEditorError>()(
   "ExternalLauncherUnknownEditorError",
