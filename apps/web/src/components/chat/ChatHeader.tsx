@@ -63,6 +63,8 @@ interface ChatHeaderProps {
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
   openInCwd: string | null;
+  /** The project's `.code-workspace` file, when opening it makes sense (see {@link OpenInPicker}). */
+  openInWorkspaceFile: string | null;
   activeProjectScripts: ReadonlyArray<ProjectScript> | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
@@ -138,6 +140,7 @@ export const ChatHeader = memo(function ChatHeader({
   isServerThread,
   activeProject,
   openInCwd,
+  openInWorkspaceFile,
   activeProjectScripts,
   preferredScriptId,
   keybindings,
@@ -386,6 +389,7 @@ export const ChatHeader = memo(function ChatHeader({
             keybindings={keybindings}
             availableEditors={availableEditors}
             openInCwd={openInCwd}
+            openInWorkspaceFile={openInWorkspaceFile}
           />
         </>
       )}
