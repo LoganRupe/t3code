@@ -150,6 +150,13 @@ describe("CheckpointDiffQuery.layer", () => {
         fromTurnCount: 0,
         toTurnCount: 4,
         diff: "full thread diff patch",
+        groups: [
+          {
+            repoRoot: "/tmp/worktree",
+            displayName: "worktree",
+            diff: "full thread diff patch",
+          },
+        ],
       });
     }),
   );
@@ -253,6 +260,13 @@ describe("CheckpointDiffQuery.layer", () => {
         fromTurnCount: 0,
         toTurnCount: 1,
         diff: "diff patch",
+        groups: [
+          {
+            repoRoot: "/tmp/workspace",
+            displayName: "workspace",
+            diff: "diff patch",
+          },
+        ],
       });
     }),
   );
