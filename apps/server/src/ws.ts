@@ -80,6 +80,7 @@ import {
   WsRpcGroup,
 } from "@t3tools/contracts";
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
+import { resolveAnchorRepoRoot } from "@t3tools/shared/git";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -1003,6 +1004,9 @@ const makeWsRpcLayer = (
           let targetProjectId = bootstrap?.createThread?.projectId;
           let targetProjectCwd = bootstrap?.prepareWorktree?.projectCwd;
           let targetWorktreePath = bootstrap?.createThread?.worktreePath ?? null;
+          // The repo `targetWorktreePath` was created from. A workspace-file
+          // project's `projectCwd` is not a repo, so cancel removes it from here.
+          let targetWorktreeRepoRoot = bootstrap?.prepareWorktree?.projectCwd ?? null;
           // Extra per-repo worktrees of a multi-repo fan-out, removed on cancel.
           const claimedCousinWorktrees: Array<{ repoRoot: string; worktreePath: string }> = [];
           // The setup script's terminal, once started. Cancel closes only this
@@ -1208,8 +1212,31 @@ const makeWsRpcLayer = (
 
           const bootstrapProgram = Effect.gen(function* () {
             const prepareWorktree = bootstrap?.prepareWorktree;
+            // Resolve the project up front so an isolated run can fan out across
+            // every repo root. `projectCwd` is the client's anchor, which for a
+            // workspace-file project is the directory holding the
+            // `.code-workspace` and usually not a repo, so the git preflight and
+            // the chosen base ref both belong to the anchor *repo* root instead.
+            const worktreeProjectId = prepareWorktree
+              ? (targetProjectId ??
+                (yield* projectionSnapshotQuery.getThreadShellById(threadId).pipe(
+                  Effect.map((shell) => (Option.isSome(shell) ? shell.value.projectId : undefined)),
+                  Effect.orElseSucceed(() => undefined),
+                )))
+              : undefined;
+            const projectShell = worktreeProjectId
+              ? yield* projectionSnapshotQuery.getProjectShellById(worktreeProjectId).pipe(
+                  Effect.map(Option.getOrUndefined),
+                  Effect.orElseSucceed(() => undefined),
+                )
+              : undefined;
+            const anchorRepoRoot = resolveAnchorRepoRoot({
+              workspaceRoot: prepareWorktree?.projectCwd ?? "",
+              repoRoots: projectShell?.repoRoots,
+            });
+            if (prepareWorktree) targetWorktreeRepoRoot = anchorRepoRoot;
             let shouldPrepareWorktree = prepareWorktree
-              ? yield* gitWorkflow.isRepository(prepareWorktree.projectCwd)
+              ? yield* gitWorkflow.isRepository(anchorRepoRoot)
               : false;
             let worktreeBaseRef = prepareWorktree?.baseBranch ?? null;
 
@@ -1219,23 +1246,23 @@ const makeWsRpcLayer = (
               const startFromOrigin =
                 prepareWorktree.startFromOrigin === true &&
                 (yield* gitWorkflow.remoteExists({
-                  cwd: prepareWorktree.projectCwd,
+                  cwd: anchorRepoRoot,
                   remoteName: "origin",
                 }));
               if (startFromOrigin) {
                 yield* track(worktreeSetupTracker.stageStatus(threadId, "fetch", "running"));
                 yield* gitWorkflow.fetchRemote({
-                  cwd: prepareWorktree.projectCwd,
+                  cwd: anchorRepoRoot,
                   remoteName: "origin",
                 });
                 const remoteBaseExists = yield* gitWorkflow.remoteBranchExists({
-                  cwd: prepareWorktree.projectCwd,
+                  cwd: anchorRepoRoot,
                   refName: prepareWorktree.baseBranch,
                   remoteName: "origin",
                 });
                 if (remoteBaseExists) {
                   const resolvedRemoteBase = yield* gitWorkflow.resolveRemoteTrackingCommit({
-                    cwd: prepareWorktree.projectCwd,
+                    cwd: anchorRepoRoot,
                     refName: prepareWorktree.baseBranch,
                     fallbackRemoteName: "origin",
                   });
@@ -1264,7 +1291,7 @@ const makeWsRpcLayer = (
 
               const resolvedWorktreeBaseRef = worktreeBaseRef ?? prepareWorktree.baseBranch;
               shouldPrepareWorktree = yield* gitWorkflow.hasCommit({
-                cwd: prepareWorktree.projectCwd,
+                cwd: anchorRepoRoot,
                 refName: resolvedWorktreeBaseRef,
               });
               worktreeBaseRef = resolvedWorktreeBaseRef;
@@ -1316,23 +1343,11 @@ const makeWsRpcLayer = (
             if (prepareWorktree && shouldPrepareWorktree && worktreeBaseRef) {
               const anchorBaseRef = worktreeBaseRef;
               // Multi-repo projects fan the isolated run out to one worktree per
-              // repo root. The anchor (project cwd) goes first so the thread's
+              // repo root. The anchor repo root goes first so the thread's
               // `worktreePath` stays `worktrees[0]` and carries the setup
               // progress; the other roots branch off their current HEAD.
-              const worktreeProjectId =
-                targetProjectId ??
-                (yield* projectionSnapshotQuery.getThreadShellById(threadId).pipe(
-                  Effect.map((shell) => (Option.isSome(shell) ? shell.value.projectId : undefined)),
-                  Effect.orElseSucceed(() => undefined),
-                ));
-              const projectShell = worktreeProjectId
-                ? yield* projectionSnapshotQuery.getProjectShellById(worktreeProjectId).pipe(
-                    Effect.map(Option.getOrUndefined),
-                    Effect.orElseSucceed(() => undefined),
-                  )
-                : undefined;
               const cousinRepoRoots = (projectShell?.repoRoots ?? []).filter(
-                (repoRoot) => repoRoot !== prepareWorktree.projectCwd,
+                (repoRoot) => repoRoot !== anchorRepoRoot,
               );
 
               yield* worktreeSetupTracker.stageStatus(threadId, "checkout", "running");
@@ -1390,7 +1405,7 @@ const makeWsRpcLayer = (
                   ? yield* gitWorkflow
                       .createWorktree(
                         {
-                          cwd: prepareWorktree.projectCwd,
+                          cwd: anchorRepoRoot,
                           refName: worktreeBaseRef,
                           newRefName: prepareWorktree.branch,
                           baseRefName: prepareWorktree.baseBranch,
@@ -1401,7 +1416,7 @@ const makeWsRpcLayer = (
                       .pipe(
                         Effect.map(({ worktree }) => [
                           {
-                            repoRoot: prepareWorktree.projectCwd,
+                            repoRoot: anchorRepoRoot,
                             worktreePath: worktree.path,
                             refName: worktree.refName,
                           },
@@ -1442,7 +1457,7 @@ const makeWsRpcLayer = (
                             threadId,
                             targets: [
                               {
-                                repoRoot: prepareWorktree.projectCwd,
+                                repoRoot: anchorRepoRoot,
                                 baseRef: anchorBaseRef,
                                 baseRefName: prepareWorktree.baseBranch,
                                 newBranch: prepareWorktree.branch ?? null,
@@ -1573,14 +1588,14 @@ const makeWsRpcLayer = (
                     })
                   : Effect.void;
                 const removeCreatedWorktree =
-                  tracked && targetWorktreePath && bootstrap?.prepareWorktree
+                  tracked && targetWorktreePath && targetWorktreeRepoRoot
                     ? closeSetupTerminal.pipe(
                         Effect.ignoreCause({ log: true }),
                         Effect.andThen(
                           Effect.forEach(
                             [
                               {
-                                repoRoot: bootstrap.prepareWorktree.projectCwd,
+                                repoRoot: targetWorktreeRepoRoot,
                                 worktreePath: targetWorktreePath,
                               },
                               ...claimedCousinWorktrees,
