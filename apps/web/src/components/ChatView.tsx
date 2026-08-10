@@ -3094,6 +3094,14 @@ export default function ChatView(props: ChatViewProps) {
         worktreePath: activeThread?.worktreePath ?? null,
       })
     : null;
+  // `workspaceRoot` is only the anchor directory for a workspace-file project,
+  // so opening it gives a plain folder. Hand the `.code-workspace` itself to
+  // editors that can open it as a multi-root workspace. Isolated runs are
+  // excluded: their fanned-out worktrees have no workspace file, and the
+  // project's would point back at the original checkouts.
+  const openInWorkspaceFile = activeThread?.worktreePath
+    ? null
+    : (activeProject?.workspaceFile ?? null);
   // For a multi-repo `.code-workspace` project, fan git status out over every
   // repo root. For a single-repo project keep the worktree-aware status cwd so
   // isolated runs report on the worktree (Phase 4 will make multi-repo
@@ -7917,6 +7925,7 @@ export default function ChatView(props: ChatViewProps) {
             activeProjectFaviconPath={activeProject?.faviconPath ?? null}
             activeProjectIcon={activeProject?.projectIcon ?? null}
             openInCwd={gitCwd}
+            openInWorkspaceFile={openInWorkspaceFile}
             activeProjectScripts={activeProjectScripts}
             preferredScriptId={
               activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
