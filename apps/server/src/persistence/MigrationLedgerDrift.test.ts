@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { detectMigrationLedgerDrift, migrationManifest, runMigrations } from "./Migrations.ts";
-import * as NodeSqliteClient from "./NodeSqliteClient.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 // Each test gets its own in-memory database so ledger rows written by one case
 // cannot satisfy or corrupt another.
