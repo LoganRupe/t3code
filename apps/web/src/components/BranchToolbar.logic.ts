@@ -12,6 +12,7 @@ export {
   dedupeRemoteBranchesWithLocalMatches,
   deriveLocalBranchNameFromRemoteRef,
   sanitizeNewRefName,
+  resolveAnchorRepoRoot,
 } from "@t3tools/shared/git";
 
 export interface EnvironmentOption {
