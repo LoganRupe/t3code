@@ -58,7 +58,7 @@ import Migration0041 from "./Migrations/041_ProjectionProjectsRepoRoots.ts";
 import Migration0042 from "./Migrations/042_ProjectionProjectsWorkspaceFile.ts";
 import Migration0043 from "./Migrations/043_ProjectionCheckpointRefs.ts";
 import Migration0044 from "./Migrations/044_ProjectionThreadsWorktrees.ts";
-import Migration0045 from "./Migrations/045_HealSkippedProjectionThreadColumns.ts";
+import Migration0045 from "./Migrations/045_HealSkippedRenumberedMigrations.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -77,7 +77,8 @@ import Migration0045 from "./Migrations/045_HealSkippedProjectionThreadColumns.t
  * silently unrunnable on every database that saw the old numbering. When
  * rebasing a branch that adds migrations, append after main's highest id rather
  * than renumbering. `detectMigrationLedgerDrift` reports this if it happens
- * anyway; 045_HealSkippedProjectionThreadColumns repairs the 033-036 occurrence.
+ * anyway; 045_HealSkippedRenumberedMigrations repairs the 033-036 and 037-040
+ * occurrences.
  */
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -124,7 +125,7 @@ export const migrationEntries = [
   [42, "ProjectionProjectsWorkspaceFile", Migration0042],
   [43, "ProjectionCheckpointRefs", Migration0043],
   [44, "ProjectionThreadsWorktrees", Migration0044],
-  [45, "HealSkippedProjectionThreadColumns", Migration0045],
+  [45, "HealSkippedRenumberedMigrations", Migration0045],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);
@@ -146,7 +147,7 @@ export interface MigrationLedgerDrift {
  * skipped and will never run again. That surfaces much later as a missing
  * column at query time, which reads like a corrupt database rather than a
  * migration problem. Drift only happens when a migration is renumbered after a
- * build has applied it -- see 041_HealSkippedProjectionThreadColumns.
+ * build has applied it -- see 045_HealSkippedRenumberedMigrations.
  *
  * Reporting is deliberately non-fatal, and a warning rather than an error.
  * Machines that already have drift need to boot so their healing migrations can
