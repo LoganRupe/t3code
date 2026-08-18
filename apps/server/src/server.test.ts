@@ -11495,9 +11495,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               remoteRefName: "origin/main",
             }),
         );
-        const execute = vi.fn(
-          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["execute"]>[0]) =>
-            Effect.succeed(SUCCESSFUL_GIT_EXECUTION),
+        const execute = vi.fn((_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["execute"]>[0]) =>
+          Effect.succeed(SUCCESSFUL_GIT_EXECUTION),
         );
         const createWorktree = vi.fn(
           (input: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>

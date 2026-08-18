@@ -3,7 +3,7 @@ import {
   getProjectFaviconResourceKey,
   isProjectFaviconFallbackUrl,
 } from "@t3tools/shared/projectFavicon";
-import { FolderCodeIcon } from "lucide-react";
+import { FolderCodeIcon, LayersIcon } from "lucide-react";
 import type { IconName } from "lucide-react/dynamic";
 import type { ComponentType } from "react";
 import { lazy, Suspense, useState } from "react";
@@ -28,7 +28,7 @@ function DynamicProjectIconFallback() {
 // changes the automatic icon, which is how the command palette drifted once.
 export type ProjectFaviconProject = Pick<
   EnvironmentProject,
-  "environmentId" | "workspaceRoot" | "title" | "faviconPath" | "projectIcon"
+  "environmentId" | "workspaceRoot" | "title" | "faviconPath" | "projectIcon" | "workspaceFile"
 >;
 export function ProjectFavicon(input: {
   project: ProjectFaviconProject;
@@ -80,7 +80,10 @@ export function ProjectFavicon(input: {
       </span>
     );
   }
-  const FallbackIcon = input.fallbackIcon ?? FolderCodeIcon;
+  // A `.code-workspace`-backed project reads as a workspace wherever it shows,
+  // matching the command palette's workspace-file marker.
+  const FallbackIcon =
+    input.fallbackIcon ?? (project.workspaceFile ? LayersIcon : FolderCodeIcon);
 
   if (!src || isProjectFaviconFallbackUrl(src)) {
     return (

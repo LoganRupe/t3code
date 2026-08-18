@@ -40,12 +40,7 @@ interface MultiRepoGitControlProps {
   environmentId: EnvironmentId;
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
-  /**
-   * Accepted for parity with the single-repo control's wiring, but not passed
-   * to the rows: it opens a PR number in the panel keyed to the project's one
-   * anchor repository, which is the wrong repo for every other row. Rows keep
-   * opening their own PR link instead.
-   */
+  /** Forwarded to each row so a repo's change request opens beside the thread. */
   onOpenPullRequest?: ((number: number) => void) | undefined;
 }
 
@@ -103,6 +98,7 @@ export function MultiRepoGitControl({
   groups,
   environmentId,
   activeThreadRef,
+  onOpenPullRequest,
   draftId,
 }: MultiRepoGitControlProps) {
   const [isSyncing, setIsSyncing] = useState(false);
@@ -250,6 +246,7 @@ export function MultiRepoGitControl({
                   activeThreadRef={activeThreadRef}
                   syncThreadBranch={false}
                   quickActionLabel="always"
+                  onOpenPullRequest={onOpenPullRequest}
                   {...(draftId ? { draftId } : {})}
                 />
               </div>
