@@ -165,6 +165,7 @@ import {
   resolveSidebarDropTarget,
   resolveSidebarDropVerb,
   type SidebarDropVerb,
+  resolveSidebarProjectRepoInfo,
   resolveSidebarThreadStatus,
   searchSidebarThreads,
   shouldCreateNewThreadInCurrentProject,
@@ -1062,7 +1063,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     [clearComposerContent, threadRef],
   );
 
-  const gitCwd = thread.worktreePath ?? props.project?.workspaceRoot ?? null;
+  // A multi-repo workspace's `workspaceRoot` is the container folder, which is
+  // not a repo; its anchor root is. Isolated runs still report on the anchor
+  // worktree only; the per-root map lives on `thread.worktrees`.
+  const gitCwd =
+    thread.worktreePath ??
+    (props.project ? resolveSidebarProjectRepoInfo(props.project).gitRoot : null);
   const linkedPullRequestStatus = useLinkedThreadPullRequest(
     thread.environmentId,
     thread.linkedPullRequest,
@@ -1999,7 +2005,12 @@ const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
   );
   // Same details tooltip as the regular rows: a search hit is still a thread,
   // and the hover card is how you disambiguate identically-titled results.
-  const gitCwd = thread.worktreePath ?? props.project?.workspaceRoot ?? null;
+  // A multi-repo workspace's `workspaceRoot` is the container folder, which is
+  // not a repo; its anchor root is. Isolated runs still report on the anchor
+  // worktree only; the per-root map lives on `thread.worktrees`.
+  const gitCwd =
+    thread.worktreePath ??
+    (props.project ? resolveSidebarProjectRepoInfo(props.project).gitRoot : null);
   const gitStatus = useEnvironmentQuery(
     leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
       ? vcsEnvironment.status({

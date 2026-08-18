@@ -18,6 +18,7 @@ import {
   Globe2Icon,
   ImageIcon,
   Layers3Icon,
+  LayersIcon,
   MonitorIcon,
   MusicIcon,
   PackageIcon,
@@ -101,7 +102,7 @@ const PROJECT_ICON_COLOR_BY_NAME: Record<ProjectIconName, ProjectIconColor> = {
 // changes the automatic icon, which is how the command palette drifted once.
 export type ProjectFaviconProject = Pick<
   EnvironmentProject,
-  "environmentId" | "workspaceRoot" | "title" | "faviconPath" | "projectIcon"
+  "environmentId" | "workspaceRoot" | "title" | "faviconPath" | "projectIcon" | "workspaceFile"
 >;
 
 export function ProjectFavicon(input: {
@@ -139,11 +140,15 @@ export function ProjectFavicon(input: {
       </span>
     );
   }
-  const automaticIconName = input.fallbackIcon
+  // A `.code-workspace`-backed project reads as a workspace wherever it shows,
+  // matching the command palette's workspace-file marker.
+  const explicitFallbackIcon =
+    input.fallbackIcon ?? (project.workspaceFile ? LayersIcon : undefined);
+  const automaticIconName = explicitFallbackIcon
     ? null
     : selectProjectIcon(project.title, project.workspaceRoot);
   const FallbackIcon =
-    input.fallbackIcon ??
+    explicitFallbackIcon ??
     (automaticIconName?.kind === "lucide" ? PROJECT_ICONS[automaticIconName.icon] : undefined);
   const fallbackEmoji = automaticIconName?.kind === "emoji" ? automaticIconName.emoji : undefined;
   const fallbackColorClassName =
