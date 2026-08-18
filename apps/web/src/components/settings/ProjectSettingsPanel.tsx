@@ -79,6 +79,7 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { ProjectFoldersDialog, type ProjectFoldersDialogTarget } from "../ProjectFoldersDialog";
 import {
   EMPTY_PROJECT_SCRIPT_INPUT,
   editorRequestForScript,
@@ -679,6 +680,10 @@ function ProjectDetail({
   // ----- project icon -----
   const [faviconPickerOpen, setFaviconPickerOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  // Multi-repo workspaces (#923): the folder editor for `.code-workspace`-backed
+  // checkouts. Null when closed.
+  const [projectFoldersTarget, setProjectFoldersTarget] =
+    useState<ProjectFoldersDialogTarget | null>(null);
   const [isSavingFavicon, setIsSavingFavicon] = useState(false);
   const savingFaviconRef = useRef(false);
   const setProjectIcon = useCallback(
@@ -1274,6 +1279,30 @@ function ProjectDetail({
               </Select>
             }
           />
+          {selectedCheckout.workspaceFile ? (
+            <SettingsRow
+              title="Folders"
+              description="Repos this multi-repo workspace spans. Saved back to its .code-workspace file."
+              control={
+                <Button
+                  size="xs"
+                  variant="outline"
+                  onClick={() => {
+                    const workspaceFile = selectedCheckout.workspaceFile;
+                    if (!workspaceFile) return;
+                    setProjectFoldersTarget({
+                      environmentId: selectedCheckout.environmentId,
+                      projectId: selectedCheckout.id,
+                      title: selectedCheckout.title,
+                      workspaceFile,
+                    });
+                  }}
+                >
+                  Manage folders
+                </Button>
+              }
+            />
+          ) : null}
           {group.memberProjects.length > 1 ? (
             <SettingsRow
               title="Remove checkout"
@@ -1434,6 +1463,10 @@ function ProjectDetail({
           />
         </Suspense>
       ) : null}
+      <ProjectFoldersDialog
+        target={projectFoldersTarget}
+        onClose={() => setProjectFoldersTarget(null)}
+      />
     </>
   );
 }
