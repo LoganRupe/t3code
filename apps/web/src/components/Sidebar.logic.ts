@@ -311,6 +311,33 @@ export function shouldCreateNewThreadInCurrentProject(
   return shiftKey || projectGroupCount <= 1;
 }
 
+/**
+ * Per-project facts a thread row needs but cannot read off the thread itself.
+ *
+ * `gitRoot` is the repo to report status against. For a `.code-workspace`
+ * project `workspaceRoot` is the folder holding the file, which usually is not
+ * a repo at all, so status has to run against the anchor repo root instead.
+ * Single-root projects resolve to their workspace root either way.
+ */
+export interface SidebarProjectRepoInfo {
+  readonly gitRoot: string;
+  /** Backed by a `.code-workspace`, so the row marks it as a workspace. */
+  readonly isWorkspace: boolean;
+}
+
+export function resolveSidebarProjectRepoInfo(project: {
+  readonly workspaceRoot: string;
+  readonly repoRoots?: readonly string[] | undefined;
+  readonly workspaceFile?: string | undefined;
+}): SidebarProjectRepoInfo {
+  return {
+    // `repoRoots` is backfilled to `[workspaceRoot]` for single-root projects,
+    // so this is a no-op outside multi-repo workspaces.
+    gitRoot: project.repoRoots?.[0] ?? project.workspaceRoot,
+    isWorkspace: Boolean(project.workspaceFile),
+  };
+}
+
 export function orderItemsByPreferredIds<TItem, TId>(input: {
   items: readonly TItem[];
   preferredIds: readonly TId[];

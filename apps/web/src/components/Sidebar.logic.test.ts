@@ -35,6 +35,7 @@ import {
   sortThreadsForSidebar,
   sortProjectsForSidebar,
   sortScopedProjectsForSidebar,
+  resolveSidebarProjectRepoInfo,
   shouldCreateNewThreadInCurrentProject,
   THREAD_JUMP_HINT_SHOW_DELAY_MS,
 } from "./Sidebar.logic";
@@ -1709,5 +1710,45 @@ describe("sortLogicalProjectsForSidebar", () => {
         (project) => project.projectKey,
       ),
     ).toEqual(["logical-newer", "logical-older"]);
+  });
+});
+
+describe("resolveSidebarProjectRepoInfo", () => {
+  it("reports a plain project's workspace root as its git root", () => {
+    expect(
+      resolveSidebarProjectRepoInfo({
+        workspaceRoot: "/repos/app",
+        repoRoots: ["/repos/app"],
+      }),
+    ).toEqual({ gitRoot: "/repos/app", isWorkspace: false });
+  });
+
+  it("falls back to the workspace root when repoRoots is absent", () => {
+    expect(resolveSidebarProjectRepoInfo({ workspaceRoot: "/repos/app" })).toEqual({
+      gitRoot: "/repos/app",
+      isWorkspace: false,
+    });
+  });
+
+  it("uses the anchor repo, not the container, for a multi-repo workspace", () => {
+    // The container holds the .code-workspace file and is usually not a repo,
+    // so reporting status against it would find nothing.
+    expect(
+      resolveSidebarProjectRepoInfo({
+        workspaceRoot: "/repos/workspace",
+        repoRoots: ["/repos/workspace/api", "/repos/workspace/web"],
+        workspaceFile: "/repos/workspace/team.code-workspace",
+      }),
+    ).toEqual({ gitRoot: "/repos/workspace/api", isWorkspace: true });
+  });
+
+  it("marks a single-folder workspace file as a workspace", () => {
+    expect(
+      resolveSidebarProjectRepoInfo({
+        workspaceRoot: "/repos/solo",
+        repoRoots: ["/repos/solo/app"],
+        workspaceFile: "/repos/solo/solo.code-workspace",
+      }).isWorkspace,
+    ).toBe(true);
   });
 });

@@ -33,8 +33,8 @@ import { cn } from "~/lib/utils";
 import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
 import { useTheme } from "../hooks/useTheme";
 import {
-  buildFileDiffRenderKey,
   DIFF_SURFACE_THEME_UNSAFE_CSS,
+  buildFileDiffRenderKey,
   getDiffCollapseIconClassName,
   getDiffLineStat,
   getRenderablePatch,
@@ -173,14 +173,20 @@ function BranchDiffRepoSection({
       : `${files.length} ${files.length === 1 ? "file" : "files"}`;
   return (
     <div>
-      <div
-        className="diff-render-group-header sticky top-0 z-10 mt-2 mb-1 flex items-center gap-2 rounded-md bg-background/95 px-2 py-1 text-xs font-medium text-muted-foreground backdrop-blur first:mt-0"
-        title={cwd}
-      >
-        <span className="truncate text-foreground/90">{repoRootBaseName(repoRoot)}</span>
-        <span className="text-muted-foreground/70">{countLabel}</span>
-        {source?.truncated === true && <span className="text-amber-500/80">truncated</span>}
-      </div>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <div className="diff-render-group-header sticky top-0 z-10 mt-2 mb-1 flex items-center gap-2 rounded-md bg-background/95 px-2 py-1 text-xs font-medium text-muted-foreground backdrop-blur first:mt-0" />
+          }
+        >
+          <span className="truncate text-foreground/90">{repoRootBaseName(repoRoot)}</span>
+          <span className="text-muted-foreground/70">{countLabel}</span>
+          {source?.truncated === true && <span className="text-amber-500/80">truncated</span>}
+        </TooltipTrigger>
+        <TooltipPopup side="bottom" className="max-w-80 whitespace-normal">
+          <span className="font-mono break-all">{cwd}</span>
+        </TooltipPopup>
+      </Tooltip>
       {preview.error && files.length === 0 ? (
         <p className="px-2 pb-2 text-[11px] text-red-500/80">{preview.error}</p>
       ) : (
@@ -996,12 +1002,20 @@ export default function DiffPanel({
                                 />
                               </div>
                             ) : choice.remote ? (
-                              <span
-                                className="flex justify-end text-muted-foreground"
-                                title="Remote only"
-                              >
-                                <CheckIcon aria-hidden="true" className="size-3" />
-                              </span>
+                              <Tooltip>
+                                <TooltipTrigger
+                                  render={
+                                    <span className="flex justify-end text-muted-foreground">
+                                      <CheckIcon
+                                        role="img"
+                                        aria-label="Remote only"
+                                        className="size-3"
+                                      />
+                                    </span>
+                                  }
+                                />
+                                <TooltipPopup side="top">Remote only</TooltipPopup>
+                              </Tooltip>
                             ) : null}
                           </div>
                         </ComboboxItem>
@@ -1161,7 +1175,7 @@ export default function DiffPanel({
               </div>
             )}
             {isMultiRepoBranchView ? (
-              <div className="diff-render-surface min-h-0 flex-1 overflow-auto">
+              <div className="diff-render-surface [--code-background:var(--background)] min-h-0 flex-1 overflow-auto">
                 {visibleDiffTargets.map((entry) => (
                   <BranchDiffRepoSection
                     key={entry.repoRoot}
@@ -1236,23 +1250,28 @@ export default function DiffPanel({
                   // AnnotatableCodeView renders a single flat file list and
                   // cannot express per-root section headers.
                   <Virtualizer
-                    className="diff-render-surface h-full min-h-0 overflow-auto"
+                    className="diff-render-surface [--code-background:var(--background)] h-full min-h-0 overflow-auto"
                     config={{
                       overscrollSize: 600,
                       intersectionObserverMargin: 1200,
                     }}
                   >
                     {visibleGroups.flatMap((group) => [
-                      <div
-                        key={`diff-group:${group.repoRoot}`}
-                        className="diff-render-group-header sticky top-0 z-10 mt-2 mb-1 flex items-center gap-2 rounded-md bg-background/95 px-2 py-1 text-xs font-medium text-muted-foreground backdrop-blur first:mt-0"
-                        title={group.repoRoot}
-                      >
-                        <span className="truncate text-foreground/90">{group.displayName}</span>
-                        <span className="text-muted-foreground/70">
-                          {group.files.length} {group.files.length === 1 ? "file" : "files"}
-                        </span>
-                      </div>,
+                      <Tooltip key={`diff-group:${group.repoRoot}`}>
+                        <TooltipTrigger
+                          render={
+                            <div className="diff-render-group-header sticky top-0 z-10 mt-2 mb-1 flex items-center gap-2 rounded-md bg-background/95 px-2 py-1 text-xs font-medium text-muted-foreground backdrop-blur first:mt-0" />
+                          }
+                        >
+                          <span className="truncate text-foreground/90">{group.displayName}</span>
+                          <span className="text-muted-foreground/70">
+                            {group.files.length} {group.files.length === 1 ? "file" : "files"}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipPopup side="bottom" className="max-w-80 whitespace-normal">
+                          <span className="font-mono break-all">{group.repoRoot}</span>
+                        </TooltipPopup>
+                      </Tooltip>,
                       ...group.files.map((fileDiff) =>
                         renderFileDiffEntry(fileDiff, group.repoRoot),
                       ),

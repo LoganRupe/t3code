@@ -24,6 +24,7 @@ import {
   useSidebarStageBackdropVariant,
 } from "./SidebarStageBackdrop";
 import { useProjects } from "../state/entities";
+import { useWorkspaceProjectReconcile } from "../hooks/useWorkspaceProjectReconcile";
 import {
   resolveInitialThreadSidebarWidth,
   resolveThreadSidebarMaximumWidth,
@@ -131,8 +132,12 @@ function SidebarControl() {
 // Settings swaps the thread sidebar out of the tree. Keep the lightweight
 // project projection subscribed so returning to a draft never renders the
 // zero-project state while the environment snapshot reconnects.
+//
+// Multi-repo workspaces (#923): this is also the one place both sidebars share,
+// so the once-per-session `.code-workspace` reconcile lives here rather than in
+// either sidebar's project row.
 function ProjectProjectionRetention() {
-  useProjects();
+  useWorkspaceProjectReconcile(useProjects());
   return null;
 }
 
