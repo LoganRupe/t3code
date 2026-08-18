@@ -25,6 +25,7 @@ import { useThreadShells } from "../../state/entities";
 import { projectEnvironment } from "../../state/projects";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { ProjectFavicon } from "../ProjectFavicon";
+import { ProjectFoldersDialog, type ProjectFoldersDialogTarget } from "../ProjectFoldersDialog";
 import { Alert, AlertDescription } from "../ui/alert";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -276,6 +277,10 @@ function ProjectDetail({
   // ----- project icon -----
   const [faviconPickerOpen, setFaviconPickerOpen] = useState(false);
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  // Multi-repo workspaces (#923): the folder editor for `.code-workspace`-backed
+  // checkouts. Null when closed.
+  const [projectFoldersTarget, setProjectFoldersTarget] =
+    useState<ProjectFoldersDialogTarget | null>(null);
   const [isSavingFavicon, setIsSavingFavicon] = useState(false);
   const savingFaviconRef = useRef(false);
   const setProjectIcon = useCallback(
@@ -383,6 +388,10 @@ function ProjectDetail({
       threads,
     ],
   );
+
+  // Multi-repo workspaces (#923): checkouts backed by a `.code-workspace` get
+  // the folder editor.
+  const workspaceFileMembers = group.memberProjects.filter((member) => member.workspaceFile);
 
   const checkoutChoices = (
     <SettingsSection title="Checkouts">
@@ -492,6 +501,36 @@ function ProjectDetail({
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
         {hasMultipleCheckouts ? checkoutChoices : null}
+        {workspaceFileMembers.length > 0 ? (
+          <SettingsSection title="Folders">
+            {workspaceFileMembers.map((member) => (
+              <SettingsRow
+                key={member.physicalProjectKey}
+                title={
+                  hasMultipleCheckouts ? (member.environmentLabel ?? "Environment") : "Folders"
+                }
+                description="Repos this multi-repo workspace spans. Saved back to its .code-workspace file."
+                control={
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => {
+                      if (!member.workspaceFile) return;
+                      setProjectFoldersTarget({
+                        environmentId: member.environmentId,
+                        projectId: member.id,
+                        title: member.title,
+                        workspaceFile: member.workspaceFile,
+                      });
+                    }}
+                  >
+                    Manage folders
+                  </Button>
+                }
+              />
+            ))}
+          </SettingsSection>
+        ) : null}
         <SettingsSection title="Danger">
           <SettingsRow
             title={
@@ -549,6 +588,10 @@ function ProjectDetail({
           />
         </Suspense>
       ) : null}
+      <ProjectFoldersDialog
+        target={projectFoldersTarget}
+        onClose={() => setProjectFoldersTarget(null)}
+      />
     </>
   );
 }
