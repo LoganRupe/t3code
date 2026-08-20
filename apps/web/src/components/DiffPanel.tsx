@@ -9,6 +9,8 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
+import { resolveAnchorRepoRoot } from "@t3tools/shared/git";
+import { resolveDiffPanelIsGitRepo, resolveDiffRepoTargets } from "./DiffPanel.logic";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -124,6 +126,20 @@ function useRefreshOnReopen(refresh: () => void, hasCachedData: boolean) {
   }, []);
 }
 
+// Refetch whenever `signal` changes, skipping the initial render. Lets the panel
+// drive per-repo queries it doesn't own (window focus, a completed turn, the
+// refresh button) without threading each query's `refresh` back up.
+function useRefreshOnSignal(refresh: () => void, signal: number) {
+  const refreshRef = useRef(refresh);
+  refreshRef.current = refresh;
+  const lastSignalRef = useRef(signal);
+  useEffect(() => {
+    if (lastSignalRef.current === signal) return;
+    lastSignalRef.current = signal;
+    refreshRef.current();
+  }, [signal]);
+}
+
 // One repo's section of a multi-repo branch/working diff. Each section fetches
 // its own repo's diff preview (a separate cwd = that repo's worktree path) so
 // the parent can render every repo grouped without a server round-trip change.
@@ -135,6 +151,7 @@ function BranchDiffRepoSection({
   scope,
   ignoreWhitespace,
   resolvedTheme,
+  refreshToken,
   renderFileDiffEntry,
 }: {
   readonly environmentId: ScopedThreadRef["environmentId"];
@@ -143,6 +160,8 @@ function BranchDiffRepoSection({
   readonly scope: "branch" | "unstaged";
   readonly ignoreWhitespace: boolean;
   readonly resolvedTheme: string;
+  /** Bumped by the panel's refresh sources so every repo section refetches. */
+  readonly refreshToken: number;
   readonly renderFileDiffEntry: (fileDiff: FileDiffMetadata, repoRoot?: string) => ReactNode;
 }) {
   const preview = useEnvironmentQuery(
@@ -152,6 +171,7 @@ function BranchDiffRepoSection({
     }),
   );
   useRefreshOnReopen(preview.refresh, preview.data !== null);
+  useRefreshOnSignal(preview.refresh, refreshToken);
   const source = preview.data?.sources.find(
     (entry) => entry.kind === (scope === "unstaged" ? "working-tree" : "branch-range"),
   );
@@ -218,6 +238,7 @@ export default function DiffPanel({
     fileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
   }));
   const [codeViewRevision, setCodeViewRevision] = useState(0);
+  const [branchRepoRefreshToken, setBranchRepoRefreshToken] = useState(0);
   const codeViewRef = useRef<AnnotatableCodeViewHandle>(null);
   const lastCompletedTurnRefreshRef = useRef<{
     readonly threadKey: string | null;
@@ -239,7 +260,30 @@ export default function DiffPanel({
         }
       : null,
   );
-  const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
+  // Multi-repo workspaces run each repo in its own worktree under the thread's
+  // worktree container; `worktrees` maps each repo root to its worktree path.
+  // The single-cwd branch/working diff would only show one repo, so for these
+  // threads we fan a diff-preview out per repo (see BranchDiffRepoSection) and
+  // render every repo grouped, with a repo filter in the header.
+  const diffRepoTargets = useMemo(
+    () =>
+      resolveDiffRepoTargets({
+        threadWorktrees: activeThread?.worktrees ?? [],
+        repoRoots: activeProject?.repoRoots,
+      }),
+    [activeThread?.worktrees, activeProject?.repoRoots],
+  );
+  // Git commands need a repo, and a workspace-file project's `workspaceRoot` is
+  // just the directory holding the `.code-workspace` — usually not a repo, so
+  // probing it reported `isRepo: false` and hid the whole panel. Anchor on a
+  // repo root instead.
+  const activeProjectCwd = activeProject
+    ? resolveAnchorRepoRoot({
+        workspaceRoot: activeProject.workspaceRoot,
+        repoRoots: activeProject.repoRoots,
+      })
+    : undefined;
+  const activeCwd = activeThread?.worktreePath ?? activeProjectCwd;
   const activeRepositoryRoot = activeThread?.worktreePath
     ? undefined
     : activeProject?.repositoryIdentity?.rootPath;
@@ -266,7 +310,10 @@ export default function DiffPanel({
       initialGitScope === "unstaged",
     ),
   );
-  const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  const isGitRepo = resolveDiffPanelIsGitRepo({
+    diffRepoTargetCount: diffRepoTargets.length,
+    probedIsRepo: gitStatusQuery.data?.isRepo,
+  });
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
   const orderedTurnDiffSummaries = useMemo(
@@ -293,6 +340,7 @@ export default function DiffPanel({
   }, [diffSelection, orderedTurnDiffSummaries, routeThreadRef]);
 
   const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
+  const isMultiRepoBranchView = selectedTurnId === null && diffRepoTargets.length > 1;
   const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
   const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
   const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
@@ -350,8 +398,10 @@ export default function DiffPanel({
     },
     { enabled: isGitRepo && selectedTurn !== undefined },
   );
+  // The multi-repo view renders a diff-preview per repo, so the single-cwd
+  // preview below would only duplicate one of them over the wire.
   const primaryBranchDiffPreview = useEnvironmentQuery(
-    selectedTurnId === null && activeThread && activeCwd
+    selectedTurnId === null && !isMultiRepoBranchView && activeThread && activeCwd
       ? reviewEnvironment.diffPreview({
           environmentId: activeThread.environmentId,
           input: {
@@ -383,6 +433,12 @@ export default function DiffPanel({
     ? fallbackBranchDiffPreview
     : primaryBranchDiffPreview;
   const refreshBranchDiffPreview = branchDiffPreview.refresh;
+  // The multi-repo view's per-repo queries live in child components, so refresh
+  // reaches them through a token rather than a callback.
+  const refreshGitDiff = useCallback(() => {
+    refreshBranchDiffPreview();
+    setBranchRepoRefreshToken((current) => current + 1);
+  }, [refreshBranchDiffPreview]);
   const canRefreshGitDiff =
     isGitRepo && selectedTurnId === null && activeThread != null && activeCwd != null;
   const activeThreadRefreshKey = routeThreadRef
@@ -391,10 +447,10 @@ export default function DiffPanel({
 
   useEffect(() => {
     if (!canRefreshGitDiff) return;
-    const refreshOnFocus = () => refreshBranchDiffPreview();
+    const refreshOnFocus = () => refreshGitDiff();
     window.addEventListener("focus", refreshOnFocus);
     return () => window.removeEventListener("focus", refreshOnFocus);
-  }, [canRefreshGitDiff, refreshBranchDiffPreview]);
+  }, [canRefreshGitDiff, refreshGitDiff]);
 
   useEffect(() => {
     const current = {
@@ -410,9 +466,9 @@ export default function DiffPanel({
       return;
     }
     if (previous.turnId === current.turnId) return;
-    refreshBranchDiffPreview();
+    refreshGitDiff();
     lastCompletedTurnRefreshRef.current = current;
-  }, [activeThreadRefreshKey, canRefreshGitDiff, latestTurn?.turnId, refreshBranchDiffPreview]);
+  }, [activeThreadRefreshKey, canRefreshGitDiff, latestTurn?.turnId, refreshGitDiff]);
 
   // Refresh the active diff sources when the panel reopens so a stale cached
   // patch never lingers (see useRefreshOnReopen). Covers the single-repo branch/
@@ -426,36 +482,6 @@ export default function DiffPanel({
     (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
   );
 
-  // Multi-repo workspaces run each repo in its own worktree under the thread's
-  // worktree container; `worktrees` maps each repo root to its worktree path.
-  // The single-cwd branch/working diff would only show one repo, so for these
-  // threads we fan a diff-preview out per repo (see BranchDiffRepoSection) and
-  // render every repo grouped, with a repo filter in the header.
-  const threadWorktrees = useMemo(
-    () => (activeThread?.worktrees ?? []).filter((entry) => entry.worktreePath.length > 0),
-    [activeThread?.worktrees],
-  );
-  // The repo roots the branch/working diff fans out over, each paired with the
-  // cwd to diff it in. Isolated runs create one worktree per repo, so diff those.
-  // A non-isolated multi-repo `.code-workspace` has no worktrees and a container
-  // `workspaceRoot` that isn't itself a git repo — so diff each repo root
-  // directly (mirrors ChatView's per-repo git status). Without this the
-  // single-cwd diff below runs `git diff` in the container and reports "no
-  // changes" even when the repos have changes.
-  const diffRepoTargets = useMemo(() => {
-    if (threadWorktrees.length > 0) {
-      return threadWorktrees.map((entry) => ({
-        repoRoot: entry.repoRoot,
-        cwd: entry.worktreePath,
-      }));
-    }
-    const repoRoots = activeProject?.repoRoots ?? [];
-    if (repoRoots.length > 1) {
-      return repoRoots.map((repoRoot) => ({ repoRoot, cwd: repoRoot }));
-    }
-    return [];
-  }, [threadWorktrees, activeProject?.repoRoots]);
-  const isMultiRepoBranchView = selectedTurnId === null && diffRepoTargets.length > 1;
   // The diff reflects the thread's isolated worktree, not the user's own
   // checkout of the same repo. Showing the worktree path explains why on-disk
   // edits made elsewhere (e.g. a separate VS Code window) won't appear here.
@@ -1045,7 +1071,7 @@ export default function DiffPanel({
                   size="icon-sm"
                   variant="ghost"
                   aria-label={branchDiffPreview.isPending ? "Refreshing diff" : "Refresh diff"}
-                  onClick={refreshBranchDiffPreview}
+                  onClick={refreshGitDiff}
                 />
               }
             >
@@ -1185,6 +1211,7 @@ export default function DiffPanel({
                     scope={selectedGitScope}
                     ignoreWhitespace={diffIgnoreWhitespace}
                     resolvedTheme={resolvedTheme}
+                    refreshToken={branchRepoRefreshToken}
                     renderFileDiffEntry={renderFileDiffEntry}
                   />
                 ))}
