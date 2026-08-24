@@ -5,14 +5,17 @@ import Migration0037 from "./037_ProjectionTurnsKeysetIndex.ts";
 import Migration0038 from "./038_ProjectionThreadsPinOrderKey.ts";
 import Migration0039 from "./039_ProjectionProjectsDefaultThreadEnvMode.ts";
 import Migration0040 from "./040_ProjectionProjectFaviconPath.ts";
+import Migration0041 from "./041_AuthSessionClientConnection.ts";
+import Migration0042 from "./042_ProjectionThreadLinkedPullRequest.ts";
+import Migration0043 from "./043_ProjectionThreadsUnsettledAt.ts";
 
 /**
  * Heals databases that skipped main's migrations because a branch build claimed
  * their id slots first.
  *
- * The multi-repo workspace migrations have been renumbered twice, and each time
- * they vacated a range of ids that machines running the older branch build had
- * already recorded in `effect_sql_migrations`. The migrator only runs files
+ * The multi-repo workspace migrations have been renumbered four times, and each
+ * time they vacated a range of ids that machines running the older branch build
+ * had already recorded in `effect_sql_migrations`. The migrator only runs files
  * whose numeric id exceeds the highest recorded id and never compares names, so
  * main's real migrations in those slots never ran on those machines and never
  * will:
@@ -23,11 +26,19 @@ import Migration0040 from "./040_ProjectionProjectFaviconPath.ts";
  *   statement preparation and crash-loops the server before it serves a client.
  * - 037-040 (TurnsKeysetIndex/PinOrderKey/DefaultThreadEnvMode/FaviconPath) were
  *   skipped on machines that ran the build numbering multi-repo 037-040, which
- *   is every machine that ran the branch between the two rebases.
+ *   is every machine that ran the branch between the first two rebases.
+ * - 041 (AuthSessionClientConnection) was skipped on machines that ran the build
+ *   numbering multi-repo 041-045. `auth_sessions` ends up missing
+ *   `client_surface` and `client_app_version`, which the connection handler
+ *   writes on every WebSocket connect.
+ * - 042-043 (ThreadLinkedPullRequest/ThreadsUnsettledAt) were skipped on machines
+ *   that ran the build numbering multi-repo 042-046. `projection_threads` ends
+ *   up missing `linked_pull_request_json` and `unsettled_at`, which the
+ *   snapshot query selects on every read.
  *
  * Healing 033-036 means adding their columns: each is a nullable TEXT
- * `ADD COLUMN` with no index or backfill. Healing 037-040 just re-runs them --
- * all four already guard on a `PRAGMA table_info` check or `IF NOT EXISTS`, so
+ * `ADD COLUMN` with no index or backfill. Healing 037-043 just re-runs them --
+ * all seven already guard on a `PRAGMA table_info` check or `IF NOT EXISTS`, so
  * running them a second time is defined behavior. Healthy databases have
  * everything already and this whole migration is a no-op.
  *
@@ -85,11 +96,14 @@ export default Effect.gen(function* () {
     ).pipe(Effect.annotateLogs({ columns: healed }));
   }
 
-  // 037-040. Each is already idempotent, so re-running is the whole heal: it
+  // 037-043. Each is already idempotent, so re-running is the whole heal: it
   // restores them on databases that recorded those ids under the multi-repo
   // names, and does nothing on databases that ran them for real.
   yield* Migration0037;
   yield* Migration0038;
   yield* Migration0039;
   yield* Migration0040;
+  yield* Migration0041;
+  yield* Migration0042;
+  yield* Migration0043;
 });
