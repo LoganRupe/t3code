@@ -31,6 +31,14 @@ const projectColumns = Effect.gen(function* () {
   return new Set(columns.map((column) => column.name));
 });
 
+const authSessionColumns = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const columns = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(auth_sessions)
+  `;
+  return new Set(columns.map((column) => column.name));
+});
+
 const turnIndexes = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const indexes = yield* sql<{ readonly name: string }>`
@@ -125,6 +133,82 @@ describe("048_HealSkippedRenumberedMigrations", () => {
           (yield* turnIndexes).has("idx_projection_turns_thread_keyset"),
           "expected the turns keyset index restored",
         );
+      }),
+    ),
+  );
+
+  it.effect("restores schema on a database that skipped migration 041", () =>
+    withDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+
+        // The third renumbering: machines that ran the branch before this
+        // rebase recorded 41-45 under the multi-repo names, so main's real
+        // 041_AuthSessionClientConnection was skipped.
+        yield* runMigrations({ toMigrationInclusive: 40 });
+        yield* sql`
+          INSERT INTO effect_sql_migrations (migration_id, name) VALUES
+            (41, 'ProjectionProjectsRepoRoots'),
+            (42, 'ProjectionProjectsWorkspaceFile'),
+            (43, 'ProjectionCheckpointRefs'),
+            (44, 'ProjectionThreadsWorktrees'),
+            (45, 'HealSkippedRenumberedMigrations')
+        `;
+
+        const beforeHeal = yield* authSessionColumns;
+        assert.ok(
+          !beforeHeal.has("client_surface"),
+          "expected client_surface to be missing before healing",
+        );
+        assert.ok(
+          !beforeHeal.has("client_app_version"),
+          "expected client_app_version to be missing before healing",
+        );
+
+        yield* runMigrations({ toMigrationInclusive: 48 });
+        const afterHeal = yield* authSessionColumns;
+        assert.ok(afterHeal.has("client_surface"), "expected client_surface restored");
+        assert.ok(afterHeal.has("client_app_version"), "expected client_app_version restored");
+      }),
+    ),
+  );
+
+  it.effect("restores schema on a database that skipped migrations 042-043", () =>
+    withDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+
+        // The fourth renumbering: machines that ran the branch before this
+        // rebase recorded 42-46 under the multi-repo names, so main's real
+        // 042_ProjectionThreadLinkedPullRequest and 043_ProjectionThreadsUnsettledAt
+        // were skipped.
+        yield* runMigrations({ toMigrationInclusive: 41 });
+        yield* sql`
+          INSERT INTO effect_sql_migrations (migration_id, name) VALUES
+            (42, 'ProjectionProjectsWorkspaceFile'),
+            (43, 'ProjectionCheckpointRefs'),
+            (44, 'ProjectionThreadsWorktrees'),
+            (45, 'HealSkippedRenumberedMigrations'),
+            (46, 'HealSkippedRenumberedMigrations')
+        `;
+
+        const beforeHeal = yield* threadColumns;
+        assert.ok(
+          !beforeHeal.has("linked_pull_request_json"),
+          "expected linked_pull_request_json to be missing before healing",
+        );
+        assert.ok(
+          !beforeHeal.has("unsettled_at"),
+          "expected unsettled_at to be missing before healing",
+        );
+
+        yield* runMigrations({ toMigrationInclusive: 48 });
+        const afterHeal = yield* threadColumns;
+        assert.ok(
+          afterHeal.has("linked_pull_request_json"),
+          "expected linked_pull_request_json restored",
+        );
+        assert.ok(afterHeal.has("unsettled_at"), "expected unsettled_at restored");
       }),
     ),
   );
