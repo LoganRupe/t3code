@@ -1,14 +1,20 @@
 import { useAtomValue } from "@effect/atom-react";
 
-import type { EnvironmentId, ReviewDiffPreviewSource, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { appAtomRegistry } from "../../state/atom-registry";
-import { buildReviewParsedDiff, type ReviewParsedDiff } from "./reviewModel";
+import {
+  buildReviewParsedDiff,
+  type ReviewDiffGroup,
+  type ReviewGitPreview,
+  type ReviewParsedDiff,
+  type ReviewTurnDiff,
+} from "./reviewModel";
 
-const EMPTY_GIT_REVIEW_SECTIONS = Object.freeze<ReadonlyArray<ReviewDiffPreviewSource>>([]);
-const EMPTY_REVIEW_TURN_DIFFS = Object.freeze<Readonly<Record<string, string>>>({});
+const EMPTY_GIT_REVIEW_PREVIEWS = Object.freeze<ReadonlyArray<ReviewGitPreview>>([]);
+const EMPTY_REVIEW_TURN_DIFFS = Object.freeze<Readonly<Record<string, ReviewTurnDiff>>>({});
 const EMPTY_REVIEW_LOADING_TURN_IDS = Object.freeze<Readonly<Record<string, boolean>>>({});
 const EMPTY_REVIEW_ASYNC_STATE = Object.freeze<ReviewAsyncState>({
   loadingTurnIds: EMPTY_REVIEW_LOADING_TURN_IDS,
@@ -17,9 +23,9 @@ const EMPTY_REVIEW_ASYNC_STATE = Object.freeze<ReviewAsyncState>({
 const EMPTY_REVIEW_SECTION_FILE_IDS = Object.freeze<
   Readonly<Record<string, ReadonlyArray<string> | undefined>>
 >({});
-const EMPTY_REVIEW_GIT_SECTIONS_ATOM = Atom.make(EMPTY_GIT_REVIEW_SECTIONS).pipe(
+const EMPTY_REVIEW_GIT_PREVIEWS_ATOM = Atom.make(EMPTY_GIT_REVIEW_PREVIEWS).pipe(
   Atom.keepAlive,
-  Atom.withLabel("mobile:review:git-sections:null"),
+  Atom.withLabel("mobile:review:git-previews:null"),
 );
 const EMPTY_REVIEW_TURN_DIFFS_ATOM = Atom.make(EMPTY_REVIEW_TURN_DIFFS).pipe(
   Atom.keepAlive,
@@ -38,10 +44,10 @@ const EMPTY_REVIEW_SECTION_FILE_IDS_ATOM = Atom.make(EMPTY_REVIEW_SECTION_FILE_I
   Atom.withLabel("mobile:review:section-file-ids:null"),
 );
 
-const reviewGitSectionsByThreadKeyAtom = Atom.family((threadKey: string) =>
-  Atom.make(EMPTY_GIT_REVIEW_SECTIONS).pipe(
+const reviewGitPreviewsByThreadKeyAtom = Atom.family((threadKey: string) =>
+  Atom.make(EMPTY_GIT_REVIEW_PREVIEWS).pipe(
     Atom.keepAlive,
-    Atom.withLabel(`mobile:review:git-sections:${threadKey}`),
+    Atom.withLabel(`mobile:review:git-previews:${threadKey}`),
   ),
 );
 
@@ -88,16 +94,17 @@ const reviewViewedFileIdsByThreadKeyAtom = Atom.family((threadKey: string) =>
 );
 
 const reviewParsedDiffBySectionCacheKeyAtom = Atom.family((cacheKey: string) =>
-  Atom.make<{ readonly diff: string | null; readonly parsed: ReviewParsedDiff } | null>(null).pipe(
-    Atom.keepAlive,
-    Atom.withLabel(`mobile:review:parsed-diffs:${cacheKey}`),
-  ),
+  Atom.make<{
+    readonly diff: string | null;
+    readonly groupKey: string | null;
+    readonly parsed: ReviewParsedDiff;
+  } | null>(null).pipe(Atom.keepAlive, Atom.withLabel(`mobile:review:parsed-diffs:${cacheKey}`)),
 );
 
 export interface ReviewCacheForThread {
   readonly threadKey: string | null;
-  readonly gitSections: ReadonlyArray<ReviewDiffPreviewSource>;
-  readonly turnDiffById: Readonly<Record<string, string>>;
+  readonly gitPreviews: ReadonlyArray<ReviewGitPreview>;
+  readonly turnDiffById: Readonly<Record<string, ReviewTurnDiff>>;
   readonly selectedSectionId: string | null;
   readonly asyncState: ReviewAsyncState;
   readonly expandedFileIdsBySection: Readonly<Record<string, ReadonlyArray<string> | undefined>>;
@@ -130,8 +137,8 @@ export function useReviewCacheForThread(input: {
   readonly threadId?: ThreadId;
 }): ReviewCacheForThread {
   const threadKey = buildThreadKey(input);
-  const gitSections = useAtomValue(
-    threadKey ? reviewGitSectionsByThreadKeyAtom(threadKey) : EMPTY_REVIEW_GIT_SECTIONS_ATOM,
+  const gitPreviews = useAtomValue(
+    threadKey ? reviewGitPreviewsByThreadKeyAtom(threadKey) : EMPTY_REVIEW_GIT_PREVIEWS_ATOM,
   );
   const turnDiffById = useAtomValue(
     threadKey ? reviewTurnDiffByThreadKeyAtom(threadKey) : EMPTY_REVIEW_TURN_DIFFS_ATOM,
@@ -160,7 +167,7 @@ export function useReviewCacheForThread(input: {
 
   return {
     threadKey,
-    gitSections,
+    gitPreviews,
     turnDiffById,
     selectedSectionId,
     asyncState,
@@ -170,14 +177,18 @@ export function useReviewCacheForThread(input: {
   };
 }
 
-export function setReviewGitSections(
+export function setReviewGitPreviews(
   threadKey: string,
-  sections: ReadonlyArray<ReviewDiffPreviewSource>,
+  previews: ReadonlyArray<ReviewGitPreview>,
 ): void {
-  appAtomRegistry.set(reviewGitSectionsByThreadKeyAtom(threadKey), sections);
+  appAtomRegistry.set(reviewGitPreviewsByThreadKeyAtom(threadKey), previews);
 }
 
-export function setReviewTurnDiff(threadKey: string, sectionId: string, diff: string): void {
+export function setReviewTurnDiff(
+  threadKey: string,
+  sectionId: string,
+  diff: ReviewTurnDiff,
+): void {
   const atom = reviewTurnDiffByThreadKeyAtom(threadKey);
   const current = appAtomRegistry.get(atom);
   appAtomRegistry.set(atom, {
@@ -274,22 +285,29 @@ export function getCachedReviewParsedDiff(input: {
   readonly threadKey: string | null;
   readonly sectionId: string | null;
   readonly diff: string | null | undefined;
+  readonly groups?: ReadonlyArray<ReviewDiffGroup> | null | undefined;
 }): ReviewParsedDiff {
+  const groups = input.groups ?? null;
   if (!input.threadKey || !input.sectionId) {
-    return buildReviewParsedDiff(input.diff, input.sectionId ?? "mobile-review");
+    return buildReviewParsedDiff(input.diff, input.sectionId ?? "mobile-review", groups);
   }
 
   const cacheKey = buildSectionCacheKey(input.threadKey, input.sectionId);
   const normalizedDiff = input.diff?.trim() ?? null;
+  // The flat diff alone is not a safe key: a multi-repo diff whose other repos
+  // are clean trims to the same text as its one dirty repo's diff, but parses
+  // to labelled files.
+  const groupKey = groups?.map((group) => group.repoRoot).join("\n") ?? null;
   const atom = reviewParsedDiffBySectionCacheKeyAtom(cacheKey);
   const cached = appAtomRegistry.get(atom);
-  if (cached && cached.diff === normalizedDiff) {
+  if (cached && cached.diff === normalizedDiff && cached.groupKey === groupKey) {
     return cached.parsed;
   }
 
-  const parsed = buildReviewParsedDiff(input.diff, input.sectionId);
+  const parsed = buildReviewParsedDiff(input.diff, input.sectionId, groups);
   appAtomRegistry.set(atom, {
     diff: normalizedDiff,
+    groupKey,
     parsed,
   });
   return parsed;

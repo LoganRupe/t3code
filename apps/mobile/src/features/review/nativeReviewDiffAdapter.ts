@@ -382,6 +382,17 @@ function mapLineRow(
   };
 }
 
+/**
+ * The path the native list shows and review comments quote. The list has no
+ * repo header row, so files of a multi-repo diff carry their repo folder as a
+ * prefix instead; that same prefixed path names the file unambiguously in a
+ * comment the agent reads across several repos. `file.path` itself stays
+ * repo-relative for language detection.
+ */
+function displayFilePath(file: ReviewRenderableFile): string {
+  return file.repoLabel === null ? file.path : `${file.repoLabel}/${file.path}`;
+}
+
 function mapFileRows(
   file: ReviewRenderableFile,
   comments: ReadonlyArray<ReviewInlineComment>,
@@ -393,7 +404,7 @@ function mapFileRows(
       kind: "file",
       id: `${file.id}:header`,
       fileId: file.id,
-      filePath: file.path,
+      filePath: displayFilePath(file),
       previousPath: file.previousPath,
       changeType: mapChangeType(file),
       additions: file.additions,
@@ -403,8 +414,9 @@ function mapFileRows(
 
   const lineRows = file.rows.filter((row): row is ReviewRenderableLineRow => row.kind === "line");
   const commentsByEndIndex = new Map<number, ReviewInlineComment[]>();
+  const commentFilePath = displayFilePath(file);
   comments.forEach((comment) => {
-    if (comment.filePath !== file.path) {
+    if (comment.filePath !== commentFilePath) {
       return;
     }
     const endIndex = Math.min(comment.endIndex, lineRows.length - 1);
@@ -434,7 +446,7 @@ function mapFileRows(
     rows.push(nativeRow);
     rowIdByCommentLineId.set(row.id, nativeRow.id);
     commentTargetsByRowId.set(nativeRow.id, {
-      filePath: file.path,
+      filePath: commentFilePath,
       lines: lineRows,
       lineIndex,
     });
@@ -444,7 +456,7 @@ function mapFileRows(
         kind: "comment",
         id: comment.id,
         fileId: file.id,
-        filePath: file.path,
+        filePath: commentFilePath,
         commentText: comment.text,
         commentRangeLabel: comment.rangeLabel,
         commentSectionTitle: comment.sectionTitle,
@@ -479,7 +491,7 @@ export function buildNativeReviewDiffData(
 
   const files = parsedDiff.files.map<NativeReviewDiffFile>((file) => ({
     id: file.id,
-    path: file.path,
+    path: displayFilePath(file),
     language: getLanguageForPath(file.path, file.languageHint),
     additions: file.additions,
     deletions: file.deletions,

@@ -11,12 +11,37 @@ const DIRTY_WORKTREE_SECTION_ID = "git:working-tree";
 const DIRTY_WORKTREE_TITLE = "Dirty worktree";
 const DIRTY_WORKTREE_SUBTITLE = "Tracked, staged, and untracked worktree changes";
 
+/**
+ * One repo's slice of a multi-repo diff. Shape matches the server's turn diff
+ * `groups[]`; git previews are folded into the same shape per fan-out target.
+ */
+export interface ReviewDiffGroup {
+  readonly repoRoot: string;
+  /** Repo folder name, the label files carry in the review list. */
+  readonly displayName: string;
+  readonly diff: string;
+}
+
+/** A git diff preview for one cwd; `repoRoot` is null for a single-repo thread's single-cwd diff. */
+export interface ReviewGitPreview {
+  readonly repoRoot: string | null;
+  readonly sources: ReadonlyArray<ReviewDiffPreviewSource>;
+}
+
+export interface ReviewTurnDiff {
+  readonly diff: string;
+  /** Per-repo slices of `diff`; null unless the thread spans more than one repo. */
+  readonly groups: ReadonlyArray<ReviewDiffGroup> | null;
+}
+
 export interface ReviewSectionItem {
   readonly id: string;
   readonly kind: ReviewSectionKind;
   readonly title: string;
   readonly subtitle: string | null;
   readonly diff: string | null;
+  /** Per-repo slices of `diff`; null unless the thread spans more than one repo. */
+  readonly groups: ReadonlyArray<ReviewDiffGroup> | null;
   readonly isLoading: boolean;
 }
 
@@ -53,6 +78,8 @@ export interface ReviewRenderableFile {
   readonly additions: number;
   readonly deletions: number;
   readonly languageHint: string | null;
+  /** Repo folder name for files of a multi-repo diff; null when the thread has one repo. */
+  readonly repoLabel: string | null;
   readonly additionLines: ReadonlyArray<string>;
   readonly deletionLines: ReadonlyArray<string>;
   readonly rows: ReadonlyArray<ReviewRenderableRow>;
@@ -163,6 +190,33 @@ function gitSubtitle(section: ReviewDiffPreviewSource): string | null {
     return `${section.baseRef} ... ${section.headRef ?? "HEAD"}`;
   }
   return "Base branch unavailable";
+}
+
+/** Last path segment of a repo root, the label a repo gets in a multi-repo diff. */
+export function repoRootDisplayName(repoRoot: string): string {
+  const trimmed = repoRoot.replace(/[/\\]+$/, "");
+  const separatorIndex = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  const name = separatorIndex >= 0 ? trimmed.slice(separatorIndex + 1) : trimmed;
+  return name.length > 0 ? name : repoRoot;
+}
+
+/** The flat patch behind a grouped diff, the same concatenation the server uses. */
+function joinGroupDiffs(groups: ReadonlyArray<ReviewDiffGroup>): string {
+  return groups.map((group) => group.diff).join("\n");
+}
+
+/**
+ * Server turn diffs always carry `groups`, one per repo root. Only a thread that
+ * spans several repos needs the per-repo split; a single group is the flat diff.
+ */
+export function toReviewTurnDiff(result: {
+  readonly diff: string;
+  readonly groups?: ReadonlyArray<ReviewDiffGroup> | undefined;
+}): ReviewTurnDiff {
+  return {
+    diff: result.diff,
+    groups: result.groups !== undefined && result.groups.length > 1 ? result.groups : null,
+  };
 }
 
 function stripGitPrefix(pathValue: string | undefined): string | null {
@@ -487,7 +541,7 @@ function buildRenderableRows(file: FileDiffMetadata): ReadonlyArray<ReviewRender
   return rows;
 }
 
-function mapRenderableFile(file: FileDiffMetadata): ReviewRenderableFile {
+function mapRenderableFile(file: FileDiffMetadata, repoLabel: string | null): ReviewRenderableFile {
   const path = stripGitPrefix(file.name) ?? stripGitPrefix(file.prevName) ?? file.name;
   const previousPath = stripGitPrefix(file.prevName);
   const additions = file.hunks.reduce((total, hunk) => total + hunk.additionLines, 0);
@@ -503,10 +557,27 @@ function mapRenderableFile(file: FileDiffMetadata): ReviewRenderableFile {
     additions,
     deletions,
     languageHint: file.lang ?? null,
+    repoLabel,
     additionLines: file.additionLines,
     deletionLines: file.deletionLines,
     rows: buildRenderableRows(file),
   };
+}
+
+/** Parses one unified patch into renderable files. Throws on malformed input. */
+function parseRenderableFiles(
+  text: string,
+  cacheScope: string,
+  repoLabel: string | null,
+): ReadonlyArray<ReviewRenderableFile> {
+  const parsedPatches = runDiffParserSilently(() =>
+    parsePatchFiles(text, buildPatchCacheKey(text, cacheScope)),
+  );
+  return pipe(
+    parsedPatches,
+    Arr.flatMap((patch) => patch.files),
+    Arr.map((file) => mapRenderableFile(file, repoLabel)),
+  );
 }
 
 export function getReviewSectionIdForCheckpoint(
@@ -525,35 +596,78 @@ export function getReadyReviewCheckpoints(
   );
 }
 
+/**
+ * Folds one git preview per repo into one section per source kind. A
+ * single-repo thread has one preview with no repo root and keeps the flat
+ * source; a multi-repo thread's previews become the section's `groups`, so
+ * every repo's changes list under the one Working tree / Branch entry.
+ */
+function buildGitSectionItems(
+  previews: ReadonlyArray<ReviewGitPreview>,
+): ReadonlyArray<ReviewSectionItem> {
+  const kinds = Array.from(
+    new Set(previews.flatMap((preview) => preview.sources.map((source) => source.kind))),
+  );
+  return kinds.flatMap<ReviewSectionItem>((kind) => {
+    const slices = previews.flatMap((preview) => {
+      const source = preview.sources.find((candidate) => candidate.kind === kind);
+      return source ? [{ repoRoot: preview.repoRoot, source }] : [];
+    });
+    const first = slices[0];
+    if (!first) {
+      return [];
+    }
+    const groups = slices.flatMap((slice) =>
+      slice.repoRoot === null
+        ? []
+        : [
+            {
+              repoRoot: slice.repoRoot,
+              displayName: repoRootDisplayName(slice.repoRoot),
+              diff: slice.source.diff,
+            },
+          ],
+    );
+    const subtitles = new Set(slices.map((slice) => gitSubtitle(slice.source)));
+    return [
+      {
+        id: `git:${kind}`,
+        kind,
+        title: first.source.title,
+        subtitle:
+          subtitles.size === 1 ? gitSubtitle(first.source) : `${slices.length} repositories`,
+        diff: groups.length > 0 ? joinGroupDiffs(groups) : first.source.diff,
+        groups: groups.length > 0 ? groups : null,
+        isLoading: false,
+      },
+    ];
+  });
+}
+
 export function buildReviewSectionItems(input: {
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
-  readonly gitSections: ReadonlyArray<ReviewDiffPreviewSource>;
-  readonly turnDiffById: Readonly<Record<string, string | undefined>>;
+  readonly gitPreviews: ReadonlyArray<ReviewGitPreview>;
+  readonly turnDiffById: Readonly<Record<string, ReviewTurnDiff | undefined>>;
   readonly loadingTurnIds: Readonly<Record<string, boolean | undefined>>;
   readonly loadingGitSections: boolean;
 }): ReadonlyArray<ReviewSectionItem> {
   const turnItems = getReadyReviewCheckpoints(input.checkpoints).map<ReviewSectionItem>(
     (checkpoint) => {
       const id = getReviewSectionIdForCheckpoint(checkpoint);
+      const turnDiff = input.turnDiffById[id];
       return {
         id,
         kind: "turn",
         title: checkpointTitle(checkpoint),
         subtitle: checkpointSubtitle(checkpoint),
-        diff: input.turnDiffById[id] ?? null,
+        diff: turnDiff?.diff ?? null,
+        groups: turnDiff?.groups ?? null,
         isLoading: input.loadingTurnIds[id] === true,
       };
     },
   );
 
-  const gitItems = input.gitSections.map<ReviewSectionItem>((section) => ({
-    id: `git:${section.kind}`,
-    kind: section.kind,
-    title: section.title,
-    subtitle: gitSubtitle(section),
-    diff: section.diff,
-    isLoading: false,
-  }));
+  const gitItems = buildGitSectionItems(input.gitPreviews);
   const hasDirtyWorktreeItem = gitItems.some((item) => item.id === DIRTY_WORKTREE_SECTION_ID);
   const visibleGitItems =
     input.loadingGitSections && !hasDirtyWorktreeItem
@@ -564,6 +678,7 @@ export function buildReviewSectionItems(input: {
             title: DIRTY_WORKTREE_TITLE,
             subtitle: DIRTY_WORKTREE_SUBTITLE,
             diff: null,
+            groups: null,
             isLoading: true,
           } satisfies ReviewSectionItem,
           ...gitItems,
@@ -579,9 +694,16 @@ export function getDefaultReviewSectionId(
   return sections[0]?.id ?? null;
 }
 
+/**
+ * Parses a section's diff for rendering. With `groups` (a multi-repo thread),
+ * each repo's patch is parsed on its own so files come out in repo order and
+ * carry their repo label; the flat `diff` still drives emptiness, truncation
+ * and the raw fallback.
+ */
 export function buildReviewParsedDiff(
   diff: string | null | undefined,
   cacheScope: string,
+  groups: ReadonlyArray<ReviewDiffGroup> | null = null,
 ): ReviewParsedDiff {
   const normalized = diff?.trim();
   if (!normalized) {
@@ -598,14 +720,19 @@ export function buildReviewParsedDiff(
     : null;
 
   try {
-    const parsedPatches = runDiffParserSilently(() =>
-      parsePatchFiles(text, buildPatchCacheKey(text, cacheScope)),
-    );
-    const files = pipe(
-      parsedPatches,
-      Arr.flatMap((patch) => patch.files),
-      Arr.map(mapRenderableFile),
-    );
+    const files =
+      groups !== null && groups.length > 0
+        ? groups.flatMap((group) => {
+            const groupText = splitTruncationMarker(group.diff.trim()).text;
+            return groupText.length === 0
+              ? []
+              : parseRenderableFiles(
+                  groupText,
+                  `${cacheScope}:${group.repoRoot}`,
+                  group.displayName,
+                );
+          })
+        : parseRenderableFiles(text, cacheScope, null);
 
     if (files.length === 0) {
       return {

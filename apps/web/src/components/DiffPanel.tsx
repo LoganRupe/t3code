@@ -8,9 +8,10 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import { resolveDiffRepoTargets } from "@t3tools/client-runtime/state/review";
 import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
 import { resolveAnchorRepoRoot } from "@t3tools/shared/git";
-import { resolveDiffPanelIsGitRepo, resolveDiffRepoTargets } from "./DiffPanel.logic";
+import { resolveDiffPanelIsGitRepo } from "./DiffPanel.logic";
 import {
   ArrowRightIcon,
   CheckIcon,
@@ -269,9 +270,10 @@ export default function DiffPanel({
     () =>
       resolveDiffRepoTargets({
         threadWorktrees: activeThread?.worktrees ?? [],
+        threadWorktreePath: activeThread?.worktreePath,
         repoRoots: activeProject?.repoRoots,
       }),
-    [activeThread?.worktrees, activeProject?.repoRoots],
+    [activeThread?.worktrees, activeThread?.worktreePath, activeProject?.repoRoots],
   );
   // Git commands need a repo, and a workspace-file project's `workspaceRoot` is
   // just the directory holding the `.code-workspace` — usually not a repo, so
