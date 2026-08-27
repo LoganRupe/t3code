@@ -52,6 +52,11 @@ export function mergeEnvironmentThread(
     interactionMode: shell.interactionMode,
     branch: shell.branch,
     worktreePath: shell.worktreePath,
+    // `thread.meta-updated` never reaches the detail subscription (see
+    // isThreadDetailEvent), so the per-root worktree map is only current on
+    // the shell. Without this a multi-repo thread keeps the empty map from its
+    // first snapshot and diffs the user's checkouts instead of its worktrees.
+    worktrees: shell.worktrees,
     latestTurn: shell.latestTurn,
     createdAt: shell.createdAt,
     updatedAt: shell.updatedAt,

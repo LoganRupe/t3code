@@ -216,12 +216,19 @@ describe("environment entity projections", () => {
       worktreePath: "/repo/stale-worktree",
       activeOrderKey: "t",
       unsettledAt: "2026-03-09T10:00:00.000Z",
+      // A thread's first detail snapshot predates worktree provisioning, and
+      // the detail stream never carries the meta update that fills it in.
+      worktrees: [],
       deletedAt: null,
       messages,
       proposedPlans: [],
       activities: [],
       checkpoints: [],
     } satisfies OrchestrationThread & { readonly environmentId: EnvironmentId };
+    const worktrees = [
+      { repoRoot: "/repo", worktreePath: "/repo/current-worktree" },
+      { repoRoot: "/other-repo", worktreePath: "/other-repo/current-worktree" },
+    ];
     const shell = {
       ...THREAD_SHELL,
       environmentId: ENVIRONMENT_ID,
@@ -230,6 +237,7 @@ describe("environment entity projections", () => {
       worktreePath: "/repo/current-worktree",
       activeOrderKey: "f",
       unsettledAt: "2026-03-09T12:00:00.000Z",
+      worktrees,
     };
 
     const merged = mergeEnvironmentThread(detail, shell);
@@ -241,6 +249,7 @@ describe("environment entity projections", () => {
       activeOrderKey: "f",
       unsettledAt: "2026-03-09T12:00:00.000Z",
     });
+    expect(merged?.worktrees).toBe(worktrees);
     expect(merged?.messages).toBe(messages);
   });
 
