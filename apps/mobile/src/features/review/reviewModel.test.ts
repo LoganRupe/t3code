@@ -13,6 +13,7 @@ import {
   getDefaultReviewSectionId,
   getReviewFilePreviewState,
   getReviewSectionIdForCheckpoint,
+  toReviewTurnDiff,
   type ReviewRenderableFile,
 } from "./reviewModel";
 
@@ -40,6 +41,7 @@ function makeRenderableFile(
     additions: 0,
     deletions: 0,
     languageHint: null,
+    repoLabel: null,
     additionLines: [],
     deletionLines: [],
     rows: [],
@@ -87,9 +89,9 @@ describe("buildReviewSectionItems", () => {
     const loadedTurnId = getReviewSectionIdForCheckpoint(checkpoints[0]);
     const items = buildReviewSectionItems({
       checkpoints,
-      gitSections,
+      gitPreviews: [{ repoRoot: null, sources: gitSections }],
       turnDiffById: {
-        [loadedTurnId]: "diff --git a/loaded.ts b/loaded.ts",
+        [loadedTurnId]: { diff: "diff --git a/loaded.ts b/loaded.ts", groups: null },
       },
       loadingTurnIds: {
         [getReviewSectionIdForCheckpoint(checkpoints[1])]: true,
@@ -108,13 +110,84 @@ describe("buildReviewSectionItems", () => {
       isLoading: false,
       diff: expect.stringContaining("loaded.ts"),
     });
+    expect(items[2]).toMatchObject({
+      title: "Dirty worktree",
+      subtitle: "Tracked, staged, and untracked worktree changes",
+      diff: "diff --git a/a.ts b/a.ts",
+      groups: null,
+    });
+    expect(items[3]).toMatchObject({ subtitle: "main ... feature", groups: null });
     expect(getDefaultReviewSectionId(items)).toBe("turn:2");
+  });
+
+  it("folds one preview per repo into grouped git sections", () => {
+    const source = (
+      kind: ReviewDiffPreviewSource["kind"],
+      diff: string,
+      baseRef: string | null,
+    ): ReviewDiffPreviewSource => ({
+      id: kind,
+      kind,
+      title: kind === "working-tree" ? "Dirty worktree" : "Against main",
+      baseRef,
+      headRef: kind === "working-tree" ? null : "feature",
+      diff,
+      diffHash: `${kind}:${diff}`,
+      truncated: false,
+    });
+
+    const items = buildReviewSectionItems({
+      checkpoints: [],
+      gitPreviews: [
+        {
+          repoRoot: "/repos/workspace/api",
+          sources: [
+            source("working-tree", "", "HEAD"),
+            source("branch-range", "api-branch", "main"),
+          ],
+        },
+        {
+          repoRoot: "/repos/workspace/web/",
+          sources: [
+            source("working-tree", "web-dirty", "HEAD"),
+            source("branch-range", "web-branch", null),
+          ],
+        },
+      ],
+      turnDiffById: {},
+      loadingTurnIds: {},
+      loadingGitSections: false,
+    });
+
+    expect(items.map((item) => item.id)).toEqual(["git:working-tree", "git:branch-range"]);
+    expect(items[0]).toMatchObject({
+      diff: "\nweb-dirty",
+      groups: [
+        { repoRoot: "/repos/workspace/api", displayName: "api", diff: "" },
+        { repoRoot: "/repos/workspace/web/", displayName: "web", diff: "web-dirty" },
+      ],
+    });
+    expect(items[1]).toMatchObject({
+      subtitle: "2 repositories",
+      diff: "api-branch\nweb-branch",
+    });
+  });
+
+  it("carries turn diff groups only for multi-repo threads", () => {
+    const api = { repoRoot: "/repos/api", displayName: "api", diff: "a" };
+    const web = { repoRoot: "/repos/web", displayName: "web", diff: "b" };
+    expect(toReviewTurnDiff({ diff: "a", groups: [api] })).toEqual({ diff: "a", groups: null });
+    expect(toReviewTurnDiff({ diff: "a" })).toEqual({ diff: "a", groups: null });
+    expect(toReviewTurnDiff({ diff: "a\nb", groups: [api, web] })).toEqual({
+      diff: "a\nb",
+      groups: [api, web],
+    });
   });
 
   it("shows dirty worktree while git preview is loading", () => {
     const items = buildReviewSectionItems({
       checkpoints: [],
-      gitSections: [],
+      gitPreviews: [],
       turnDiffById: {},
       loadingTurnIds: {},
       loadingGitSections: true,
@@ -135,6 +208,47 @@ describe("buildReviewSectionItems", () => {
 });
 
 describe("buildReviewParsedDiff", () => {
+  it("labels files by repo when parsing a grouped diff", () => {
+    const patch = (path: string) =>
+      [
+        `diff --git a/${path} b/${path}`,
+        "index 1111111..2222222 100644",
+        `--- a/${path}`,
+        `+++ b/${path}`,
+        "@@ -1,1 +1,1 @@",
+        "-const before = 1;",
+        "+const after = 2;",
+      ].join("\n");
+    const groups = [
+      { repoRoot: "/repos/api", displayName: "api", diff: patch("src/server.ts") },
+      { repoRoot: "/repos/web", displayName: "web", diff: "" },
+      { repoRoot: "/repos/docs", displayName: "docs", diff: patch("README.md") },
+    ];
+
+    const parsed = buildReviewParsedDiff(
+      groups.map((group) => group.diff).join("\n"),
+      "unit",
+      groups,
+    );
+
+    expect(parsed.kind).toBe("files");
+    if (parsed.kind !== "files") {
+      return;
+    }
+    expect(parsed.files.map((file) => [file.repoLabel, file.path])).toEqual([
+      ["api", "src/server.ts"],
+      ["docs", "README.md"],
+    ]);
+    expect(new Set(parsed.files.map((file) => file.id)).size).toBe(2);
+    expect(parsed.additions).toBe(2);
+    expect(parsed.deletions).toBe(2);
+
+    const single = buildReviewParsedDiff(patch("src/server.ts"), "unit", [groups[0]!]);
+    expect(single.kind === "files" && single.files[0]?.repoLabel).toBe("api");
+    const flat = buildReviewParsedDiff(patch("src/server.ts"), "unit", null);
+    expect(flat.kind === "files" && flat.files[0]?.repoLabel).toBeNull();
+  });
+
   it("builds renderable rows from a unified patch", () => {
     const parsed = buildReviewParsedDiff(
       [

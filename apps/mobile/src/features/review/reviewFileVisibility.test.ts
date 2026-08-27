@@ -18,6 +18,7 @@ function makeFile(id: string): ReviewRenderableFile {
     additions: 0,
     deletions: 0,
     languageHint: null,
+    repoLabel: null,
     additionLines: [],
     deletionLines: [],
     rows: [],

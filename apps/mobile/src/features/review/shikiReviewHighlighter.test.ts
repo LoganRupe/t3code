@@ -1,11 +1,30 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import type { ReviewRenderableLineRow } from "./reviewModel";
+import type { ReviewRenderableFile, ReviewRenderableLineRow } from "./reviewModel";
 import {
   highlightCodeSnippet,
   highlightReviewSelectedLines,
   highlightSourceFile,
 } from "./shikiReviewHighlighter";
+
+function makeRenderableFile(
+  input: Partial<ReviewRenderableFile> & Pick<ReviewRenderableFile, "path">,
+): ReviewRenderableFile {
+  return {
+    id: input.path,
+    cacheKey: input.path,
+    previousPath: null,
+    changeType: "new",
+    additions: 0,
+    deletions: 0,
+    languageHint: null,
+    repoLabel: null,
+    additionLines: [],
+    deletionLines: [],
+    rows: [],
+    ...input,
+  };
+}
 
 describe("highlightSourceFile", () => {
   it("preserves one highlighted token row per source line without trailing newlines", async () => {
