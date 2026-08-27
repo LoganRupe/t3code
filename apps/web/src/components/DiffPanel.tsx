@@ -165,6 +165,7 @@ function BranchDiffRepoSection({
   scope,
   ignoreWhitespace,
   resolvedTheme,
+  wordWrap,
   refreshToken,
   renderFileDiffEntry,
 }: {
@@ -174,6 +175,7 @@ function BranchDiffRepoSection({
   readonly scope: "branch" | "unstaged";
   readonly ignoreWhitespace: boolean;
   readonly resolvedTheme: string;
+  readonly wordWrap: boolean;
   /** Bumped by the panel's refresh sources so every repo section refetches. */
   readonly refreshToken: number;
   readonly renderFileDiffEntry: (fileDiff: FileDiffMetadata, repoRoot?: string) => ReactNode;
@@ -189,10 +191,14 @@ function BranchDiffRepoSection({
   const source = preview.data?.sources.find(
     (entry) => entry.kind === (scope === "unstaged" ? "working-tree" : "branch-range"),
   );
+  const renderable = useMemo(
+    () =>
+      getRenderablePatch(source?.diff, `diff-panel:${repoRoot}:${resolvedTheme}`, {
+        compactPartialHunkOffsets: true,
+      }),
+    [repoRoot, resolvedTheme, source?.diff],
+  );
   const files = useMemo(() => {
-    const renderable = getRenderablePatch(source?.diff, `diff-panel:${repoRoot}:${resolvedTheme}`, {
-      compactPartialHunkOffsets: true,
-    });
     if (!renderable || renderable.kind !== "files") return [];
     return renderable.files.toSorted((left, right) =>
       resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
@@ -200,11 +206,16 @@ function BranchDiffRepoSection({
         sensitivity: "base",
       }),
     );
-  }, [repoRoot, resolvedTheme, source?.diff]);
+  }, [renderable]);
+  // A patch the parser can't split into files is still a diff; mirror the
+  // single-repo view and show it raw rather than reporting "0 files".
+  const rawPatch = renderable?.kind === "raw" ? renderable : null;
   const countLabel =
     preview.isPending && source === undefined
       ? "Loading…"
-      : `${files.length} ${files.length === 1 ? "file" : "files"}`;
+      : rawPatch
+        ? "raw patch"
+        : `${files.length} ${files.length === 1 ? "file" : "files"}`;
   return (
     <div>
       <Tooltip>
@@ -221,8 +232,20 @@ function BranchDiffRepoSection({
           <span className="font-mono break-all">{cwd}</span>
         </TooltipPopup>
       </Tooltip>
-      {preview.error && files.length === 0 ? (
+      {preview.error && files.length === 0 && !rawPatch ? (
         <p className="px-2 pb-2 text-[11px] text-red-500/80">{preview.error}</p>
+      ) : rawPatch ? (
+        <div className="space-y-2 px-2 pb-2">
+          <p className="text-[11px] text-muted-foreground/75">{rawPatch.reason}</p>
+          <pre
+            className={cn(
+              "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
+              wordWrap ? "overflow-auto whitespace-pre-wrap wrap-break-word" : "overflow-auto",
+            )}
+          >
+            {rawPatch.text}
+          </pre>
+        </div>
       ) : (
         files.map((fileDiff) => renderFileDiffEntry(fileDiff, repoRoot))
       )}
@@ -491,11 +514,6 @@ export default function DiffPanel({
     (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
   );
 
-  // The diff reflects the thread's isolated worktree, not the user's own
-  // checkout of the same repo. Showing the worktree path explains why on-disk
-  // edits made elsewhere (e.g. a separate VS Code window) won't appear here.
-  const diffWorktreePath = activeThread?.worktreePath ?? null;
-
   const currentLoadDiffFiles = useMemo<FileDiffContentsLoader | undefined>(() => {
     const preview = branchDiffPreview.data;
     if (selectedTurnId !== null || !activeThread || !preview || !selectedGitSource) {
@@ -658,6 +676,17 @@ export default function DiffPanel({
       .filter((group) => group.files.length > 0);
   }, [activeDiffGroups, resolvedTheme]);
   const isGroupedDiffView = renderableGroups.length > 1;
+
+  // The diff reflects the thread's isolated worktree, not the user's own
+  // checkout of the same repo. Showing the worktree path explains why on-disk
+  // edits made elsewhere (e.g. a separate VS Code window) won't appear here.
+  // A turn diff that touched exactly one repo of a multi-repo run names that
+  // repo's worktree; the thread's anchor worktree would mislabel the files.
+  const diffWorktreePath = activeThread?.worktreePath
+    ? selectedTurn && renderableGroups.length === 1
+      ? (renderableGroups[0]?.repoRoot ?? activeThread.worktreePath)
+      : activeThread.worktreePath
+    : null;
 
   // Repo filter options come from whichever multi-repo view is active: the
   // per-worktree branch fan-out, or the checkpoint groups in a turn diff. Keyed
@@ -1270,6 +1299,7 @@ export default function DiffPanel({
                     scope={selectedGitScope}
                     ignoreWhitespace={diffIgnoreWhitespace}
                     resolvedTheme={resolvedTheme}
+                    wordWrap={wordWrap}
                     refreshToken={branchRepoRefreshToken}
                     renderFileDiffEntry={renderFileDiffEntry}
                   />
