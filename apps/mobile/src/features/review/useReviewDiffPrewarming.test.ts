@@ -24,6 +24,7 @@ function makeSection(index: number, diff: string | null = reviewDiff) {
     subtitle: null,
     isLoading: false,
     diff,
+    groups: null,
   } satisfies ReviewModel.ReviewSectionItem;
 }
 

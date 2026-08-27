@@ -138,9 +138,10 @@ export function useReviewDiffData(input: {
               threadKey,
               sectionId: selectedSection?.id ?? null,
               diff: selectedSection?.diff,
+              groups: selectedSection?.groups,
             }),
           ),
-    [lazySource, selectedSection?.diff, selectedSection?.id, threadKey],
+    [lazySource, selectedSection?.diff, selectedSection?.groups, selectedSection?.id, threadKey],
   );
   const registry = useContext(RegistryContext);
   const { environmentId, cwd } = input;

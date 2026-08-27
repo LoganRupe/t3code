@@ -2,26 +2,35 @@ import { useCallback, useEffect, useMemo } from "react";
 import * as DateTime from "effect/DateTime";
 
 import type { EnvironmentId, OrchestrationCheckpointSummary, ThreadId } from "@t3tools/contracts";
+import { resolveDiffRepoTargets } from "@t3tools/client-runtime/state/review";
 
 import { useCheckpointDiff } from "../../state/queries";
-import { useEnvironmentQuery } from "../../state/query";
+import { useEnvironmentQueries } from "../../state/query";
 import { reviewEnvironment } from "../../state/review";
 import { useSelectedThreadDetail } from "../../state/use-thread-detail";
+import { useThreadSelection } from "../../state/use-thread-selection";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import {
   buildReviewSectionItems,
   getDefaultReviewSectionId,
   getReadyReviewCheckpoints,
   getReviewSectionIdForCheckpoint,
+  toReviewTurnDiff,
+  type ReviewGitPreview,
 } from "./reviewModel";
 import {
   setReviewAsyncError,
-  setReviewGitSections,
+  setReviewGitPreviews,
   setReviewSelectedSectionId,
   setReviewTurnDiff,
   setReviewTurnDiffLoading,
   type ReviewCacheForThread,
 } from "./reviewState";
+
+const EMPTY_WORKTREES: ReadonlyArray<{
+  readonly repoRoot: string;
+  readonly worktreePath: string;
+}> = [];
 
 export function useReviewSections(input: {
   readonly enabled?: boolean;
@@ -32,22 +41,64 @@ export function useReviewSections(input: {
   const { environmentId, reviewCache, threadId } = input;
   const enabled = input.enabled ?? true;
   const selectedThread = useSelectedThreadDetail();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
-  const diffPreview = useEnvironmentQuery(
-    enabled && environmentId !== undefined && selectedThreadCwd !== null
-      ? reviewEnvironment.diffPreview({
-          environmentId,
-          input: { cwd: selectedThreadCwd },
-        })
-      : null,
+  const { selectedThread: selectedThreadShell, selectedThreadProject } = useThreadSelection();
+  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  // The shell arrives before the detail and both carry the per-repo worktree
+  // map; take whichever has it.
+  const threadWorktrees = selectedThread?.worktrees?.length
+    ? selectedThread.worktrees
+    : (selectedThreadShell?.worktrees ?? EMPTY_WORKTREES);
+  const repoRoots = selectedThreadProject?.repoRoots;
+  // A multi-repo thread diffs one cwd per repo; anything else diffs the anchor
+  // cwd exactly as before.
+  const diffRepoTargets = useMemo(
+    () =>
+      resolveDiffRepoTargets({
+        threadWorktrees,
+        threadWorktreePath: selectedThreadWorktreePath,
+        repoRoots,
+      }),
+    [repoRoots, selectedThreadWorktreePath, threadWorktrees],
   );
+  const diffPreviewTargets = useMemo(
+    () =>
+      diffRepoTargets.length > 1
+        ? diffRepoTargets
+        : selectedThreadCwd !== null
+          ? [{ repoRoot: null, cwd: selectedThreadCwd }]
+          : [],
+    [diffRepoTargets, selectedThreadCwd],
+  );
+  const diffPreviewAtoms = useMemo(
+    () =>
+      enabled && environmentId !== undefined
+        ? diffPreviewTargets.map((target) =>
+            reviewEnvironment.diffPreview({ environmentId, input: { cwd: target.cwd } }),
+          )
+        : [],
+    [diffPreviewTargets, enabled, environmentId],
+  );
+  const diffPreview = useEnvironmentQueries(diffPreviewAtoms);
+  // Per-file lazy loading reads one cwd, so only a single-cwd diff has a revision.
+  const singleDiffPreview = diffPreviewTargets.length === 1 ? diffPreview.results[0] : null;
   const { loadingTurnIds } = reviewCache.asyncState;
 
   useEffect(() => {
-    if (reviewCache.threadKey && diffPreview.data) {
-      setReviewGitSections(reviewCache.threadKey, diffPreview.data.sources);
+    if (!reviewCache.threadKey) {
+      return;
     }
-  }, [diffPreview.data, reviewCache.threadKey]);
+    const previews = diffPreviewTargets.flatMap<ReviewGitPreview>((target, index) => {
+      const data = diffPreview.results[index];
+      return data ? [{ repoRoot: target.repoRoot, sources: data.sources }] : [];
+    });
+    // Wait for every repo of a fan-out before publishing, so a section does
+    // not flash one repo's files before the rest arrive; a failed repo stops
+    // the wait once nothing is pending.
+    const complete = previews.length === diffPreviewTargets.length || !diffPreview.isPending;
+    if (previews.length > 0 && complete) {
+      setReviewGitPreviews(reviewCache.threadKey, previews);
+    }
+  }, [diffPreview.isPending, diffPreview.results, diffPreviewTargets, reviewCache.threadKey]);
 
   const readyCheckpoints = useMemo(
     () => getReadyReviewCheckpoints(selectedThread?.checkpoints ?? []),
@@ -67,17 +118,16 @@ export function useReviewSections(input: {
     () =>
       buildReviewSectionItems({
         checkpoints: readyCheckpoints,
-        gitSections: diffPreview.data?.sources ?? reviewCache.gitSections,
+        gitPreviews: reviewCache.gitPreviews,
         turnDiffById: reviewCache.turnDiffById,
         loadingTurnIds,
         loadingGitSections: diffPreview.isPending,
       }),
     [
       diffPreview.isPending,
-      diffPreview.data?.sources,
       loadingTurnIds,
       readyCheckpoints,
-      reviewCache.gitSections,
+      reviewCache.gitPreviews,
       reviewCache.turnDiffById,
     ],
   );
@@ -143,7 +193,11 @@ export function useReviewSections(input: {
     if (!reviewCache.threadKey || !activeSectionId || !activeTurnDiff.data) {
       return;
     }
-    setReviewTurnDiff(reviewCache.threadKey, activeSectionId, activeTurnDiff.data.diff);
+    setReviewTurnDiff(
+      reviewCache.threadKey,
+      activeSectionId,
+      toReviewTurnDiff(activeTurnDiff.data),
+    );
     setReviewAsyncError(reviewCache.threadKey, null);
   }, [activeSectionId, activeTurnDiff.data, reviewCache.threadKey]);
 
@@ -178,8 +232,8 @@ export function useReviewSections(input: {
     isSelectedSectionPending:
       selectedSection?.kind === "turn" ? activeTurnDiff.isPending : diffPreview.isPending,
     loadingGitDiffs: diffPreview.isPending,
-    diffPreviewRevision: diffPreview.data
-      ? DateTime.formatIso(diffPreview.data.generatedAt)
+    diffPreviewRevision: singleDiffPreview
+      ? DateTime.formatIso(singleDiffPreview.generatedAt)
       : undefined,
     loadingTurnIds,
     reviewSections,
