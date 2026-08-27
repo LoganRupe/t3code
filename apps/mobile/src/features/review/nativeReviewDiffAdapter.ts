@@ -420,6 +420,17 @@ function mapLineRow(
   };
 }
 
+/**
+ * The path the native list shows and review comments quote. The list has no
+ * repo header row, so files of a multi-repo diff carry their repo folder as a
+ * prefix instead; that same prefixed path names the file unambiguously in a
+ * comment the agent reads across several repos. `file.path` itself stays
+ * repo-relative for language detection.
+ */
+function displayFilePath(file: ReviewRenderableFile): string {
+  return file.repoLabel === null ? file.path : `${file.repoLabel}/${file.path}`;
+}
+
 function prepareFileRows(file: ReviewRenderableFile): PreparedNativeReviewFileRows {
   const cached = nativeReviewFileRowsCache.get(file);
   if (cached) return cached;
@@ -430,7 +441,7 @@ function prepareFileRows(file: ReviewRenderableFile): PreparedNativeReviewFileRo
       kind: "file",
       id: `${file.id}:header`,
       fileId: file.id,
-      filePath: file.path,
+      filePath: displayFilePath(file),
       previousPath: file.previousPath,
       changeType: mapChangeType(file),
       additions: file.additions,
@@ -439,6 +450,7 @@ function prepareFileRows(file: ReviewRenderableFile): PreparedNativeReviewFileRo
   ];
 
   const lineRows = file.rows.filter((row): row is ReviewRenderableLineRow => row.kind === "line");
+  const commentFilePath = displayFilePath(file);
   let lineIndex = 0;
   file.rows.forEach((row, rowIndex) => {
     if (row.kind === "hunk") {
@@ -455,7 +467,7 @@ function prepareFileRows(file: ReviewRenderableFile): PreparedNativeReviewFileRo
     rows.push(nativeRow);
     rowIdByCommentLineId.set(row.id, nativeRow.id);
     commentTargetsByRowId.set(nativeRow.id, {
-      filePath: file.path,
+      filePath: commentFilePath,
       lines: lineRows,
       lineIndex,
     });
@@ -465,7 +477,7 @@ function prepareFileRows(file: ReviewRenderableFile): PreparedNativeReviewFileRo
   rows.push(...noticeRowsForFile(file));
   const prepared: PreparedNativeReviewFileRows = {
     fileId: file.id,
-    filePath: file.path,
+    filePath: commentFilePath,
     lineCount: lineRows.length,
     // Comments must not split the source deletion/addition runs used for word matching.
     rows: addNativeWordDiffRanges(rows),
@@ -537,7 +549,7 @@ function prepareNativeReviewDiffData(parsedDiff: ReviewParsedDiff): PreparedNati
 
   const files = parsedDiff.files.map<NativeReviewDiffFile>((file) => ({
     id: file.id,
-    path: file.path,
+    path: displayFilePath(file),
     language: getLanguageForPath(file.path, file.languageHint),
     additions: file.additions,
     deletions: file.deletions,

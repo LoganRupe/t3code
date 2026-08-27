@@ -10,6 +10,7 @@ function section(id: string, kind: ReviewSectionKind): ReviewSectionItem {
     title: id,
     subtitle: null,
     diff: null,
+    groups: null,
     isLoading: false,
   };
 }
