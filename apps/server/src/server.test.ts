@@ -11487,6 +11487,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         const fetchRemote = vi.fn(
           (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["fetchRemote"]>[0]) => Effect.void,
         );
+        const remoteBranchExists = vi.fn(
+          (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteBranchExists"]>[0]) =>
+            Effect.succeed(true),
+        );
         const fetchedOriginCommit = "0123456789abcdef0123456789abcdef01234567";
         const resolveRemoteTrackingCommit = vi.fn(
           (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["resolveRemoteTrackingCommit"]>[0]) =>
@@ -11514,6 +11518,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               execute,
               remoteExists,
               fetchRemote,
+              remoteBranchExists,
               resolveRemoteTrackingCommit,
               createWorktree,
             },
