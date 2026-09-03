@@ -54,6 +54,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           project_id,
           title,
           workspace_root,
+          workspace_file,
           default_model_selection_json,
           scripts_json,
           created_at,
@@ -64,6 +65,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           'project-1',
           'Project 1',
           '/tmp/project-1',
+          '/tmp/project-1/project-1.code-workspace',
           '{"provider":"codex","model":"gpt-5-codex"}',
           '[{"id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
           '2026-02-24T00:00:00.000Z',
@@ -272,6 +274,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: asProjectId("project-1"),
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
+          workspaceFile: "/tmp/project-1/project-1.code-workspace",
           repoRoots: ["/tmp/project-1"],
           repositoryIdentity: null,
           repositoryIdentities: [],
@@ -402,6 +405,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           id: asProjectId("project-1"),
           title: "Project 1",
           workspaceRoot: "/tmp/project-1",
+          workspaceFile: "/tmp/project-1/project-1.code-workspace",
           repoRoots: ["/tmp/project-1"],
           repositoryIdentity: null,
           repositoryIdentities: [],
@@ -738,6 +742,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           project_id,
           title,
           workspace_root,
+          workspace_file,
           default_model_selection_json,
           scripts_json,
           created_at,
@@ -749,6 +754,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             'project-active',
             'Active Project',
             '/tmp/workspace',
+            '/tmp/workspace/active.code-workspace',
             '{"provider":"codex","model":"gpt-5-codex"}',
             '[]',
             '2026-03-01T00:00:00.000Z',
@@ -759,6 +765,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             'project-deleted',
             'Deleted Project',
             '/tmp/deleted',
+            NULL,
             NULL,
             '[]',
             '2026-03-01T00:00:02.000Z',
@@ -841,6 +848,15 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         assert.equal(project._tag, "Some");
         if (project._tag === "Some") {
           assert.equal(project.value.id, asProjectId("project-active"));
+          assert.equal(project.value.workspaceFile, "/tmp/workspace/active.code-workspace");
+        }
+
+        const projectShell = yield* snapshotQuery.getProjectShellById(
+          asProjectId("project-active"),
+        );
+        assert.equal(projectShell._tag, "Some");
+        if (projectShell._tag === "Some") {
+          assert.equal(projectShell.value.workspaceFile, "/tmp/workspace/active.code-workspace");
         }
 
         const missingProject = yield* snapshotQuery.getActiveProjectByWorkspaceRoot("/tmp/missing");
