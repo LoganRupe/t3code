@@ -8,12 +8,16 @@ import Migration0040 from "./040_ProjectionProjectFaviconPath.ts";
 import Migration0041 from "./041_AuthSessionClientConnection.ts";
 import Migration0042 from "./042_ProjectionThreadLinkedPullRequest.ts";
 import Migration0043 from "./043_ProjectionThreadsUnsettledAt.ts";
+import Migration0044 from "./044_ClearAutomaticProjectModelDefaults.ts";
+import Migration0045 from "./045_ProjectionProjectsAutoPull.ts";
+import Migration0046 from "./046_RepairAutomaticSettlementTimestamps.ts";
+import Migration0047 from "./047_ProjectionProjectIcon.ts";
 
 /**
  * Heals databases that skipped main's migrations because a branch build claimed
  * their id slots first.
  *
- * The multi-repo workspace migrations have been renumbered four times, and each
+ * The multi-repo workspace migrations have been renumbered five times, and each
  * time they vacated a range of ids that machines running the older branch build
  * had already recorded in `effect_sql_migrations`. The migrator only runs files
  * whose numeric id exceeds the highest recorded id and never compares names, so
@@ -35,12 +39,18 @@ import Migration0043 from "./043_ProjectionThreadsUnsettledAt.ts";
  *   that ran the build numbering multi-repo 042-046. `projection_threads` ends
  *   up missing `linked_pull_request_json` and `unsettled_at`, which the
  *   snapshot query selects on every read.
+ * - 044-047 (ClearAutomaticProjectModelDefaults/AutoPull/
+ *   RepairAutomaticSettlementTimestamps/ProjectIcon) were skipped on machines
+ *   that ran the build numbering multi-repo 044-048. `projection_projects` ends
+ *   up missing `auto_pull` and `project_icon_json`, which the snapshot query
+ *   selects on every project read, and the two data repairs never ran.
  *
  * Healing 033-036 means adding their columns: each is a nullable TEXT
- * `ADD COLUMN` with no index or backfill. Healing 037-043 just re-runs them --
- * all seven already guard on a `PRAGMA table_info` check or `IF NOT EXISTS`, so
- * running them a second time is defined behavior. Healthy databases have
- * everything already and this whole migration is a no-op.
+ * `ADD COLUMN` with no index or backfill. Healing 037-047 just re-runs them --
+ * the schema ones guard on a `PRAGMA table_info` check or `IF NOT EXISTS`, and
+ * the two data repairs (044, 046) only match rows they have not already
+ * rewritten, so running them a second time is defined behavior. Healthy
+ * databases have everything already and this whole migration is a no-op.
  *
  * Migration ids are immutable once any build has applied them -- including a
  * branch build. When rebasing, append after main's highest id rather than
@@ -96,7 +106,7 @@ export default Effect.gen(function* () {
     ).pipe(Effect.annotateLogs({ columns: healed }));
   }
 
-  // 037-043. Each is already idempotent, so re-running is the whole heal: it
+  // 037-047. Each is already idempotent, so re-running is the whole heal: it
   // restores them on databases that recorded those ids under the multi-repo
   // names, and does nothing on databases that ran them for real.
   yield* Migration0037;
@@ -106,4 +116,8 @@ export default Effect.gen(function* () {
   yield* Migration0041;
   yield* Migration0042;
   yield* Migration0043;
+  yield* Migration0044;
+  yield* Migration0045;
+  yield* Migration0046;
+  yield* Migration0047;
 });

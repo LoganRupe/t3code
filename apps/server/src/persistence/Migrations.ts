@@ -86,7 +86,7 @@ import Migration0054 from "./Migrations/054_HealSkippedRenumberedMigrations.ts";
  * rebasing a branch that adds migrations, append after main's highest id rather
  * than renumbering. `detectMigrationLedgerDrift` reports this if it happens
  * anyway; 052_HealSkippedRenumberedMigrations repairs the 033-036, 037-040,
- * 041 and 042-043 occurrences.
+ * 041, 042-043 and 044-047 occurrences.
  */
 export const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
