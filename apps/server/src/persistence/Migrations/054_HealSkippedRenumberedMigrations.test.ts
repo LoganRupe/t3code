@@ -70,13 +70,13 @@ describe("054_HealSkippedRenumberedMigrations", () => {
             (36, 'ProjectionThreadsWorktrees')
         `;
 
-        yield* runMigrations({ toMigrationInclusive: 51 });
+        yield* runMigrations({ toMigrationInclusive: 53 });
         const beforeHeal = yield* threadColumns;
         for (const column of HEALED_COLUMNS) {
           assert.ok(!beforeHeal.has(column), `expected ${column} to be missing before healing`);
         }
 
-        yield* runMigrations({ toMigrationInclusive: 52 });
+        yield* runMigrations({ toMigrationInclusive: 54 });
         const afterHeal = yield* threadColumns;
         for (const column of HEALED_COLUMNS) {
           assert.ok(afterHeal.has(column), `expected ${column} to be restored`);
@@ -102,7 +102,7 @@ describe("054_HealSkippedRenumberedMigrations", () => {
             (40, 'ProjectionThreadsWorktrees')
         `;
 
-        yield* runMigrations({ toMigrationInclusive: 51 });
+        yield* runMigrations({ toMigrationInclusive: 53 });
         assert.ok(
           !(yield* threadColumns).has("pin_order_key"),
           "expected pin_order_key to be missing before healing",
@@ -121,7 +121,7 @@ describe("054_HealSkippedRenumberedMigrations", () => {
           "expected the turns keyset index to be missing before healing",
         );
 
-        yield* runMigrations({ toMigrationInclusive: 52 });
+        yield* runMigrations({ toMigrationInclusive: 54 });
         assert.ok((yield* threadColumns).has("pin_order_key"), "expected pin_order_key restored");
         const projectColumnsAfter = yield* projectColumns;
         assert.ok(
@@ -165,7 +165,7 @@ describe("054_HealSkippedRenumberedMigrations", () => {
           "expected client_app_version to be missing before healing",
         );
 
-        yield* runMigrations({ toMigrationInclusive: 52 });
+        yield* runMigrations({ toMigrationInclusive: 54 });
         const afterHeal = yield* authSessionColumns;
         assert.ok(afterHeal.has("client_surface"), "expected client_surface restored");
         assert.ok(afterHeal.has("client_app_version"), "expected client_app_version restored");
@@ -202,7 +202,7 @@ describe("054_HealSkippedRenumberedMigrations", () => {
           "expected unsettled_at to be missing before healing",
         );
 
-        yield* runMigrations({ toMigrationInclusive: 52 });
+        yield* runMigrations({ toMigrationInclusive: 54 });
         const afterHeal = yield* threadColumns;
         assert.ok(
           afterHeal.has("linked_pull_request_json"),
@@ -238,7 +238,7 @@ describe("054_HealSkippedRenumberedMigrations", () => {
           "expected project_icon_json to be missing before healing",
         );
 
-        yield* runMigrations({ toMigrationInclusive: 52 });
+        yield* runMigrations({ toMigrationInclusive: 54 });
         const afterHeal = yield* projectColumns;
         assert.ok(afterHeal.has("auto_pull"), "expected auto_pull restored");
         assert.ok(afterHeal.has("project_icon_json"), "expected project_icon_json restored");
@@ -246,16 +246,56 @@ describe("054_HealSkippedRenumberedMigrations", () => {
     ),
   );
 
+  it.effect("restores schema on a database that skipped migrations 048-049", () =>
+    withDatabase(
+      Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+
+        // The sixth renumbering: machines that ran the branch before this
+        // rebase recorded 48-52 under the multi-repo names, so main's real
+        // 048_ProjectionThreadBranchPullRequest and
+        // 049_ProjectionThreadsActiveOrderKey were skipped.
+        yield* runMigrations({ toMigrationInclusive: 47 });
+        yield* sql`
+          INSERT INTO effect_sql_migrations (migration_id, name) VALUES
+            (48, 'ProjectionProjectsRepoRoots'),
+            (49, 'ProjectionProjectsWorkspaceFile'),
+            (50, 'ProjectionCheckpointRefs'),
+            (51, 'ProjectionThreadsWorktrees'),
+            (52, 'HealSkippedRenumberedMigrations')
+        `;
+
+        const beforeHeal = yield* threadColumns;
+        assert.ok(
+          !beforeHeal.has("branch_pull_request_json"),
+          "expected branch_pull_request_json to be missing before healing",
+        );
+        assert.ok(
+          !beforeHeal.has("active_order_key"),
+          "expected active_order_key to be missing before healing",
+        );
+
+        yield* runMigrations({ toMigrationInclusive: 54 });
+        const afterHeal = yield* threadColumns;
+        assert.ok(
+          afterHeal.has("branch_pull_request_json"),
+          "expected branch_pull_request_json restored",
+        );
+        assert.ok(afterHeal.has("active_order_key"), "expected active_order_key restored");
+      }),
+    ),
+  );
+
   it.effect("is a no-op on a healthy database", () =>
     withDatabase(
       Effect.gen(function* () {
-        yield* runMigrations({ toMigrationInclusive: 51 });
+        yield* runMigrations({ toMigrationInclusive: 53 });
         const beforeHeal = yield* threadColumns;
         for (const column of HEALED_COLUMNS) {
           assert.ok(beforeHeal.has(column), `expected ${column} to already exist`);
         }
 
-        yield* runMigrations({ toMigrationInclusive: 52 });
+        yield* runMigrations({ toMigrationInclusive: 54 });
         const afterHeal = yield* threadColumns;
 
         assert.deepEqual([...afterHeal].sort(), [...beforeHeal].sort());
