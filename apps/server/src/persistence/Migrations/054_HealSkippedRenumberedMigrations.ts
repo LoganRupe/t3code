@@ -12,12 +12,14 @@ import Migration0044 from "./044_ClearAutomaticProjectModelDefaults.ts";
 import Migration0045 from "./045_ProjectionProjectsAutoPull.ts";
 import Migration0046 from "./046_RepairAutomaticSettlementTimestamps.ts";
 import Migration0047 from "./047_ProjectionProjectIcon.ts";
+import Migration0048 from "./048_ProjectionThreadBranchPullRequest.ts";
+import Migration0049 from "./049_ProjectionThreadsActiveOrderKey.ts";
 
 /**
  * Heals databases that skipped main's migrations because a branch build claimed
  * their id slots first.
  *
- * The multi-repo workspace migrations have been renumbered five times, and each
+ * The multi-repo workspace migrations have been renumbered six times, and each
  * time they vacated a range of ids that machines running the older branch build
  * had already recorded in `effect_sql_migrations`. The migrator only runs files
  * whose numeric id exceeds the highest recorded id and never compares names, so
@@ -45,8 +47,13 @@ import Migration0047 from "./047_ProjectionProjectIcon.ts";
  *   up missing `auto_pull` and `project_icon_json`, which the snapshot query
  *   selects on every project read, and the two data repairs never ran.
  *
+ * - 048-049 (ThreadBranchPullRequest/ThreadsActiveOrderKey) were skipped on
+ *   machines that ran the build numbering multi-repo 048-052.
+ *   `projection_threads` ends up missing `branch_pull_request_json` and
+ *   `active_order_key`, which the snapshot query selects on every thread read.
+ *
  * Healing 033-036 means adding their columns: each is a nullable TEXT
- * `ADD COLUMN` with no index or backfill. Healing 037-047 just re-runs them --
+ * `ADD COLUMN` with no index or backfill. Healing 037-049 just re-runs them --
  * the schema ones guard on a `PRAGMA table_info` check or `IF NOT EXISTS`, and
  * the two data repairs (044, 046) only match rows they have not already
  * rewritten, so running them a second time is defined behavior. Healthy
@@ -106,7 +113,7 @@ export default Effect.gen(function* () {
     ).pipe(Effect.annotateLogs({ columns: healed }));
   }
 
-  // 037-047. Each is already idempotent, so re-running is the whole heal: it
+  // 037-049. Each is already idempotent, so re-running is the whole heal: it
   // restores them on databases that recorded those ids under the multi-repo
   // names, and does nothing on databases that ran them for real.
   yield* Migration0037;
@@ -120,4 +127,6 @@ export default Effect.gen(function* () {
   yield* Migration0045;
   yield* Migration0046;
   yield* Migration0047;
+  yield* Migration0048;
+  yield* Migration0049;
 });
