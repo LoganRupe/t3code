@@ -67,7 +67,8 @@ describe("file-save React lifecycle", () => {
   it("persists editor model changes after StrictMode setup replay", async () => {
     mount();
     changeHandler()("AUDIT7907NATIVE\n");
-    expect(onPendingChange).toHaveBeenCalledWith("file.txt", true);
+    // Third argument is the owning repo root (multi-repo #923), absent here.
+    expect(onPendingChange).toHaveBeenCalledWith("file.txt", true, undefined);
     await vi.advanceTimersByTimeAsync(500);
     expect(writeFile).toHaveBeenCalledExactlyOnceWith({
       environmentId,
@@ -79,7 +80,7 @@ describe("file-save React lifecycle", () => {
       "file.txt",
       "AUDIT7907NATIVE\n",
     );
-    expect(onPendingChange).toHaveBeenLastCalledWith("file.txt", false);
+    expect(onPendingChange).toHaveBeenLastCalledWith("file.txt", false, undefined);
   });
 
   it("persists rendered Markdown task changes after StrictMode setup replay", async () => {
