@@ -160,6 +160,28 @@ describe("buildRemoteOpenUrl", () => {
     );
   });
 
+  it("links the workspace file so VS Code opens a multi-root workspace", () => {
+    expect(
+      buildRemoteOpenUrl({
+        editor: "vscode",
+        host: "sol",
+        absolutePath: "/home/theo/code",
+        workspaceFile: "/home/theo/code/my repo.code-workspace",
+      }),
+    ).toBe("vscode://vscode-remote/ssh-remote+sol/home/theo/code/my%20repo.code-workspace");
+  });
+
+  it("links the folder for Zed, which has no workspace files", () => {
+    expect(
+      buildRemoteOpenUrl({
+        editor: "zed",
+        host: "sol",
+        absolutePath: "/home/theo/code",
+        workspaceFile: "/home/theo/code/my repo.code-workspace",
+      }),
+    ).toBe("zed://ssh/sol/home/theo/code");
+  });
+
   it("returns undefined for editors without remote support", () => {
     expect(buildRemoteOpenUrl({ editor: "idea", host: "sol", absolutePath: "/tmp/x" })).toBe(
       undefined,
