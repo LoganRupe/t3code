@@ -189,7 +189,9 @@ export const OpenInPicker = memo(function OpenInPicker({
   /**
    * The project's `.code-workspace` file, when it has one. Editors that
    * understand workspace files open this instead of `openInCwd` so a multi-repo
-   * project lands as a multi-root workspace; the server picks per editor.
+   * project lands as a multi-root workspace. Both branches honor it: the server
+   * picks per editor when it launches locally, `buildRemoteOpenUrl` does when
+   * the link is handed to the viewing machine.
    */
   openInWorkspaceFile?: string | null;
   compact?: boolean;
@@ -221,6 +223,7 @@ export const OpenInPicker = memo(function OpenInPicker({
           editor,
           host: remote.host.host,
           absolutePath: openInCwd,
+          ...(openInWorkspaceFile ? { workspaceFile: openInWorkspaceFile } : {}),
         });
         if (url === undefined) return;
         // Only record hint-seen/preferred when the shell actually accepted

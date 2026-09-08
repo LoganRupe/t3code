@@ -133,20 +133,32 @@ export const remoteSchemeForEditor = (id: EditorId): string | undefined => {
 
 /**
  * Builds a `<scheme>://vscode-remote/ssh-remote+<host><path>` deep link that
- * opens `absolutePath` on `host` in the local editor over SSH. Returns
- * undefined for editors without remote deep-link support.
+ * opens `absolutePath` on `host` in the local editor over SSH, or
+ * `workspaceFile` when the editor understands one. Returns undefined for
+ * editors without remote deep-link support.
+ *
+ * A workspace needs no separate URI form: VS Code's protocol handler opens the
+ * link as a workspace rather than a folder whenever the path ends in
+ * `.code-workspace`.
  */
 export const buildRemoteOpenUrl = (input: {
   readonly editor: EditorId;
   readonly host: string;
   readonly absolutePath: string;
+  readonly workspaceFile?: string | undefined;
 }): string | undefined => {
-  const scheme = remoteSchemeForEditor(input.editor);
-  if (scheme === undefined) {
+  const editorDef = EDITORS.find((candidate) => candidate.id === input.editor);
+  const scheme = editorDef === undefined ? undefined : remoteSchemeOf(editorDef);
+  if (editorDef === undefined || scheme === undefined) {
     return undefined;
   }
+  const target = resolveEditorTarget({
+    editor: editorDef,
+    cwd: input.absolutePath,
+    workspaceFile: input.workspaceFile,
+  });
   // Windows server paths (`C:\...`) appear as `/C:/...` in vscode-remote URIs.
-  const posixPath = input.absolutePath.replaceAll("\\", "/");
+  const posixPath = target.replaceAll("\\", "/");
   const rootedPath = posixPath.startsWith("/") ? posixPath : `/${posixPath}`;
   const encodedPath = rootedPath.split("/").map(encodeURIComponent).join("/");
   return `${scheme}://vscode-remote/ssh-remote+${encodeURIComponent(input.host)}${encodedPath}`;
