@@ -5,6 +5,8 @@ import {
   buildDiffFileTreeUpdates,
   collectDirectoryPaths,
   diffFileTreeEntries,
+  groupedDiffFileTreeEntries,
+  groupedDiffFileTreePath,
 } from "./diffFileTree.logic";
 
 function file(type: FileDiffMetadata["type"], name: string, prevName = name): FileDiffMetadata {
@@ -28,6 +30,45 @@ describe("diffFileTreeEntries", () => {
       { path: "src/d.ts", status: "renamed" },
       { path: "README.md", status: "modified" },
     ]);
+  });
+
+  it("keeps the first of two files at the same path so the tree never throws on a duplicate", () => {
+    expect(diffFileTreeEntries([file("change", "README.md"), file("new", "README.md")])).toEqual([
+      { path: "README.md", status: "modified" },
+    ]);
+  });
+});
+
+describe("groupedDiffFileTreeEntries", () => {
+  const groups = [
+    { label: "api", files: [file("change", "README.md"), file("new", "src/a.ts")] },
+    { label: "web", files: [file("change", "README.md")] },
+  ];
+
+  it("files each repo's changes under a folder named for the repo", () => {
+    expect(groupedDiffFileTreeEntries(groups)).toEqual([
+      { path: "api/README.md", status: "modified" },
+      { path: "api/src/a.ts", status: "added" },
+      { path: "web/README.md", status: "modified" },
+    ]);
+  });
+
+  it("drops a repeat when two roots share a folder name", () => {
+    expect(
+      groupedDiffFileTreeEntries([
+        { label: "app", files: [file("change", "README.md")] },
+        { label: "app", files: [file("change", "README.md"), file("new", "b.ts")] },
+      ]),
+    ).toEqual([
+      { path: "app/README.md", status: "modified" },
+      { path: "app/b.ts", status: "added" },
+    ]);
+  });
+
+  it("resolves a repo-relative path to the first group that changed it", () => {
+    expect(groupedDiffFileTreePath(groups, "README.md")).toBe("api/README.md");
+    expect(groupedDiffFileTreePath(groups, "src/a.ts")).toBe("api/src/a.ts");
+    expect(groupedDiffFileTreePath(groups, "missing.ts")).toBeNull();
   });
 });
 
