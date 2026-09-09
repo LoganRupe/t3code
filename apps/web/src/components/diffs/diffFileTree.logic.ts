@@ -23,11 +23,65 @@ function toGitStatus(file: FileDiffMetadata): GitStatus {
   }
 }
 
-/** Maps parsed diff files to tree entries, keeping the diff's own order. */
+/**
+ * Maps parsed diff files to tree entries, keeping the diff's own order. A path that repeats
+ * keeps its first entry: Pierre's path store throws on a duplicate, and a tree missing a row
+ * beats a diff panel that cannot render at all.
+ */
 export function diffFileTreeEntries(
   files: ReadonlyArray<FileDiffMetadata>,
 ): ReadonlyArray<DiffFileTreeEntry> {
-  return files.map((file) => ({ path: resolveFileDiffPath(file), status: toGitStatus(file) }));
+  const entries: DiffFileTreeEntry[] = [];
+  appendDiffFileTreeEntries(entries, new Set(), files, "");
+  return entries;
+}
+
+function appendDiffFileTreeEntries(
+  entries: DiffFileTreeEntry[],
+  seen: Set<string>,
+  files: ReadonlyArray<FileDiffMetadata>,
+  pathPrefix: string,
+): void {
+  for (const file of files) {
+    const path = `${pathPrefix}${resolveFileDiffPath(file)}`;
+    if (seen.has(path)) continue;
+    seen.add(path);
+    entries.push({ path, status: toGitStatus(file) });
+  }
+}
+
+/** A group of changed files under one repo root of a multi-repo diff. */
+export interface DiffFileTreeGroup {
+  /** Folder name the group's files sit under in the tree, matching the diff's section header. */
+  readonly label: string;
+  readonly files: ReadonlyArray<FileDiffMetadata>;
+}
+
+/**
+ * Tree entries for a diff that spans several repo roots. Each root's files sit under a folder
+ * named for that root, so two roots that both changed `README.md` stay two rows, the same way
+ * the diff draws one section per root.
+ */
+export function groupedDiffFileTreeEntries(
+  groups: ReadonlyArray<DiffFileTreeGroup>,
+): ReadonlyArray<DiffFileTreeEntry> {
+  const entries: DiffFileTreeEntry[] = [];
+  const seen = new Set<string>();
+  for (const group of groups) {
+    appendDiffFileTreeEntries(entries, seen, group.files, `${group.label}/`);
+  }
+  return entries;
+}
+
+/** The tree path a repo-relative file takes inside a grouped tree, or null when no group has it. */
+export function groupedDiffFileTreePath(
+  groups: ReadonlyArray<DiffFileTreeGroup>,
+  filePath: string,
+): string | null {
+  const group = groups.find((candidate) =>
+    candidate.files.some((file) => resolveFileDiffPath(file) === filePath),
+  );
+  return group ? `${group.label}/${filePath}` : null;
 }
 
 /**
