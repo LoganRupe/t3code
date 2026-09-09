@@ -63,7 +63,11 @@ import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./Dif
 import { DiffStatLabel } from "./chat/DiffStatLabel";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { DiffFileTree } from "./diffs/DiffFileTree";
-import { diffFileTreeEntries } from "./diffs/diffFileTree.logic";
+import {
+  diffFileTreeEntries,
+  groupedDiffFileTreeEntries,
+  groupedDiffFileTreePath,
+} from "./diffs/diffFileTree.logic";
 import { Button } from "./ui/button";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
@@ -712,7 +716,6 @@ export default function DiffPanel({
     }
     return getDiffLineStat(renderableFiles);
   }, [renderableFiles, selectedGitSource, selectedTurn]);
-  const fileTreeEntries = useMemo(() => diffFileTreeEntries(renderableFiles), [renderableFiles]);
   const selectedDiffFileKey = selectedFilePath
     ? (codeViewFiles.find((candidate) => candidate.filePath === selectedFilePath)?.fileKey ?? null)
     : null;
@@ -772,9 +775,34 @@ export default function DiffPanel({
   const visibleDiffTargets = effectiveRepoFilter
     ? diffRepoTargets.filter((entry) => repoRootBaseName(entry.repoRoot) === effectiveRepoFilter)
     : diffRepoTargets;
-  const visibleGroups = effectiveRepoFilter
-    ? renderableGroups.filter((group) => repoRootBaseName(group.repoRoot) === effectiveRepoFilter)
-    : renderableGroups;
+  const visibleGroups = useMemo(
+    () =>
+      effectiveRepoFilter
+        ? renderableGroups.filter(
+            (group) => repoRootBaseName(group.repoRoot) === effectiveRepoFilter,
+          )
+        : renderableGroups,
+    [effectiveRepoFilter, renderableGroups],
+  );
+
+  // The tree mirrors what the diff draws. A grouped view gets one folder per
+  // repo section (named like the section header), so two roots that changed the
+  // same relative path are two rows instead of a duplicate-path crash.
+  const fileTreeGroups = useMemo(
+    () => visibleGroups.map((group) => ({ label: group.displayName, files: group.files })),
+    [visibleGroups],
+  );
+  const fileTreeEntries = useMemo(
+    () =>
+      isGroupedDiffView
+        ? groupedDiffFileTreeEntries(fileTreeGroups)
+        : diffFileTreeEntries(renderableFiles),
+    [fileTreeGroups, isGroupedDiffView, renderableFiles],
+  );
+  const selectedFileTreePath =
+    selectedFilePath && isGroupedDiffView
+      ? groupedDiffFileTreePath(fileTreeGroups, selectedFilePath)
+      : selectedFilePath;
 
   useEffect(() => {
     if (!selectedDiffFileKey || !codeView?.getInstance()) return;
@@ -1599,7 +1627,7 @@ export default function DiffPanel({
                     <DiffFileTree
                       ariaLabel={`${reviewSectionTitle} files`}
                       entries={fileTreeEntries}
-                      selectedPath={selectedFilePath}
+                      selectedPath={selectedFileTreePath}
                       revealRequestId={selectedFileRevealRequestId}
                       onSelectFile={revealDiffFile}
                     />
