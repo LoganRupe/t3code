@@ -31,14 +31,68 @@ function toGitStatus(file: FileDiffMetadata): GitStatus {
 export function diffFileTreeEntries(
   files: ReadonlyArray<FileDiffMetadata>,
 ): ReadonlyArray<DiffFileTreeEntry> {
-  const statusByPath = new Map<string, GitStatus>();
+  const entries: DiffFileTreeEntry[] = [];
+  appendDiffFileTreeEntries(entries, new Map(), files, "");
+  return entries;
+}
+
+/**
+ * Appends `files` under `pathPrefix`, collapsing a repeated path onto its first entry.
+ * Pierre's path store throws on a duplicate, and a type change (regular file to symlink)
+ * arrives as a deletion plus an addition of the same path, so the surviving row reads
+ * `modified` when the two statuses disagree.
+ */
+function appendDiffFileTreeEntries(
+  entries: DiffFileTreeEntry[],
+  indexByPath: Map<string, number>,
+  files: ReadonlyArray<FileDiffMetadata>,
+  pathPrefix: string,
+): void {
   for (const file of files) {
-    const path = resolveFileDiffPath(file);
+    const path = `${pathPrefix}${resolveFileDiffPath(file)}`;
     const status = toGitStatus(file);
-    const previous = statusByPath.get(path);
-    statusByPath.set(path, previous === undefined || previous === status ? status : "modified");
+    const existing = indexByPath.get(path);
+    if (existing === undefined) {
+      indexByPath.set(path, entries.length);
+      entries.push({ path, status });
+      continue;
+    }
+    if (entries[existing]!.status !== status) entries[existing] = { path, status: "modified" };
   }
-  return [...statusByPath].map(([path, status]) => ({ path, status }));
+}
+
+/** A group of changed files under one repo root of a multi-repo diff. */
+export interface DiffFileTreeGroup {
+  /** Folder name the group's files sit under in the tree, matching the diff's section header. */
+  readonly label: string;
+  readonly files: ReadonlyArray<FileDiffMetadata>;
+}
+
+/**
+ * Tree entries for a diff that spans several repo roots. Each root's files sit under a folder
+ * named for that root, so two roots that both changed `README.md` stay two rows, the same way
+ * the diff draws one section per root.
+ */
+export function groupedDiffFileTreeEntries(
+  groups: ReadonlyArray<DiffFileTreeGroup>,
+): ReadonlyArray<DiffFileTreeEntry> {
+  const entries: DiffFileTreeEntry[] = [];
+  const indexByPath = new Map<string, number>();
+  for (const group of groups) {
+    appendDiffFileTreeEntries(entries, indexByPath, group.files, `${group.label}/`);
+  }
+  return entries;
+}
+
+/** The tree path a repo-relative file takes inside a grouped tree, or null when no group has it. */
+export function groupedDiffFileTreePath(
+  groups: ReadonlyArray<DiffFileTreeGroup>,
+  filePath: string,
+): string | null {
+  const group = groups.find((candidate) =>
+    candidate.files.some((file) => resolveFileDiffPath(file) === filePath),
+  );
+  return group ? `${group.label}/${filePath}` : null;
 }
 
 /**
