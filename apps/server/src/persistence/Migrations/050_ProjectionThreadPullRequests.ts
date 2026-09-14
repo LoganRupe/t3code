@@ -51,6 +51,19 @@ export default Effect.gen(function* () {
     ON projection_thread_pull_requests(host, repository, number)
   `;
 
+  // A database that skipped 042_ProjectionThreadLinkedPullRequest to a
+  // renumbered multi-repo migration reaches this id without
+  // `linked_pull_request_json`, and the select below would abort the boot
+  // before 056_HealSkippedRenumberedMigrations can restore the column. That
+  // heal re-runs this migration once the column is back, so skipping here only
+  // defers the backfill.
+  const threadColumns = yield* sql<{ readonly name: string }>`
+    PRAGMA table_info(projection_threads)
+  `;
+  if (!threadColumns.some((column) => column.name === "linked_pull_request_json")) {
+    return;
+  }
+
   const legacyRows = yield* sql<LegacyLinkedThreadRow>`
     SELECT
       thread_id AS "threadId",
