@@ -10657,17 +10657,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             "thread.turn.start",
           ],
         );
-        const createWorktreeInput = createWorktree.mock.calls[0]?.[0];
-        assert.equal(createWorktreeInput?.cwd, "/tmp/project");
-        assert.equal(createWorktreeInput?.refName, fetchedOriginCommit);
-        assert.equal(createWorktreeInput?.newRefName, "t3code/bootstrap-refName");
-        // Even a single-root project goes through the fan-out, which places each
-        // worktree at `<worktreesDir>/<projectId>/<threadId>/<repoName>`.
-        assertTrue(
-          createWorktreeInput?.path?.endsWith(
-            "/worktrees/project-default/thread-bootstrap/project",
-          ) === true,
-        );
+        // Single-root projects keep upstream's worktree call; only multi-repo
+        // projects fan out under `<worktreesDir>/<projectId>/<threadId>`.
+        assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
+          cwd: "/tmp/project",
+          refName: fetchedOriginCommit,
+          newRefName: "t3code/bootstrap-refName",
+          baseRefName: "main",
+          path: null,
+        });
         assert.deepEqual(fetchRemote.mock.calls[0]?.[0], {
           cwd: "/tmp/project",
           remoteName: "origin",
