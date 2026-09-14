@@ -13,7 +13,7 @@ export default Effect.gen(function* () {
   // A database that skipped 033_ProjectionThreadsSettled to a renumbered
   // multi-repo migration reaches this id without `settled_at`, and preparing
   // the statement below would abort the boot before
-  // 052_HealSkippedRenumberedMigrations can restore the column. That heal
+  // 056_HealSkippedRenumberedMigrations can restore the column. That heal
   // re-runs this migration once the column is back, so skipping here only
   // defers the repair.
   const columns = yield* sql<{ readonly name: string }>`
