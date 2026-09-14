@@ -68,7 +68,7 @@ import Migration0052 from "./Migrations/052_ProjectionProjectsRepoRoots.ts";
 import Migration0053 from "./Migrations/053_ProjectionProjectsWorkspaceFile.ts";
 import Migration0054 from "./Migrations/054_ProjectionCheckpointRefs.ts";
 import Migration0055 from "./Migrations/055_ProjectionThreadsWorktrees.ts";
-import Migration0056 from "./Migrations/054_HealSkippedRenumberedMigrations.ts";
+import Migration0056 from "./Migrations/056_HealSkippedRenumberedMigrations.ts";
 
 /**
  * Migration loader with all migrations defined inline.
@@ -87,8 +87,8 @@ import Migration0056 from "./Migrations/054_HealSkippedRenumberedMigrations.ts";
  * silently unrunnable on every database that saw the old numbering. When
  * rebasing a branch that adds migrations, append after main's highest id rather
  * than renumbering. `detectMigrationLedgerDrift` reports this if it happens
- * anyway; 052_HealSkippedRenumberedMigrations repairs the 033-036, 037-040,
- * 041, 042-043 and 044-047 occurrences.
+ * anyway; 056_HealSkippedRenumberedMigrations repairs the 033-036, 037-040,
+ * 041, 042-043, 044-047, 048-049 and 050-051 occurrences.
  */
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -168,7 +168,7 @@ export interface MigrationLedgerDrift {
  * skipped and will never run again. That surfaces much later as a missing
  * column at query time, which reads like a corrupt database rather than a
  * migration problem. Drift only happens when a migration is renumbered after a
- * build has applied it -- see 052_HealSkippedRenumberedMigrations.
+ * build has applied it -- see 056_HealSkippedRenumberedMigrations.
  *
  * Reporting is deliberately non-fatal, and a warning rather than an error.
  * Machines that already have drift need to boot so their healing migrations can
