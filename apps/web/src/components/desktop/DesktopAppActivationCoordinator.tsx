@@ -8,14 +8,19 @@ import { findProjectByPath, inferProjectTitleFromPath } from "../../lib/projectP
 import { newProjectId } from "../../lib/utils";
 import { readProjects, waitForProject } from "../../state/entities";
 import { usePrimaryEnvironment } from "../../state/environments";
+import { filesystemEnvironment } from "../../state/filesystem";
 import { projectEnvironment } from "../../state/projects";
 import { useEnvironmentQuery } from "../../state/query";
 import { environmentShell } from "../../state/shell";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
 
 export function DesktopAppActivationCoordinator() {
   const primaryEnvironment = usePrimaryEnvironment();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
+  const readWorkspaceFile = useAtomQueryRunner(filesystemEnvironment.readWorkspaceFile, {
+    reportFailure: false,
+  });
   const openThread = useNewThreadHandler();
   const queueRef = useRef(Promise.resolve());
   const activation = window.desktopBridge?.appActivation;
@@ -49,7 +54,24 @@ export function DesktopAppActivationCoordinator() {
           readProjects().filter((project) => project.environmentId === environmentId),
           workspaceRoot,
         ) ?? null,
-      createProject: async (environmentId, workspaceRoot) => {
+      createProject: async (environmentId, workspaceRoot, workspaceFile) => {
+        let workspace = {};
+        if (workspaceFile !== undefined) {
+          const read = await readWorkspaceFile({
+            environmentId,
+            input: { workspaceFilePath: workspaceFile },
+          });
+          if (read._tag === "Failure") {
+            const error = squashAtomCommandFailure(read);
+            throw error instanceof Error
+              ? error
+              : new Error("T3 Code could not read the workspace file.");
+          }
+          workspace = {
+            workspaceFile: read.value.workspaceFilePath,
+            repoRoots: read.value.repoRoots,
+          };
+        }
         const projectId = newProjectId();
         const result = await createProject({
           environmentId,
@@ -57,6 +79,7 @@ export function DesktopAppActivationCoordinator() {
             projectId,
             title: inferProjectTitleFromPath(workspaceRoot),
             workspaceRoot,
+            ...workspace,
             createWorkspaceRootIfMissing: false,
             defaultModelSelection: null,
           },

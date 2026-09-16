@@ -12,6 +12,8 @@ export const DesktopAppActivationRequest = Schema.Struct({
   requestId: TrimmedNonEmptyString,
   type: Schema.Literal("open-workspace"),
   workspaceRoot: TrimmedNonEmptyString,
+  /** Present when the caller opened a multi-root VS Code workspace file. */
+  workspaceFile: Schema.optional(TrimmedNonEmptyString),
   platform: DesktopAppActivationPlatform,
 });
 export type DesktopAppActivationRequest = typeof DesktopAppActivationRequest.Type;
