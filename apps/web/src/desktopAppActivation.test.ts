@@ -75,6 +75,20 @@ describe("desktop app activation", () => {
     expect(response).toMatchObject({ ok: true, projectId: createdProjectId });
   });
 
+  it("passes a workspace file through to project creation", async () => {
+    const workspaceFile = "/workspace/project/project.code-workspace";
+    const deps = dependencies({ findProject: () => null });
+
+    const response = await handleDesktopAppActivationRequest({ ...request, workspaceFile }, deps);
+
+    expect(deps.createProject).toHaveBeenCalledWith(
+      environmentId,
+      request.workspaceRoot,
+      workspaceFile,
+    );
+    expect(response).toMatchObject({ ok: true, projectId: createdProjectId });
+  });
+
   it("rejects a Windows path when the primary environment is WSL", async () => {
     const response = await handleDesktopAppActivationRequest(
       { ...request, platform: "win32" },

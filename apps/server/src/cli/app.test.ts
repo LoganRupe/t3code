@@ -191,17 +191,21 @@ describe("t3 app", () => {
       Effect.gen(function* () {
         const baseDir = NodePath.join(root, "t3-home");
         const explicitPath = NodePath.join(root, "project");
+        const workspaceFile = NodePath.join(root, "project.code-workspace");
         const platform = yield* HostProcessPlatform;
         const workingDirectory = yield* HostProcessWorkingDirectory;
         const desktop = yield* fakeDesktop({ baseDir });
 
         yield* runCli(["app"], { T3CODE_HOME: baseDir });
         yield* runCli(["app", explicitPath, "--base-dir", baseDir]);
+        yield* runCli(["app", workspaceFile, "--base-dir", baseDir]);
 
         expect(desktop.received.map((request) => request.workspaceRoot)).toEqual([
           workingDirectory,
           explicitPath,
+          root,
         ]);
+        expect(desktop.received[2]).toMatchObject({ workspaceFile });
         expect(desktop.received.every((request) => request.platform === platform)).toBe(true);
       }).pipe(Effect.scoped),
     ),

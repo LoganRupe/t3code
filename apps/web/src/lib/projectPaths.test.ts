@@ -9,6 +9,7 @@ import {
   getBrowseParentPath,
   hasTrailingPathSeparator,
   inferProjectTitleFromPath,
+  inferProjectTitleFromWorkspaceFile,
   isExplicitRelativeProjectPath,
   isFilesystemBrowseQuery,
   normalizeProjectPathForComparison,
@@ -44,6 +45,16 @@ describe("projectPaths", () => {
     expect(inferProjectTitleFromPath("/repo/app/")).toBe("app");
     expect(inferProjectTitleFromPath("C:\\Work\\Repo\\")).toBe("Repo");
     expect(inferProjectTitleFromPath("/home/user\\project/")).toBe("user\\project");
+  });
+
+  it("titles workspace-file projects after the file, not its directory", () => {
+    expect(inferProjectTitleFromWorkspaceFile("/home/user/code/platform.code-workspace")).toBe(
+      "platform",
+    );
+    expect(inferProjectTitleFromWorkspaceFile("C:\\Work\\code\\Platform.CODE-WORKSPACE")).toBe(
+      "Platform",
+    );
+    expect(inferProjectTitleFromWorkspaceFile("/home/user/code/.code-workspace")).toBe(null);
   });
 
   it("detects browse queries across supported path styles", () => {
