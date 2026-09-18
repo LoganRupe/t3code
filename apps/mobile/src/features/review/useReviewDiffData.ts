@@ -56,6 +56,8 @@ function getCachedReviewFile(
       previousPath: stat.previousPath,
       changeType: "change" as const,
       languageHint: null,
+      // Per-file lazy loading only runs for a single-repo diff.
+      repoLabel: null,
       additionLines: [],
       deletionLines: [],
       rows: [],
