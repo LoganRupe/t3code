@@ -60,6 +60,7 @@ const readModelWithThread = Effect.gen(function* () {
       interactionMode: "default",
       branch: null,
       worktreePath: null,
+      worktrees: [],
       createdAt,
       updatedAt: createdAt,
     },

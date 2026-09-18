@@ -11187,15 +11187,13 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         });
       }
       assert.equal(resolveRemoteTrackingCommit.mock.calls.length, 0);
-      const createWorktreeInput = createWorktree.mock.calls[0]?.[0];
-      assert.equal(createWorktreeInput?.cwd, "/tmp/project");
-      assert.equal(createWorktreeInput?.refName, "main");
-      assert.equal(createWorktreeInput?.newRefName, "t3code/bootstrap-refName");
-      assertTrue(
-        createWorktreeInput?.path?.endsWith(
-          "/worktrees/project-default/thread-bootstrap-no-origin/project",
-        ) === true,
-      );
+      assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
+        cwd: "/tmp/project",
+        refName: "main",
+        newRefName: "t3code/bootstrap-refName",
+        baseRefName: "main",
+        path: null,
+      });
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
