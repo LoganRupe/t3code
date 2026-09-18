@@ -12,6 +12,7 @@ export const DesktopAppActivationRequest = Schema.Struct({
   requestId: TrimmedNonEmptyString,
   type: Schema.Literal("open-workspace"),
   workspaceRoot: TrimmedNonEmptyString,
+  workspaceFile: Schema.optional(TrimmedNonEmptyString),
   platform: DesktopAppActivationPlatform,
 });
 export type DesktopAppActivationRequest = typeof DesktopAppActivationRequest.Type;
