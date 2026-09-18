@@ -54,7 +54,7 @@ export default Effect.gen(function* () {
   // A database that skipped 042_ProjectionThreadLinkedPullRequest to a
   // renumbered multi-repo migration reaches this id without
   // `linked_pull_request_json`, and the select below would abort the boot
-  // before 056_HealSkippedRenumberedMigrations can restore the column. That
+  // before 058_HealSkippedRenumberedMigrations can restore the column. That
   // heal re-runs this migration once the column is back, so skipping here only
   // defers the backfill.
   const threadColumns = yield* sql<{ readonly name: string }>`
