@@ -153,6 +153,19 @@ export function inferProjectTitleFromPath(value: string): string {
   return segments.findLast(Boolean) ?? normalized;
 }
 
+/**
+ * Titles a `.code-workspace`-backed project after the file rather than the
+ * directory holding it, which is often a generic parent such as `~/code`.
+ * Returns null when the file name carries no title, leaving the caller to fall
+ * back to {@link inferProjectTitleFromPath} on the anchor directory.
+ */
+export function inferProjectTitleFromWorkspaceFile(workspaceFilePath: string): string | null {
+  const title = inferProjectTitleFromPath(workspaceFilePath)
+    .replace(/\.code-workspace$/i, "")
+    .trim();
+  return title.length > 0 ? title : null;
+}
+
 export function appendBrowsePathSegment(currentPath: string, segment: string): string {
   const separator = preferredPathSeparator(currentPath);
   return `${getBrowseDirectoryPath(currentPath)}${segment}${separator}`;

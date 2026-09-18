@@ -95,6 +95,7 @@ import {
   getBrowseDirectoryPath,
   hasTrailingPathSeparator,
   inferProjectTitleFromPath,
+  inferProjectTitleFromWorkspaceFile,
   isExplicitRelativeProjectPath,
   isUnsupportedWindowsProjectPath,
   resolveProjectPathForDispatch,
@@ -2799,13 +2800,12 @@ function OpenCommandPaletteDialog(props: {
         );
       }
 
-      const fileName = workspaceFilePath.split(/[/\\]/).pop() ?? workspaceFilePath;
-      const title = fileName.replace(/\.code-workspace$/i, "").trim();
+      const title = inferProjectTitleFromWorkspaceFile(resolved.workspaceFilePath);
 
       await handleAddProject(resolved.anchorDir, {
         workspaceFile: resolved.workspaceFilePath,
         repoRoots: resolved.repoRoots,
-        ...(title.length > 0 ? { title } : {}),
+        ...(title === null ? {} : { title }),
       });
     },
     [browseEnvironmentId, handleAddProject, readWorkspaceFile],

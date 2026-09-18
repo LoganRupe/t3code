@@ -8,6 +8,7 @@ export {
   getBrowseParentPath,
   hasTrailingPathSeparator,
   inferProjectTitleFromPath,
+  inferProjectTitleFromWorkspaceFile,
   isExplicitRelativeProjectPath,
   isFilesystemBrowseQuery,
   isUnsupportedWindowsProjectPath,

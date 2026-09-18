@@ -4,7 +4,11 @@ import { useEffect, useEffectEvent, useRef } from "react";
 
 import { handleDesktopAppActivationRequest } from "../../desktopAppActivation";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
-import { findProjectByPath, inferProjectTitleFromPath } from "../../lib/projectPaths";
+import {
+  findProjectByPath,
+  inferProjectTitleFromPath,
+  inferProjectTitleFromWorkspaceFile,
+} from "../../lib/projectPaths";
 import { newProjectId } from "../../lib/utils";
 import { readProjects, waitForProject } from "../../state/entities";
 import { usePrimaryEnvironment } from "../../state/environments";
@@ -56,6 +60,9 @@ export function DesktopAppActivationCoordinator() {
         ) ?? null,
       createProject: async (environmentId, workspaceRoot, workspaceFile) => {
         let workspace = {};
+        // The palette names a workspace project after its file, so the CLI has
+        // to as well; the anchor directory is often a generic parent.
+        let title = inferProjectTitleFromPath(workspaceRoot);
         if (workspaceFile !== undefined) {
           const read = await readWorkspaceFile({
             environmentId,
@@ -71,13 +78,14 @@ export function DesktopAppActivationCoordinator() {
             workspaceFile: read.value.workspaceFilePath,
             repoRoots: read.value.repoRoots,
           };
+          title = inferProjectTitleFromWorkspaceFile(read.value.workspaceFilePath) ?? title;
         }
         const projectId = newProjectId();
         const result = await createProject({
           environmentId,
           input: {
             projectId,
-            title: inferProjectTitleFromPath(workspaceRoot),
+            title,
             workspaceRoot,
             ...workspace,
             createWorkspaceRootIfMissing: false,
