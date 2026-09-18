@@ -29,6 +29,7 @@ export interface DesktopAppActivationDependencies {
   readonly createProject: (
     environmentId: EnvironmentId,
     workspaceRoot: string,
+    workspaceFile: string | undefined,
   ) => Promise<ProjectId>;
   readonly waitForProject: (projectRef: ScopedProjectRef) => Promise<void>;
   readonly openThread: (
@@ -79,7 +80,11 @@ export async function handleDesktopAppActivationRequest(
   let projectId = dependencies.findProject(target.environmentId, request.workspaceRoot)?.id ?? null;
   if (projectId === null) {
     try {
-      projectId = await dependencies.createProject(target.environmentId, request.workspaceRoot);
+      projectId = await dependencies.createProject(
+        target.environmentId,
+        request.workspaceRoot,
+        request.workspaceFile,
+      );
       await dependencies.waitForProject({ environmentId: target.environmentId, projectId });
     } catch (error) {
       return failure(

@@ -202,7 +202,11 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
   const allowDevFallback = Option.isNone(flags.baseDir) && !environment.t3Home?.trim();
   const rawWorkspaceRoot =
     Option.getOrUndefined(flags.workspaceRoot) ?? (yield* HostProcessWorkingDirectory);
-  const workspaceRoot = path.resolve(yield* expandHomePath(rawWorkspaceRoot));
+  const resolvedInput = path.resolve(yield* expandHomePath(rawWorkspaceRoot));
+  const workspaceFile = resolvedInput.toLowerCase().endsWith(".code-workspace")
+    ? resolvedInput
+    : undefined;
+  const workspaceRoot = workspaceFile === undefined ? resolvedInput : path.dirname(workspaceFile);
   const userId = yield* HostProcessUserId;
   const resolveAddress = (stateSubdirectory: "userdata" | "dev") =>
     resolveDesktopAppControlAddress({
@@ -217,6 +221,7 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
     requestId: NodeCrypto.randomUUID(),
     type: "open-workspace",
     workspaceRoot,
+    ...(workspaceFile === undefined ? {} : { workspaceFile }),
     platform: hostPlatform,
   };
   const address = resolveAddress("userdata");
@@ -252,7 +257,9 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
 export const appCommand = Command.make("app", {
   baseDir: baseDirFlag,
   workspaceRoot: Argument.String("path").pipe(
-    Argument.withDescription("Project directory. Default: current directory."),
+    Argument.withDescription(
+      "Project directory or .code-workspace file. Default: current directory.",
+    ),
     Argument.optional,
   ),
 }).pipe(
