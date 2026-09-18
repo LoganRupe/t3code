@@ -96,6 +96,7 @@ describe("mobile SQLite environment cache store", () => {
             branch: null,
             pullRequests: [],
             worktreePath: null,
+            worktrees: [],
             latestTurn: null,
             createdAt: now,
             updatedAt: now,
