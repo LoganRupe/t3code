@@ -75,6 +75,15 @@ function checkpointStatusFromRuntime(status: string | undefined): "ready" | "mis
   }
 }
 
+function threadWorktreePaths(thread: {
+  readonly worktreePath: string | null;
+  readonly worktrees: ReadonlyArray<{ readonly worktreePath: string }>;
+}): ReadonlyArray<string> {
+  const paths = new Set(thread.worktrees.map((entry) => entry.worktreePath));
+  if (thread.worktreePath !== null) paths.add(thread.worktreePath);
+  return [...paths];
+}
+
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const randomUUID = crypto.randomUUIDv4;
@@ -359,34 +368,33 @@ const make = Effect.gen(function* () {
               format: "numstat",
             })
           : Effect.succeed("")
-      )
-        .pipe(
-          Effect.map((diff) =>
-            parseTurnDiffFilesFromNumstat(diff).map((file) => ({
-              path: file.path,
-              kind: "modified" as const,
-              additions: file.additions,
-              deletions: file.deletions,
-            })),
-          ),
-          Effect.tapError((error) =>
-            appendCaptureFailureActivity({
-              threadId: input.threadId,
-              turnId: input.turnId,
-              detail: `Checkpoint captured, but turn diff summary is unavailable for ${root}: ${error.message}`,
-              createdAt: input.createdAt,
-            }),
-          ),
-          Effect.catch((error) =>
-            Effect.logWarning("failed to derive checkpoint file summary", {
-              threadId: input.threadId,
-              turnId: input.turnId,
-              turnCount: input.turnCount,
-              root,
-              detail: error.message,
-            }).pipe(Effect.as([])),
-          ),
-        );
+      ).pipe(
+        Effect.map((diff) =>
+          parseTurnDiffFilesFromNumstat(diff).map((file) => ({
+            path: file.path,
+            kind: "modified" as const,
+            additions: file.additions,
+            deletions: file.deletions,
+          })),
+        ),
+        Effect.tapError((error) =>
+          appendCaptureFailureActivity({
+            threadId: input.threadId,
+            turnId: input.turnId,
+            detail: `Checkpoint captured, but turn diff summary is unavailable for ${root}: ${error.message}`,
+            createdAt: input.createdAt,
+          }),
+        ),
+        Effect.catch((error) =>
+          Effect.logWarning("failed to derive checkpoint file summary", {
+            threadId: input.threadId,
+            turnId: input.turnId,
+            turnCount: input.turnCount,
+            root,
+            detail: error.message,
+          }).pipe(Effect.as([])),
+        ),
+      );
     });
 
     const perRoot = yield* Effect.forEach(
@@ -862,23 +870,39 @@ const make = Effect.gen(function* () {
   });
 
   // Checkpoints contain the whole checkout, so restoring a shared cwd can erase a sibling's work.
+  // A multi-repo thread owns one worktree per repo root, so `cwd` may be any of them.
   const isRestoreWorkspaceIsolated = Effect.fn("isRestoreWorkspaceIsolated")(function* (
-    thread: { readonly id: ThreadId; readonly worktreePath: string | null },
+    thread: {
+      readonly id: ThreadId;
+      readonly worktreePath: string | null;
+      readonly worktrees: ReadonlyArray<{ readonly worktreePath: string }>;
+    },
     cwd: string,
   ) {
-    if (thread.worktreePath === null) return false;
+    const ownWorktrees = threadWorktreePaths(thread);
+    if (ownWorktrees.length === 0) return false;
     const canonicalCwd = yield* fileSystem.realPath(cwd);
-    if ((yield* fileSystem.realPath(thread.worktreePath)) !== canonicalCwd) return false;
+    const ownCanonical = yield* Effect.forEach(ownWorktrees, (worktreePath) =>
+      fileSystem.realPath(worktreePath),
+    );
+    if (!ownCanonical.includes(canonicalCwd)) return false;
     const active = yield* projectionSnapshotQuery.getShellSnapshot();
     const archived = yield* projectionSnapshotQuery.getArchivedShellSnapshot();
     const projects = [...active.projects, ...archived.projects];
     const paths = new Set<string>();
     for (const other of [...active.threads, ...archived.threads]) {
       if (other.id === thread.id) continue;
-      const candidate =
-        other.worktreePath ??
-        projects.find((project) => project.id === other.projectId)?.workspaceRoot;
-      if (candidate !== undefined) paths.add(candidate);
+      const otherWorktrees = threadWorktreePaths(other);
+      if (otherWorktrees.length > 0) {
+        for (const worktreePath of otherWorktrees) paths.add(worktreePath);
+        continue;
+      }
+      // A workspace file can list repos outside its container, so a checkout
+      // thread owns every repo root, not just the workspace root.
+      const project = projects.find((candidate) => candidate.id === other.projectId);
+      if (project === undefined) continue;
+      paths.add(project.workspaceRoot);
+      for (const repoRoot of project.repoRoots ?? []) paths.add(repoRoot);
     }
     for (const session of yield* providerService.listSessions()) {
       if (
@@ -970,7 +994,10 @@ const make = Effect.gen(function* () {
         return;
       }
 
-      if (!(yield* isRestoreWorkspaceIsolated(thread, checkpointCwd))) {
+      const isolatedRoots = yield* Effect.forEach(checkpointRoots, (root) =>
+        isRestoreWorkspaceIsolated(thread, root),
+      );
+      if (!isolatedRoots.every(Boolean)) {
         yield* appendRevertFailureActivity({
           threadId: thread.id,
           turnCount: event.payload.turnCount,
