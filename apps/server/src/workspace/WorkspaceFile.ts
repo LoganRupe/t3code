@@ -1,4 +1,3 @@
-import * as NodeOS from "node:os";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -9,6 +8,7 @@ import * as Schema from "effect/Schema";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 
 import { writeFileStringAtomically } from "../atomicWrite.ts";
+import { expandHomePathWith } from "../pathExpansion.ts";
 
 export class WorkspaceFileError extends Schema.TaggedError<WorkspaceFileError>()(
   "WorkspaceFileError",
@@ -98,13 +98,6 @@ const decodeDocument = Schema.decodeUnknownEffect(fromLenientJson(Schema.Unknown
 const decodeFolders = Schema.decodeUnknownEffect(Schema.Array(CodeWorkspaceFolder));
 const encodeDocument = Schema.encodeUnknownEffect(fromJsonStringPretty(Schema.Unknown));
 
-function expandHomePath(input: string, path: Path.Path): string {
-  if (input === "~") return NodeOS.homedir();
-  if (input.startsWith("~/") || input.startsWith("~\\"))
-    return path.join(NodeOS.homedir(), input.slice(2));
-  return input;
-}
-
 export const makeWorkspaceFile = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -123,7 +116,7 @@ export const makeWorkspaceFile = Effect.gen(function* () {
 
   const read: WorkspaceFileShape["read"] = Effect.fn("WorkspaceFile.read")(
     function* (workspaceFilePath) {
-      const absoluteFilePath = path.resolve(expandHomePath(workspaceFilePath.trim(), path));
+      const absoluteFilePath = path.resolve(expandHomePathWith(workspaceFilePath.trim(), path));
       const anchorDir = path.dirname(absoluteFilePath);
 
       const raw = yield* fileSystem.readFileString(absoluteFilePath).pipe(
@@ -171,7 +164,7 @@ export const makeWorkspaceFile = Effect.gen(function* () {
         folderEntries,
         (entry) =>
           Effect.gen(function* () {
-            const expanded = expandHomePath(entry.path.trim(), path);
+            const expanded = expandHomePathWith(entry.path.trim(), path);
             const absolutePath = path.isAbsolute(expanded)
               ? path.resolve(expanded)
               : path.resolve(anchorDir, expanded);
@@ -218,7 +211,7 @@ export const makeWorkspaceFile = Effect.gen(function* () {
   };
 
   const write: WorkspaceFileShape["write"] = Effect.fn("WorkspaceFile.write")(function* (input) {
-    const absoluteFilePath = path.resolve(expandHomePath(input.workspaceFilePath.trim(), path));
+    const absoluteFilePath = path.resolve(expandHomePathWith(input.workspaceFilePath.trim(), path));
 
     const contents = yield* encodeDocument(input.document).pipe(
       Effect.mapError(
