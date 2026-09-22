@@ -213,69 +213,71 @@ export function MultiRepoGitControl({
             </span>
           )}
         </PopoverTrigger>
-        <PopoverPopup side="bottom" align="end" className="w-80 p-1">
-          <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-            <span className="text-xs font-medium text-muted-foreground">
-              {aggregate.repoCount} {aggregate.repoCount === 1 ? "repo" : "repos"}
-            </span>
-            {plan.steps.length > 0 && (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      disabled={isSyncing}
-                      onClick={handleSyncAll}
-                    >
-                      {isSyncing ? (
-                        <Spinner className="size-3.5" />
-                      ) : (
-                        <RefreshCwIcon className="size-3.5" aria-hidden />
-                      )}
-                      <span className="ml-0.5">Sync all</span>
-                    </Button>
-                  }
-                />
-                <TooltipPopup side="bottom">
-                  Run the primary action for {plan.steps.length}{" "}
-                  {plan.steps.length === 1 ? "repo" : "repos"}
-                  {plan.skipped.length > 0 ? ` (${plan.skipped.length} need manual steps)` : ""}
-                </TooltipPopup>
-              </Tooltip>
-            )}
-          </div>
-          <div className="flex flex-col">
-            {groups.map((group) => (
-              <div
-                key={group.repoRoot}
-                className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5"
-              >
-                <div className="flex min-w-0 flex-col">
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <span className="truncate text-sm font-medium text-foreground">
-                          {group.displayName}
-                        </span>
-                      }
-                    />
-                    <TooltipPopup side="left">{group.repoRoot}</TooltipPopup>
-                  </Tooltip>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {summarizeRepoStatus(group.state.data, group.state.isPending)}
-                  </span>
+        <PopoverPopup side="bottom" align="end" width="md">
+          <div className="flex w-full min-w-0 flex-col p-1">
+            <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+              <span className="text-xs font-medium text-muted-foreground">
+                {aggregate.repoCount} {aggregate.repoCount === 1 ? "repo" : "repos"}
+              </span>
+              {plan.steps.length > 0 && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={isSyncing}
+                        onClick={handleSyncAll}
+                      >
+                        {isSyncing ? (
+                          <Spinner className="size-3.5" />
+                        ) : (
+                          <RefreshCwIcon className="size-3.5" aria-hidden />
+                        )}
+                        <span className="ml-0.5">Sync all</span>
+                      </Button>
+                    }
+                  />
+                  <TooltipPopup side="bottom">
+                    Run the primary action for {plan.steps.length}{" "}
+                    {plan.steps.length === 1 ? "repo" : "repos"}
+                    {plan.skipped.length > 0 ? ` (${plan.skipped.length} need manual steps)` : ""}
+                  </TooltipPopup>
+                </Tooltip>
+              )}
+            </div>
+            <div className="flex flex-col">
+              {groups.map((group) => (
+                <div
+                  key={group.repoRoot}
+                  className="flex items-center justify-between gap-3 rounded-md px-2 py-1.5"
+                >
+                  <div className="flex min-w-0 flex-col">
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <span className="truncate text-sm font-medium text-foreground">
+                            {group.displayName}
+                          </span>
+                        }
+                      />
+                      <TooltipPopup side="left">{group.repoRoot}</TooltipPopup>
+                    </Tooltip>
+                    <span className="truncate text-xs text-muted-foreground">
+                      {summarizeRepoStatus(group.state.data, group.state.isPending)}
+                    </span>
+                  </div>
+                  <GitActionsControl
+                    gitCwd={group.repoRoot}
+                    activeThreadRef={activeThreadRef}
+                    syncThreadBranch={false}
+                    quickActionLabel="always"
+                    onOpenPullRequest={onOpenPullRequest}
+                    {...(draftId ? { draftId } : {})}
+                  />
                 </div>
-                <GitActionsControl
-                  gitCwd={group.repoRoot}
-                  activeThreadRef={activeThreadRef}
-                  syncThreadBranch={false}
-                  quickActionLabel="always"
-                  onOpenPullRequest={onOpenPullRequest}
-                  {...(draftId ? { draftId } : {})}
-                />
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         </PopoverPopup>
       </Popover>
