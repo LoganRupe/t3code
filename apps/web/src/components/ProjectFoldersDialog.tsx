@@ -267,7 +267,7 @@ export function ProjectFoldersDialog({
               : "Manage the folders that make up this workspace."}
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-3">
+        <DialogPanel>
           {status === "loading" ? (
             <p className="text-xs text-muted-foreground">Reading workspace file…</p>
           ) : status === "error" ? (

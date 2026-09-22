@@ -545,6 +545,9 @@ function RightPanelEmptyState(props: {
                   <Menu>
                     <MenuTrigger
                       aria-label="Open terminal in a repo"
+                      // Same plain-button row as the non-menu branch below, so the
+                      // two render identically whether or not the repo picker applies.
+                      render={<button type="button" />}
                       className={cn(
                         "flex h-8 w-full cursor-pointer items-center gap-2.5 rounded-[var(--control-radius)] px-2.5 text-left text-sm transition-colors group-hover:bg-accent/60",
                         isHighlighted(action) && "bg-accent/60",

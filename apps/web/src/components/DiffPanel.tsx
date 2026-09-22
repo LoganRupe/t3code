@@ -1080,7 +1080,8 @@ export default function DiffPanel({
         {showRepoFilter ? (
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              render={<Button size="xs" variant="ghost-muted" />}
+              className="max-w-full"
               aria-label={`Filter diff by repo. Currently ${effectiveRepoFilter ?? "all repos"}`}
             >
               <FolderGit2Icon className="size-3.5 shrink-0 opacity-70" />
@@ -1154,7 +1155,8 @@ export default function DiffPanel({
                 }}
               >
                 <ComboboxTrigger
-                  className="inline-flex min-w-0 max-w-48 items-center gap-1 overflow-hidden rounded-md px-1.5 py-1 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                  render={<Button size="xs" variant="ghost-muted" />}
+                  className="min-w-0 max-w-48 overflow-hidden"
                   aria-label={`Change comparison target. Currently ${selectedGitSource.baseRef}`}
                 >
                   <span className="min-w-0 truncate">{selectedGitSource.baseRef}</span>
@@ -1581,11 +1583,8 @@ export default function DiffPanel({
                               render={
                                 <Button
                                   size="icon-micro"
-                                  variant="ghost"
-                                  className={cn(
-                                    "-ms-0.5 [--control-icon-color:currentColor] bg-transparent hover:bg-foreground/10",
-                                    getDiffCollapseIconClassName(fileDiff),
-                                  )}
+                                  variant="ghost-muted"
+                                  className={cn("-ms-0.5", getDiffCollapseIconClassName(fileDiff))}
                                   aria-label={
                                     collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`
                                   }
