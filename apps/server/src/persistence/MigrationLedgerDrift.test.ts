@@ -8,7 +8,7 @@ import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 // Each test gets its own in-memory database so ledger rows written by one case
 // cannot satisfy or corrupt another.
 const withDatabase = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
-  effect.pipe(Effect.provide(NodeSqliteClient.layerMemory()));
+  effect.pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 describe("migration ledger drift", () => {
   it.effect("reports nothing for a database migrated in order", () =>

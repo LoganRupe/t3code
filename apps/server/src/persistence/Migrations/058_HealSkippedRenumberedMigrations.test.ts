@@ -66,7 +66,7 @@ const turnIndexes = Effect.gen(function* () {
 // Each test gets its own in-memory database; a shared one would let the drift
 // reproduced below leak into the healthy-database case and pass it vacuously.
 const withDatabase = <A, E>(effect: Effect.Effect<A, E, SqlClient.SqlClient>) =>
-  effect.pipe(Effect.provide(NodeSqliteClient.layerMemory()));
+  effect.pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" })));
 
 describe("058_HealSkippedRenumberedMigrations", () => {
   it.effect("restores columns on a database that skipped migrations 033-036", () =>
