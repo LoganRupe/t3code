@@ -1,4 +1,3 @@
-import * as NodeOS from "node:os";
 import * as Arr from "effect/Array";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -8,6 +7,8 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import type { FilesystemScanGitReposInput, FilesystemScanGitReposResult } from "@t3tools/contracts";
+
+import { expandHomePathWith } from "../pathExpansion.ts";
 
 export class WorkspaceGitScanError extends Schema.TaggedError<WorkspaceGitScanError>()(
   "WorkspaceGitScanError",
@@ -31,13 +32,6 @@ export class WorkspaceGitScan extends Context.Service<WorkspaceGitScan, Workspac
 
 const SCAN_CONCURRENCY = 32;
 
-function expandHomePath(input: string, path: Path.Path): string {
-  if (input === "~") return NodeOS.homedir();
-  if (input.startsWith("~/") || input.startsWith("~\\"))
-    return path.join(NodeOS.homedir(), input.slice(2));
-  return input;
-}
-
 export const makeWorkspaceGitScan = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -49,7 +43,7 @@ export const makeWorkspaceGitScan = Effect.gen(function* () {
     );
 
   const scan: WorkspaceGitScanShape["scan"] = Effect.fn("WorkspaceGitScan.scan")(function* (input) {
-    const normalizedParent = path.resolve(expandHomePath(input.parentPath.trim(), path));
+    const normalizedParent = path.resolve(expandHomePathWith(input.parentPath.trim(), path));
 
     const stat = yield* fileSystem.stat(normalizedParent).pipe(
       Effect.mapError(
