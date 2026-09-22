@@ -1080,7 +1080,8 @@ export default function DiffPanel({
         {showRepoFilter ? (
           <DropdownMenu>
             <DropdownMenuTrigger
-              className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md px-1.5 text-[11px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              render={<Button size="xs" variant="ghost-muted" />}
+              className="max-w-full"
               aria-label={`Filter diff by repo. Currently ${effectiveRepoFilter ?? "all repos"}`}
             >
               <FolderGit2Icon className="size-3.5 shrink-0 opacity-70" />

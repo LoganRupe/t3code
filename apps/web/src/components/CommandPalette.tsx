@@ -3010,7 +3010,9 @@ function OpenCommandPaletteDialog(props: {
         {isBrowsing && !relativePathNeedsActiveProject ? (
           <CommandFooterAction
             aria-pressed={showWorkspaceFiles}
-            className={cn("gap-1.5", showWorkspaceFiles && "text-foreground")}
+            // ghost-muted already reads data-pressed as the active colour, so the
+            // toggle sets it instead of overriding the variant's own foreground.
+            data-pressed={showWorkspaceFiles || undefined}
             onClick={toggleShowWorkspaceFiles}
             title="Toggle showing .code-workspace files while browsing"
           >
