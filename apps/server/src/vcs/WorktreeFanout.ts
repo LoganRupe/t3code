@@ -181,3 +181,24 @@ export const createThreadWorktrees = (
 
     return created;
   });
+
+/**
+ * Folder entries for a thread's generated `.code-workspace`: each folder of the
+ * project's workspace file that is a fanned-out repo root points at its
+ * worktree (relative, since the file sits in the per-thread directory beside
+ * them); folders without a worktree keep their original absolute path. Names
+ * carry over so the editor shows the project's repo names, not placement
+ * suffixes like `app-2`.
+ */
+export function threadWorkspaceFolders(input: {
+  readonly folders: ReadonlyArray<{ readonly absolutePath: string; readonly name: string }>;
+  readonly worktrees: ReadonlyArray<{ readonly repoRoot: string; readonly worktreePath: string }>;
+}): ReadonlyArray<{ readonly path: string; readonly name: string }> {
+  return input.folders.map((folder) => {
+    const worktree = input.worktrees.find((entry) => entry.repoRoot === folder.absolutePath);
+    return {
+      path: worktree ? `./${basenameOf(worktree.worktreePath)}` : folder.absolutePath,
+      name: folder.name,
+    };
+  });
+}
