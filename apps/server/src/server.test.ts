@@ -11617,6 +11617,8 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           layers: {
             gitVcsDriver: {
               execute,
+              // No origin/HEAD, so the cousin falls back to its checked-out ref.
+              resolveDefaultBranchName: () => Effect.succeed(null),
               remoteExists,
               fetchRemote,
               remoteBranchExists,
@@ -11718,8 +11720,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           ),
         );
 
-        // The base ref the user picked lands on the anchor repo; the cousin
-        // branches off its own HEAD instead of silently reusing it.
+        // The base ref the user picked lands on the anchor repo. The cousin
+        // resolves its own base ("dev") and starts it from origin too.
+        assert.deepEqual(
+          fetchRemote.mock.calls.map((call) => [call[0]?.cwd, call[0]?.refName]),
+          [
+            [anchorRepoRoot, "main"],
+            [cousinRepoRoot, "dev"],
+          ],
+        );
         assert.deepEqual(
           createWorktree.mock.calls.map((call) => ({
             cwd: call[0]?.cwd,
@@ -11727,7 +11736,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           })),
           [
             { cwd: anchorRepoRoot, refName: fetchedOriginCommit },
-            { cwd: cousinRepoRoot, refName: "dev" },
+            { cwd: cousinRepoRoot, refName: fetchedOriginCommit },
           ],
         );
 
@@ -11743,6 +11752,159 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           ]);
         }
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("bases each multi-repo cousin on its pick, else its own default branch", () =>
+    Effect.gen(function* () {
+      // A `.code-workspace` project's `projectCwd` is the directory holding
+      // the file, which is not a git repo — the chosen base ref belongs to the
+      // first repo root, and git commands must run there.
+      const anchorRepoRoot = "/tmp/workspace/api";
+      const cousinRepoRoot = "/tmp/workspace/web";
+      const defaultedRepoRoot = "/tmp/workspace/docs";
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const remoteExists = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteExists"]>[0]) =>
+          Effect.succeed(true),
+      );
+      const fetchRemote = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["fetchRemote"]>[0]) => Effect.void,
+      );
+      const remoteBranchExists = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["remoteBranchExists"]>[0]) =>
+          Effect.succeed(true),
+      );
+      const fetchedOriginCommit = "0123456789abcdef0123456789abcdef01234567";
+      const resolveRemoteTrackingCommit = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["resolveRemoteTrackingCommit"]>[0]) =>
+          Effect.succeed({
+            commitSha: fetchedOriginCommit,
+            remoteRefName: "origin/main",
+          }),
+      );
+      const execute = vi.fn((_: Parameters<GitVcsDriver.GitVcsDriver["Service"]["execute"]>[0]) =>
+        Effect.succeed(SUCCESSFUL_GIT_EXECUTION),
+      );
+      const createWorktree = vi.fn(
+        (input: Parameters<GitVcsDriver.GitVcsDriver["Service"]["createWorktree"]>[0]) =>
+          Effect.succeed({
+            worktree: {
+              refName: "t3code/bootstrap-refName",
+              path: `${input.cwd}-worktree`,
+            },
+          }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            execute,
+            resolveDefaultBranchName: (cwd) =>
+              Effect.succeed(cwd === defaultedRepoRoot ? "master" : "main"),
+            remoteExists,
+            fetchRemote,
+            remoteBranchExists,
+            resolveRemoteTrackingCommit,
+            createWorktree,
+          },
+          vcsDriver: {
+            isInsideWorkTree: () => Effect.succeed(true),
+          },
+          gitManager: {
+            // The cousin repo branches off its own checked-out ref.
+            localStatus: () =>
+              Effect.succeed({
+                isRepo: true,
+                hasPrimaryRemote: true,
+                isDefaultRef: true,
+                refName: "dev",
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+              }),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Workspace",
+                  workspaceRoot: "/tmp/workspace",
+                  workspaceFile: "/tmp/workspace/project.code-workspace",
+                  repoRoots: [anchorRepoRoot, cousinRepoRoot, defaultedRepoRoot],
+                  defaultModelSelection: null,
+                  scripts: [],
+                  createdAt: "2026-01-01T00:00:00.000Z",
+                  updatedAt: "2026-01-01T00:00:00.000Z",
+                }),
+              ),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-bootstrap-turn-start-multi-repo-bases"),
+            threadId: ThreadId.make("thread-bootstrap-multi-repo-bases"),
+            message: {
+              messageId: MessageId.make("msg-bootstrap-multi-repo-bases"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "Bootstrap Thread",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: "main",
+                worktreePath: null,
+                createdAt,
+              },
+              prepareWorktree: {
+                projectCwd: "/tmp/workspace",
+                baseBranch: "main",
+                branch: "t3code/bootstrap-refName",
+                repoBaseBranches: [{ repoRoot: cousinRepoRoot, baseBranch: "release" }],
+              },
+            },
+            createdAt,
+          }),
+        ),
+      );
+
+      // No "start from origin": nothing is fetched, and each cousin uses the
+      // client's pick or, without one, its own origin/HEAD branch rather
+      // than whatever it has checked out ("dev").
+      assert.equal(fetchRemote.mock.calls.length, 0);
+      assert.deepEqual(
+        createWorktree.mock.calls.map((call) => ({
+          cwd: call[0]?.cwd,
+          refName: call[0]?.refName,
+        })),
+        [
+          { cwd: anchorRepoRoot, refName: "main" },
+          { cwd: cousinRepoRoot, refName: "release" },
+          { cwd: defaultedRepoRoot, refName: "master" },
+        ],
+      );
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("records setup-script failures without aborting bootstrap turn start", () =>
