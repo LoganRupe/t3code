@@ -40,6 +40,8 @@ export class GitWorkflowService extends Context.Service<
       readonly cwd: string;
       readonly refName: string;
     }) => Effect.Effect<boolean, GitCommandError>;
+    /** The branch `origin/HEAD` points at, or null when origin has none. */
+    readonly resolveDefaultBranch: (cwd: string) => Effect.Effect<string | null, GitCommandError>;
     readonly status: (
       input: VcsStatusInput,
     ) => Effect.Effect<VcsStatusResult, GitManagerServiceError>;
@@ -294,6 +296,10 @@ export const make = Effect.gen(function* () {
           }),
         ),
         Effect.map((result) => result.exitCode === 0),
+      ),
+    resolveDefaultBranch: (cwd) =>
+      ensureGitCommand("GitWorkflowService.resolveDefaultBranch", cwd).pipe(
+        Effect.andThen(git.resolveDefaultBranchName(cwd, "origin")),
       ),
     status: (input) =>
       detectGitRepositoryForStatus("GitWorkflowService.status", input.cwd).pipe(

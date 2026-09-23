@@ -1536,10 +1536,56 @@ const makeWsRpcLayer = (
               // Multi-repo projects fan the isolated run out to one worktree per
               // repo root. The anchor repo root goes first so the thread's
               // `worktreePath` stays `worktrees[0]` and carries the setup
-              // progress; the other roots branch off their current HEAD.
+              // progress.
               const cousinRepoRoots = (projectShell?.repoRoots ?? []).filter(
                 (repoRoot) => repoRoot !== anchorRepoRoot,
               );
+              // A cousin bases on the client's pick for it, else its own
+              // default branch (origin/HEAD), else whatever it has checked out.
+              // "Start from origin" applies per repo, falling back to the local
+              // branch; a default branch that only exists on origin still works.
+              const resolveCousinBase = (repoRoot: string) =>
+                Effect.gen(function* () {
+                  const baseBranch =
+                    prepareWorktree.repoBaseBranches?.find((entry) => entry.repoRoot === repoRoot)
+                      ?.baseBranch ??
+                    (yield* gitWorkflow
+                      .resolveDefaultBranch(repoRoot)
+                      .pipe(Effect.orElseSucceed(() => null))) ??
+                    (yield* gitWorkflow.localStatus({ cwd: repoRoot }).pipe(
+                      Effect.map((status) => status.refName),
+                      Effect.orElseSucceed(() => null),
+                    ));
+                  if (!baseBranch) return { baseRef: "HEAD" };
+                  if (
+                    prepareWorktree.startFromOrigin === true &&
+                    (yield* gitWorkflow
+                      .remoteExists({ cwd: repoRoot, remoteName: "origin" })
+                      .pipe(Effect.orElseSucceed(() => false)))
+                  ) {
+                    const remoteBase = yield* gitWorkflow
+                      .fetchRemote({ cwd: repoRoot, remoteName: "origin", refName: baseBranch })
+                      .pipe(
+                        Effect.andThen(
+                          gitWorkflow.resolveRemoteTrackingCommit({
+                            cwd: repoRoot,
+                            refName: baseBranch,
+                            fallbackRemoteName: "origin",
+                          }),
+                        ),
+                        Effect.map((resolved) => resolved.commitSha),
+                        Effect.orElseSucceed(() => null),
+                      );
+                    if (remoteBase) return { baseRef: remoteBase, baseRefName: baseBranch };
+                  }
+                  for (const candidate of [baseBranch, `origin/${baseBranch}`]) {
+                    const exists = yield* gitWorkflow
+                      .hasCommit({ cwd: repoRoot, refName: candidate })
+                      .pipe(Effect.orElseSucceed(() => false));
+                    if (exists) return { baseRef: candidate, baseRefName: baseBranch };
+                  }
+                  return { baseRef: "HEAD" };
+                });
 
               yield* worktreeSetupTracker.stageStatus(threadId, "checkout", "running");
               let checkoutTotal: number | null = null;
@@ -1628,12 +1674,10 @@ const makeWsRpcLayer = (
                   : yield* Effect.forEach(
                       cousinRepoRoots,
                       (repoRoot): Effect.Effect<WorktreeFanoutTarget> =>
-                        gitWorkflow.localStatus({ cwd: repoRoot }).pipe(
-                          Effect.map((status) => status.refName ?? "HEAD"),
-                          Effect.orElseSucceed(() => "HEAD"),
-                          Effect.map((baseRef) => ({
+                        resolveCousinBase(repoRoot).pipe(
+                          Effect.map((base) => ({
                             repoRoot,
-                            baseRef,
+                            ...base,
                             newBranch: prepareWorktree.branch ?? null,
                             options: {
                               submodules,
