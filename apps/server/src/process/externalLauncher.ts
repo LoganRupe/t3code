@@ -526,11 +526,17 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   }
 
   // A multi-repo project passes its `.code-workspace` alongside the anchor dir;
-  // only editors that understand workspace files get the file itself.
+  // only editors that understand workspace files get the file itself. An
+  // isolated run created before its thread got a generated workspace file has
+  // none on disk, so fall back to the directory rather than a failed open.
+  const fileSystem = yield* FileSystem.FileSystem;
+  const workspaceFileExists = input.workspaceFile
+    ? yield* fileSystem.exists(input.workspaceFile).pipe(Effect.orElseSucceed(() => false))
+    : false;
   const target = resolveEditorTarget({
     editor: editorDef,
     cwd: input.cwd,
-    workspaceFile: input.workspaceFile,
+    workspaceFile: workspaceFileExists ? input.workspaceFile : undefined,
   });
 
   if (editorDef.commands) {

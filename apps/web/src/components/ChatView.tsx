@@ -77,6 +77,7 @@ import {
 } from "@t3tools/shared/projectScripts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
+import { threadWorkspaceFilePath } from "@t3tools/shared/path";
 import { truncate } from "@t3tools/shared/String";
 import { resolveThreadReferenceCopyTarget } from "@t3tools/shared/threadReference";
 import {
@@ -3650,12 +3651,18 @@ export default function ChatView(props: ChatViewProps) {
     : null;
   // `workspaceRoot` is only the anchor directory for a workspace-file project,
   // so opening it gives a plain folder. Hand the `.code-workspace` itself to
-  // editors that can open it as a multi-root workspace. Isolated runs are
-  // excluded: their fanned-out worktrees have no workspace file, and the
-  // project's would point back at the original checkouts.
-  const openInWorkspaceFile = activeThread?.worktreePath
+  // editors that can open it as a multi-root workspace. A fanned-out isolated
+  // run gets the copy generated beside its worktrees instead, since the
+  // project's own file points back at the original checkouts.
+  const projectWorkspaceFile = activeProject?.workspaceFile ?? null;
+  const anchorWorktreePath = activeThread?.worktrees[0]?.worktreePath ?? null;
+  const openInWorkspaceFile = !projectWorkspaceFile
     ? null
-    : (activeProject?.workspaceFile ?? null);
+    : !activeThread?.worktreePath
+      ? projectWorkspaceFile
+      : anchorWorktreePath && activeThread.worktrees.length > 1
+        ? threadWorkspaceFilePath({ anchorWorktreePath, projectWorkspaceFile })
+        : null;
   // For a multi-repo `.code-workspace` project, fan git status out over every
   // repo root. For a single-repo project keep the worktree-aware status cwd so
   // isolated runs report on the worktree (Phase 4 will make multi-repo
