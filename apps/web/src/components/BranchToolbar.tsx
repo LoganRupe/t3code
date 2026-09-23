@@ -25,6 +25,7 @@ import { useProject, useThreadShell, useThreadShellsForProjectRefs } from "../st
 import {
   type EnvMode,
   type EnvironmentOption,
+  resolveAnchorRepoRoot,
   resolveContextStripLabelsCompact,
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
@@ -41,6 +42,7 @@ import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSele
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { ComposerControl } from "./chat/ComposerControl";
+import { RepoBaseBranchesMenu } from "./RepoBaseBranchesMenu";
 import {
   Menu,
   MenuGroup,
@@ -615,6 +617,20 @@ export const BranchToolbar = memo(function BranchToolbar({
   const [stripElement, setStripElement] = useState<HTMLDivElement | null>(null);
   const labelsOverflow = useLabelsOverflow(stripElement);
 
+  // A new isolated run of a multi-repo project fans out to every repo root;
+  // the roots besides the anchor get their own base-branch picker.
+  const otherRepoRoots =
+    activeProject && effectiveEnvMode === "worktree" && !activeWorktreePath
+      ? (activeProject.repoRoots ?? []).filter(
+          (repoRoot) =>
+            repoRoot !==
+            resolveAnchorRepoRoot({
+              workspaceRoot: activeProject.workspaceRoot,
+              repoRoots: activeProject.repoRoots,
+            }),
+        )
+      : [];
+
   if (!hasActiveThread || !activeProject) return null;
 
   return (
@@ -705,6 +721,14 @@ export const BranchToolbar = memo(function BranchToolbar({
         />
       ) : null}
 
+      {showGitControls && otherRepoRoots.length > 0 ? (
+        <RepoBaseBranchesMenu
+          environmentId={environmentId}
+          threadId={threadId}
+          repoRoots={otherRepoRoots}
+          startFromOrigin={startFromOrigin}
+        />
+      ) : null}
       {showGitControls ? (
         <BranchToolbarBranchSelector
           forceNewWorktree={forceNewWorktree}
