@@ -86,6 +86,7 @@ import {
 import { resolveServerBackgroundActivitySettings } from "@t3tools/shared/backgroundActivitySettings";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import { resolveAnchorRepoRoot } from "@t3tools/shared/git";
+import { threadWorkspaceFilePath } from "@t3tools/shared/path";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
@@ -142,7 +143,11 @@ import * as WorkspaceGitScan from "./workspace/WorkspaceGitScan.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
-import { createThreadWorktrees, type WorktreeFanoutTarget } from "./vcs/WorktreeFanout.ts";
+import {
+  createThreadWorktrees,
+  threadWorkspaceFolders,
+  type WorktreeFanoutTarget,
+} from "./vcs/WorktreeFanout.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
 import { linkCreatedPullRequest } from "./git/linkCreatedPullRequest.ts";
 import * as ReviewService from "./review/ReviewService.ts";
@@ -1678,6 +1683,27 @@ const makeWsRpcLayer = (
                 repoRoot: entry.repoRoot,
                 worktreePath: entry.worktreePath,
               }));
+              // Give the fanned-out run its own `.code-workspace` so "Open in"
+              // lands on the worktrees rather than the original checkouts. It
+              // lives in the per-thread directory, so it goes when that does.
+              const projectWorkspaceFile = projectShell?.workspaceFile;
+              if (cousinRepoRoots.length > 0 && projectWorkspaceFile) {
+                yield* workspaceFile.read(projectWorkspaceFile).pipe(
+                  Effect.flatMap((resolved) =>
+                    workspaceFile.write({
+                      workspaceFilePath: threadWorkspaceFilePath({
+                        anchorWorktreePath: anchorWorktree.worktreePath,
+                        projectWorkspaceFile,
+                      }),
+                      document: workspaceFile.withFolders(
+                        resolved.document,
+                        threadWorkspaceFolders({ folders: resolved.folders, worktrees }),
+                      ),
+                    }),
+                  ),
+                  Effect.ignoreCause({ log: true }),
+                );
+              }
 
               const checkoutEndedAt = yield* nowIso;
               yield* worktreeSetupTracker.update(threadId, (snapshot) => ({
