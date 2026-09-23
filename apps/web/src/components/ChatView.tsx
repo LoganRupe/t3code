@@ -120,6 +120,7 @@ import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
 import { useVcsStatusGroups } from "~/lib/vcsStatusState";
 import { isElectron } from "../env";
+import { repoBaseBranchesForSend } from "../repoBaseBranchStore";
 import { readLocalApi } from "../localApi";
 import { useDiffPanelStore } from "../diffPanelStore";
 import {
@@ -8117,6 +8118,7 @@ export default function ChatView(props: ChatViewProps) {
                     prepareWorktree: {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: activeThreadBranch!,
+                      ...repoBaseBranchesForSend(activeThread, activeProject.repoRoots),
                       requireWorktree: true,
                       branch: buildTemporaryWorktreeBranchName(randomHex),
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
@@ -8458,6 +8460,7 @@ export default function ChatView(props: ChatViewProps) {
                     prepareWorktree: {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
+                      ...repoBaseBranchesForSend(activeThread, activeProject.repoRoots),
                       branch: buildTemporaryWorktreeBranchName(randomHex),
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
                     },

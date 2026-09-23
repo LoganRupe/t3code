@@ -1319,9 +1319,21 @@ const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+/** A multi-repo isolated run's base branch for one non-anchor repo root. */
+export const ThreadTurnStartBootstrapRepoBaseBranch = Schema.Struct({
+  repoRoot: TrimmedNonEmptyString,
+  baseBranch: TrimmedNonEmptyString,
+});
+
 const ThreadTurnStartBootstrapPrepareWorktree = Schema.Struct({
   projectCwd: TrimmedNonEmptyString,
+  /** Base for the anchor repo, the only repo in a single-repo project. */
   baseBranch: TrimmedNonEmptyString,
+  /**
+   * Per-repo overrides for the other roots of a multi-repo project. Roots left
+   * out base on their own default branch (origin/HEAD).
+   */
+  repoBaseBranches: Schema.optional(Schema.Array(ThreadTurnStartBootstrapRepoBaseBranch)),
   branch: Schema.optional(TrimmedNonEmptyString),
   startFromOrigin: Schema.optional(Schema.Boolean),
   requireWorktree: Schema.optional(Schema.Boolean),
