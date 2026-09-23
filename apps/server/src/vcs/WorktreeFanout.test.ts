@@ -6,6 +6,7 @@ import { GitCommandError, type VcsCreateWorktreeInput } from "@t3tools/contracts
 import {
   createThreadWorktrees,
   removeThreadWorktrees,
+  threadWorkspaceFolders,
   worktreePlacement,
   type WorktreeFanoutDeps,
 } from "./WorktreeFanout.ts";
@@ -145,4 +146,26 @@ describe("removeThreadWorktrees", () => {
       expect(recorder.removed).toEqual(["/t3/worktrees/p/t/backend", "/t3/worktrees/p/t/frontend"]);
     }),
   );
+});
+
+describe("threadWorkspaceFolders", () => {
+  it("points repo folders at their worktrees and keeps the rest in place", () => {
+    expect(
+      threadWorkspaceFolders({
+        folders: [
+          { absolutePath: "/code/web/app", name: "web" },
+          { absolutePath: "/code/docs", name: "docs" },
+          { absolutePath: "/code/api/app", name: "api" },
+        ],
+        worktrees: [
+          { repoRoot: "/code/web/app", worktreePath: "/t3/worktrees/p/t/app" },
+          { repoRoot: "/code/api/app", worktreePath: "/t3/worktrees/p/t/app-2" },
+        ],
+      }),
+    ).toEqual([
+      { path: "./app", name: "web" },
+      { path: "/code/docs", name: "docs" },
+      { path: "./app-2", name: "api" },
+    ]);
+  });
 });

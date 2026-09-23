@@ -1217,18 +1217,14 @@ const makeExecutableStubs = Effect.fn("makeExecutableStubs")(function* (
 const ANCHOR_DIR = "/workspace/anchor";
 const WORKSPACE_FILE = "/workspace/anchor/project.code-workspace";
 
-it.effect("opens a workspace file in editors that understand one", () =>
+const launchVscodeWithWorkspaceFile = (workspaceFile: string) =>
   Effect.gen(function* () {
     const binDir = yield* makeExecutableStubs(["code"]);
 
     let spawned: ChildProcess.StandardCommand | undefined;
     yield* Effect.gen(function* () {
       const launcher = yield* ExternalLauncher.ExternalLauncher;
-      yield* launcher.launchEditor({
-        editor: "vscode",
-        cwd: ANCHOR_DIR,
-        workspaceFile: WORKSPACE_FILE,
-      });
+      yield* launcher.launchEditor({ editor: "vscode", cwd: ANCHOR_DIR, workspaceFile });
     }).pipe(
       Effect.provide(
         testLayer({
@@ -1242,7 +1238,24 @@ it.effect("opens a workspace file in editors that understand one", () =>
     );
 
     assert.ok(spawned);
-    assert.deepEqual(spawned.args, [WORKSPACE_FILE]);
+    return spawned.args;
+  });
+
+it.effect("opens a workspace file in editors that understand one", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const dir = yield* fileSystem.makeTempDirectoryScoped();
+    const workspaceFile = `${dir}/project.code-workspace`;
+    yield* fileSystem.writeFileString(workspaceFile, "{}");
+
+    assert.deepEqual(yield* launchVscodeWithWorkspaceFile(workspaceFile), [workspaceFile]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+// An isolated run created before threads got a generated workspace file.
+it.effect("falls back to the directory when the workspace file is missing", () =>
+  Effect.gen(function* () {
+    assert.deepEqual(yield* launchVscodeWithWorkspaceFile(WORKSPACE_FILE), [ANCHOR_DIR]);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
