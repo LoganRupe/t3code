@@ -6,6 +6,7 @@ import {
   isWindowsDrivePath,
   normalizeProjectPathForComparison,
   normalizeProjectPathForDispatch,
+  threadWorkspaceFilePath,
 } from "./path.ts";
 
 describe("path helpers", () => {
@@ -42,5 +43,20 @@ describe("path helpers", () => {
     expect(normalizeProjectPathForComparison("C:")).toBe(normalizeProjectPathForComparison("C:/"));
     // Non-root drive paths keep their trailing separator trimmed as before.
     expect(normalizeProjectPathForDispatch("C:\\repo\\")).toBe("C:\\repo");
+  });
+
+  it("places a thread's workspace file beside its per-root worktrees", () => {
+    expect(
+      threadWorkspaceFilePath({
+        anchorWorktreePath: "/home/u/.t3/worktrees/p1/t1/api/",
+        projectWorkspaceFile: "/home/u/code/shop.code-workspace",
+      }),
+    ).toBe("/home/u/.t3/worktrees/p1/t1/shop.code-workspace");
+    expect(
+      threadWorkspaceFilePath({
+        anchorWorktreePath: "C:\\t3\\worktrees\\p1\\t1\\api",
+        projectWorkspaceFile: "C:\\code\\shop.code-workspace",
+      }),
+    ).toBe("C:\\t3\\worktrees\\p1\\t1\\shop.code-workspace");
   });
 });

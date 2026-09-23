@@ -53,3 +53,21 @@ export function normalizeProjectPathForComparison(value: string): string {
   }
   return normalized;
 }
+
+/**
+ * Where an isolated multi-repo run keeps its generated `.code-workspace`: in the
+ * per-thread directory next to the per-root worktrees, named after the project's
+ * own file so the editor window keeps the project's title. The server writes it
+ * during the worktree fan-out; clients hand it to "Open in".
+ */
+export function threadWorkspaceFilePath(input: {
+  readonly anchorWorktreePath: string;
+  readonly projectWorkspaceFile: string;
+}): string {
+  const lastSeparator = (value: string) =>
+    Math.max(value.lastIndexOf("/"), value.lastIndexOf("\\"));
+  const anchor = trimTrailingPathSeparators(input.anchorWorktreePath);
+  const anchorSeparator = lastSeparator(anchor);
+  const fileName = input.projectWorkspaceFile.slice(lastSeparator(input.projectWorkspaceFile) + 1);
+  return anchorSeparator === -1 ? fileName : `${anchor.slice(0, anchorSeparator + 1)}${fileName}`;
+}
