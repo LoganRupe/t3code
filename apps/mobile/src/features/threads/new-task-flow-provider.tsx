@@ -20,6 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { sanitizeNewRefName } from "@t3tools/shared/git";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { resolveAnchorRepoRoot } from "@t3tools/shared/git";
 import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
@@ -636,11 +637,23 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
   const branchTarget = useMemo(
     () => ({
       environmentId: selectedProject?.environmentId ?? null,
-      // `|| null` also skips the stand-in project's empty workspaceRoot.
-      cwd: selectedProject?.workspaceRoot || null,
+      // Skips the stand-in project's empty workspaceRoot. A workspace-file
+      // project's workspaceRoot is the directory holding the file, usually
+      // not a repo, so its refs come from the anchor repo root instead.
+      cwd: selectedProject?.workspaceRoot
+        ? resolveAnchorRepoRoot({
+            workspaceRoot: selectedProject.workspaceRoot,
+            repoRoots: selectedProject.repoRoots,
+          })
+        : null,
       query: debouncedBranchQuery,
     }),
-    [debouncedBranchQuery, selectedProject?.environmentId, selectedProject?.workspaceRoot],
+    [
+      debouncedBranchQuery,
+      selectedProject?.environmentId,
+      selectedProject?.workspaceRoot,
+      selectedProject?.repoRoots,
+    ],
   );
   const branchState = usePaginatedBranches(branchTarget);
   const branchSearchIsDebouncing = branchSearchQuery !== debouncedBranchQuery;
