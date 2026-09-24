@@ -170,19 +170,19 @@ export function resolveThreadPullRequestBadgePresentation({
       text: badge.layers,
     };
   }
-  if (number === undefined || url === undefined) return null;
-
-  const tooltip = status?.tooltip ?? `PR #${number}, status pending`;
   if (badge?.kind === "pull-request" && badge.others > 0) {
     // Unrelated links fold into one state, so a count of merged PRs reads as merged.
     const aggregate = PULL_REQUEST_STATE_PRESENTATION[badge.state];
     return {
       Icon: aggregate.Icon,
       toneClassName: aggregate.toneClassName,
-      label: `${tooltip}, and ${badge.others} more linked; overall ${aggregate.label.toLowerCase()}`,
+      label: `${badge.others + 1} linked pull requests, overall ${aggregate.label.toLowerCase()}`,
       text: `+${badge.others + 1}`,
     };
   }
+  if (number === undefined || url === undefined) return null;
+
+  const tooltip = status?.tooltip ?? `PR #${number}, status pending`;
   return {
     Icon: status?.Icon ?? PullRequestGlyph.pullRequest,
     toneClassName: status?.colorClass ?? "text-muted-foreground",
@@ -191,27 +191,36 @@ export function resolveThreadPullRequestBadgePresentation({
   };
 }
 
+/** Whether the badge stands for several pull requests, so it opens the list rather than one. */
+export function threadPullRequestBadgeOpensList(badge: ThreadPullRequestBadge | null): boolean {
+  return badge?.kind === "stack" || (badge?.kind === "pull-request" && badge.others > 0);
+}
+
 /**
  * The linked-PR badge shared by the sidebar and composer footer. The badge owns what it shows:
  * the state glyph and number at the meta size, in the state's color. The caller owns the control
  * it sits in through `render` (an inline link in a sidebar row, a toolbar control in the
- * composer), and the badge fills in the link or stack button behavior.
+ * composer), and the badge fills in the link or list button behavior. A badge for several pull
+ * requests opens the pull-requests panel and lists them all on hover; a single one opens that
+ * pull request.
  */
 export function ThreadPullRequestBadgeControl({
   render,
   badge,
+  pullRequests,
   number,
   url,
   status,
-  onOpenStack,
+  onOpenList,
   onOpenPullRequest,
 }: {
   render: ReactElement<{ render?: useRender.RenderProp }>;
   badge: ThreadPullRequestBadge | null;
+  pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
   number?: number | undefined;
   url?: string | undefined;
   status: PrStatusIndicator | null;
-  onOpenStack: () => void;
+  onOpenList: () => void;
   onOpenPullRequest: (event: MouseEvent<HTMLElement>) => void;
 }) {
   const presentation = resolveThreadPullRequestBadgePresentation({ badge, number, url, status });
@@ -220,9 +229,10 @@ export function ThreadPullRequestBadgeControl({
     <PullRequestBadge
       render={render}
       presentation={presentation}
-      isStack={badge?.kind === "stack"}
+      opensList={threadPullRequestBadgeOpensList(badge)}
+      pullRequests={pullRequests}
       url={url}
-      onOpenStack={onOpenStack}
+      onOpenList={onOpenList}
       onOpenPullRequest={onOpenPullRequest}
     />
   );
@@ -231,31 +241,33 @@ export function ThreadPullRequestBadgeControl({
 function PullRequestBadge({
   render,
   presentation,
-  isStack,
+  opensList,
+  pullRequests,
   url,
-  onOpenStack,
+  onOpenList,
   onOpenPullRequest,
 }: {
   render: ReactElement<{ render?: useRender.RenderProp }>;
   presentation: NonNullable<ReturnType<typeof resolveThreadPullRequestBadgePresentation>>;
-  isStack: boolean;
+  opensList: boolean;
+  pullRequests: ReadonlyArray<ThreadPullRequestLink> | undefined;
   url: string | undefined;
-  onOpenStack: () => void;
+  onOpenList: () => void;
   onOpenPullRequest: (event: MouseEvent<HTMLElement>) => void;
 }) {
-  const onClick = isStack
+  const onClick = opensList
     ? (event: MouseEvent<HTMLElement>) => {
         event.preventDefault();
         event.stopPropagation();
-        onOpenStack();
+        onOpenList();
       }
     : onOpenPullRequest;
-  const element = isStack ? (
+  const element = opensList ? (
     <button type="button" />
   ) : (
     <a href={url} target="_blank" rel="noopener noreferrer" />
   );
-  // The caller's control (InlineButton, ComposerControl) renders as the link or stack button
+  // The caller's control (InlineButton, ComposerControl) renders as the link or list button
   // through its own render prop; useRender merges the badge's behavior into it.
   const control = useRender({
     render,
@@ -276,7 +288,13 @@ function PullRequestBadge({
           {presentation.text}
         </span>
       </TooltipTrigger>
-      <TooltipPopup side="top">{presentation.label}</TooltipPopup>
+      <TooltipPopup side="top">
+        {opensList && pullRequests ? (
+          <ThreadPullRequestsMiniList pullRequests={pullRequests} />
+        ) : (
+          presentation.label
+        )}
+      </TooltipPopup>
     </Tooltip>
   );
 }

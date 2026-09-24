@@ -41,7 +41,9 @@ interface MultiRepoGitControlProps {
   activeThreadRef: ScopedThreadRef | null;
   draftId?: DraftId;
   /** Forwarded to each row so a repo's change request opens beside the thread. */
-  onOpenPullRequest?: ((number: number) => void) | undefined;
+  onOpenPullRequest?:
+    | ((pullRequest: { readonly number: number; readonly url: string }) => void)
+    | undefined;
   /**
    * `"menu"` when the chat header has collapsed its actions into the overflow
    * menu, so the trigger renders as a full-width row instead of a toolbar chip.
