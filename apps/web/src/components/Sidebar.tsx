@@ -101,7 +101,7 @@ import { isTerminalFocused } from "../lib/terminalFocus";
 import { isModelPickerOpen } from "../modelPickerVisibility";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { isMacPlatform } from "~/lib/utils";
-import { useOpenPrLink } from "../lib/openPullRequestLink";
+import { useOpenPrLink, useOpenThreadPullRequestTabs } from "../lib/openPullRequestLink";
 import { releaseComposerDraftUploads } from "../lib/composerDraftUploads";
 import { readLocalApi } from "../localApi";
 import {
@@ -201,6 +201,7 @@ import { SidebarDragLifecycle, SidebarPointerSensor } from "./Sidebar.pointer";
 import { createSidebarListMotion } from "./Sidebar.motion";
 import {
   ThreadPullRequestBadgeControl,
+  threadPullRequestBadgeOpensList,
   ThreadPullRequestsMiniList,
   ThreadWorktreeIndicator,
   prStatusIndicator,
@@ -1491,24 +1492,38 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
     </span>
   );
 
-  // Stacks show their layer count; multiple unrelated links show their total count.
-  // Plain clicks open T3; individual PR links also support opening the host in a new tab.
+  // Stacks show their layer count; multiple unrelated links show their total count. A single PR
+  // link also supports opening the host in a new tab.
   const prBadgeShape = supportsMultiplePullRequests
     ? resolveThreadPullRequestBadge(thread.pullRequests)
     : null;
-  const handlePrStackClick = useCallback(() => {
-    useRightPanelStore.getState().open(threadRef, "pull-requests");
+  const openThreadPullRequestTabs = useOpenThreadPullRequestTabs(threadRef);
+  const handlePrListClick = useCallback(() => {
+    // Unrelated PRs (one per repo, say) open a tab each; a stack reads best as its ordered list.
+    const openedTabs =
+      prBadgeShape?.kind === "pull-request" &&
+      openThreadPullRequestTabs(thread.pullRequests, currentLinkedPr?.url);
+    if (!openedTabs) useRightPanelStore.getState().open(threadRef, "pull-requests");
     if (!props.isActive) onThreadActivate(threadRef);
-  }, [onThreadActivate, props.isActive, threadRef]);
+  }, [
+    currentLinkedPr?.url,
+    onThreadActivate,
+    openThreadPullRequestTabs,
+    prBadgeShape?.kind,
+    props.isActive,
+    thread.pullRequests,
+    threadRef,
+  ]);
   const prBadge =
-    prBadgeShape?.kind === "stack" || pr || currentLinkedPr ? (
+    threadPullRequestBadgeOpensList(prBadgeShape) || pr || currentLinkedPr ? (
       <ThreadPullRequestBadgeControl
         render={<InlineButton />}
         badge={prBadgeShape}
+        pullRequests={thread.pullRequests}
         number={pr?.number ?? currentLinkedPr?.number}
         url={pr?.url ?? currentLinkedPr?.url}
         status={prStatus}
-        onOpenStack={handlePrStackClick}
+        onOpenList={handlePrListClick}
         onOpenPullRequest={handlePrClick}
       />
     ) : null;

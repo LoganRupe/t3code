@@ -76,6 +76,7 @@ import {
   resolveProjectScripts,
 } from "@t3tools/shared/projectScripts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { parseChangeRequestUrl } from "@t3tools/shared/changeRequestUrl";
 import { sourceControlRepositorySelector } from "@t3tools/shared/sourceControl";
 import { threadWorkspaceFilePath } from "@t3tools/shared/path";
 import { truncate } from "@t3tools/shared/String";
@@ -118,7 +119,7 @@ import {
 import * as Cause from "effect/Cause";
 import * as Schema from "effect/Schema";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { useVcsStatusGroups } from "~/lib/vcsStatusState";
+import { repoRootDisplayName, useVcsStatusGroups } from "~/lib/vcsStatusState";
 import { isElectron } from "../env";
 import { repoBaseBranchesForSend } from "../repoBaseBranchStore";
 import { readLocalApi } from "../localApi";
@@ -3665,14 +3666,28 @@ export default function ChatView(props: ChatViewProps) {
         ? threadWorkspaceFilePath({ anchorWorktreePath, projectWorkspaceFile })
         : null;
   // For a multi-repo `.code-workspace` project, fan git status out over every
-  // repo root. For a single-repo project keep the worktree-aware status cwd so
-  // isolated runs report on the worktree (Phase 4 will make multi-repo
-  // worktree-aware too).
+  // repo root, swapping in the thread's worktree for roots an isolated run
+  // covers. A single-repo project uses the worktree-aware status cwd.
   const isMultiRepo = (activeProject?.repoRoots?.length ?? 0) > 1;
   const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
+  const threadWorktrees = activeThread?.worktrees;
+  const multiRepoStatusRoots = useMemo(() => {
+    if (!isMultiRepo || !activeProject?.repoRoots) return null;
+    return activeProject.repoRoots.map((repoRoot) => ({
+      repoRoot,
+      cwd:
+        threadWorktrees?.find((worktree) => worktree.repoRoot === repoRoot)?.worktreePath ??
+        repoRoot,
+    }));
+  }, [isMultiRepo, activeProject?.repoRoots, threadWorktrees]);
   const gitStatusRoots = useMemo(
-    () => (isMultiRepo ? (activeProject?.repoRoots ?? null) : gitStatusCwd ? [gitStatusCwd] : null),
-    [isMultiRepo, activeProject?.repoRoots, gitStatusCwd],
+    () =>
+      multiRepoStatusRoots
+        ? multiRepoStatusRoots.map((root) => root.cwd)
+        : gitStatusCwd
+          ? [gitStatusCwd]
+          : null,
+    [multiRepoStatusRoots, gitStatusCwd],
   );
   // @-mention file search spans every repo root for a multi-repo workspace
   // (#923); single-repo projects search the worktree-aware `gitCwd` alone.
@@ -3705,12 +3720,19 @@ export default function ChatView(props: ChatViewProps) {
   );
   const repoStatusGroups = useMemo(
     () =>
-      gitRepoGroups.map((group) => ({
-        repoRoot: group.repoRoot,
-        displayName: group.displayName,
-        state: group.state,
-      })),
-    [gitRepoGroups],
+      gitRepoGroups.map((group) => {
+        // A worktree's basename is its branch slug; label the row by its repo.
+        const sourceRoot = multiRepoStatusRoots?.find((root) => root.cwd === group.repoRoot);
+        return {
+          repoRoot: group.repoRoot,
+          displayName:
+            sourceRoot && sourceRoot.cwd !== sourceRoot.repoRoot
+              ? repoRootDisplayName(sourceRoot.repoRoot)
+              : group.displayName,
+          state: group.state,
+        };
+      }),
+    [gitRepoGroups, multiRepoStatusRoots],
   );
   // Per-root targets for the terminal surface picker; undefined for single-repo
   // projects so the Terminal action opens directly (no dropdown).
@@ -4761,19 +4783,19 @@ export default function ChatView(props: ChatViewProps) {
     readonly reference: ThreadLinkedPullRequest | null;
   } | null>(null);
   const openProjectPullRequest = useCallback(
-    (number: number) => {
-      if (
-        !supportsPullRequests ||
-        !activeThreadRef ||
-        !activeProject ||
-        activeProjectRepository === null
-      ) {
-        return;
-      }
+    ({ number, url }: { readonly number: number; readonly url: string }) => {
+      if (!supportsPullRequests || !activeThreadRef || !activeProject) return;
+      // A multi-repo row's PR can live in any of the project's repos; its URL
+      // names the repo. The primary repo covers URLs this cannot read.
+      const parsed = parseChangeRequestUrl(url);
+      const repository = parsed?.repository ?? activeProjectRepository;
+      if (repository === null) return;
       useRightPanelStore.getState().openPullRequest(activeThreadRef, {
         projectId: activeProject.id,
-        repository: activeProjectRepository,
+        ...(parsed ? { host: parsed.host } : {}),
+        repository,
         number,
+        url,
       });
     },
     [activeProject, activeProjectRepository, activeThreadRef, supportsPullRequests],

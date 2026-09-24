@@ -71,7 +71,9 @@ interface ChatHeaderProps {
   availableEditors: ReadonlyArray<EditorId>;
   rightPanelOpen: boolean;
   gitCwd: string | null;
-  readonly onOpenPullRequest?: ((number: number) => void) | undefined;
+  readonly onOpenPullRequest?:
+    | ((pullRequest: { readonly number: number; readonly url: string }) => void)
+    | undefined;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
   /**

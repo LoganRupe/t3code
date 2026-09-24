@@ -125,7 +125,9 @@ interface GitActionsControlProps {
    * Opens the thread's own change request beside it. Absent when the thread has no project to
    * place it against, in which case it still opens in the browser.
    */
-  onOpenPullRequest?: ((number: number) => void) | undefined;
+  onOpenPullRequest?:
+    | ((pullRequest: { readonly number: number; readonly url: string }) => void)
+    | undefined;
   /**
    * Whether this control should keep the thread's single `branch` field in sync
    * with its repo's live branch. Defaults to true. Disabled for the per-repo
@@ -1222,7 +1224,7 @@ export default function GitActionsControl({
     // Beside the thread where it was made, the way the browser opens beside it. Checked before
     // the shell, which opening in the app does not need.
     if (openPr && onOpenPullRequest) {
-      onOpenPullRequest(openPr.number);
+      onOpenPullRequest(openPr);
       return;
     }
     const prUrl = openPr?.url ?? null;
