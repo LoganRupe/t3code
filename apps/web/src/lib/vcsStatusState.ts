@@ -69,7 +69,7 @@ function getVcsStatusTargetKey(target: VcsStatusTarget): string | null {
 }
 
 /** The basename of an absolute repo-root path, used as a display label. */
-function repoRootDisplayName(repoRoot: string): string {
+export function repoRootDisplayName(repoRoot: string): string {
   const trimmed = repoRoot.replace(/[/\\]+$/, "");
   const separator = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
   const base = separator >= 0 ? trimmed.slice(separator + 1) : trimmed;
