@@ -590,6 +590,7 @@ function buildCodexCollaborationMode(input: {
   readonly model?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly browserToolsAvailable?: boolean | T3CodeToolAvailability;
+  readonly multiRepo?: boolean;
 }): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
   if (input.interactionMode === undefined) {
     return undefined;
@@ -603,7 +604,7 @@ function buildCodexCollaborationMode(input: {
       reasoning_effort: reasoningEffort,
       developer_instructions: buildCodexDeveloperInstructions(
         input.interactionMode,
-        { model, reasoningEffort },
+        { model, reasoningEffort, multiRepo: input.multiRepo },
         input.browserToolsAvailable ?? true,
       ),
     },
@@ -628,6 +629,8 @@ export function buildTurnStartParams(input: {
   readonly interactionMode?: ProviderInteractionMode;
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean | T3CodeToolAvailability;
+  /** The session spans several repository roots. */
+  readonly multiRepo?: boolean;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -649,6 +652,7 @@ export function buildTurnStartParams(input: {
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
     browserToolsAvailable: input.browserToolsAvailable ?? true,
+    ...(input.multiRepo ? { multiRepo: true } : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -2552,6 +2556,7 @@ export const makeCodexSessionRuntime = (
               options.appServerArgs,
               options.mcpCapabilities,
             ),
+            multiRepo: (options.additionalRoots?.length ?? 0) > 0,
           });
           const rawResponse = yield* client.raw.request("turn/start", params);
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(

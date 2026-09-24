@@ -287,6 +287,24 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  it.effect("asks a multi-repo session for absolute file paths", () =>
+    Effect.gen(function* () {
+      const instructions = function* (multiRepo: boolean) {
+        const params = yield* buildTurnStartParams({
+          threadId: "provider-thread-1",
+          runtimeMode: "full-access",
+          prompt: "Go",
+          interactionMode: "default",
+          multiRepo,
+        });
+        return params.collaborationMode?.settings.developer_instructions ?? "";
+      };
+
+      NodeAssert.match(yield* instructions(true), /<multi_repo_workspace>/);
+      NodeAssert.doesNotMatch(yield* instructions(false), /<multi_repo_workspace>/);
+    }),
+  );
+
   it("reports the same fallback model and effort in settings and instructions", () => {
     const params = Effect.runSync(
       buildTurnStartParams({

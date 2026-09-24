@@ -2383,16 +2383,17 @@ function useChatMarkdownState({
     return metaByHref;
   }, [cwd, imageBaseDir, repoRootsKey, text]);
   const inlineCodeFileLinkMetaByText = useMemo(() => {
+    const roots = repoRootsKey ? repoRootsKey.split("\0") : undefined;
     const metaByText = new Map<string, MarkdownFileLinkMeta>();
     for (const span of extractInlineCodeSpans(text)) {
       if (metaByText.has(span)) continue;
-      const meta = resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd);
+      const meta = resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd, roots);
       if (meta) {
         metaByText.set(span, meta);
       }
     }
     return metaByText;
-  }, [cwd, imageBaseDir, text]);
+  }, [cwd, imageBaseDir, repoRootsKey, text]);
   const fileLinkParentSuffixByPath = useMemo(() => {
     const filePaths = [
       ...[...markdownFileLinkMetaByHref.values()].map((meta) => meta.filePath),
