@@ -882,6 +882,7 @@ describe.sequential("signRelayAgentActivityPublishProof", () => {
           branch: null,
           worktreePath: null,
           pullRequests: [],
+          worktrees: [],
           latestTurn: completedTurn,
           createdAt: old,
           updatedAt: old,
