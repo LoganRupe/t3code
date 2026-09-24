@@ -1115,7 +1115,7 @@ export default function DiffPanel({
                   </span>
                 }
               />
-              <TooltipPopup side="bottom" className="max-w-80 whitespace-normal leading-tight">
+              <TooltipPopup side="bottom" className="max-w-80 whitespace-normal">
                 Reflects this thread&apos;s isolated worktree, not your own checkout of the repo:
                 <br />
                 <span className="font-mono break-all">{diffWorktreePath}</span>
