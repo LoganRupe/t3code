@@ -170,19 +170,19 @@ export function resolveThreadPullRequestBadgePresentation({
       text: badge.layers,
     };
   }
-  if (number === undefined || url === undefined) return null;
-
-  const tooltip = status?.tooltip ?? `PR #${number}, status pending`;
   if (badge?.kind === "pull-request" && badge.others > 0) {
     // Unrelated links fold into one state, so a count of merged PRs reads as merged.
     const aggregate = PULL_REQUEST_STATE_PRESENTATION[badge.state];
     return {
       Icon: aggregate.Icon,
       toneClassName: aggregate.toneClassName,
-      label: `${tooltip}, and ${badge.others} more linked; overall ${aggregate.label.toLowerCase()}`,
+      label: `${badge.others + 1} linked pull requests, overall ${aggregate.label.toLowerCase()}`,
       text: `+${badge.others + 1}`,
     };
   }
+  if (number === undefined || url === undefined) return null;
+
+  const tooltip = status?.tooltip ?? `PR #${number}, status pending`;
   return {
     Icon: status?.Icon ?? PullRequestGlyph.pullRequest,
     toneClassName: status?.colorClass ?? "text-muted-foreground",
@@ -191,43 +191,54 @@ export function resolveThreadPullRequestBadgePresentation({
   };
 }
 
-/** The complete linked-PR control shared by the sidebar and composer footer. */
+/** Whether the badge stands for several pull requests, so it opens the list rather than one. */
+export function threadPullRequestBadgeOpensList(badge: ThreadPullRequestBadge | null): boolean {
+  return badge?.kind === "stack" || (badge?.kind === "pull-request" && badge.others > 0);
+}
+
+/**
+ * The complete linked-PR control shared by the sidebar and composer footer. A badge for several
+ * pull requests opens the pull-requests panel and lists them all on hover; a single one opens
+ * that pull request.
+ */
 export function ThreadPullRequestBadgeControl({
   variant,
   badge,
+  pullRequests,
   number,
   url,
   status,
-  onOpenStack,
+  onOpenList,
   onOpenPullRequest,
 }: {
   variant: "underline" | "ghost";
   badge: ThreadPullRequestBadge | null;
+  pullRequests?: ReadonlyArray<ThreadPullRequestLink> | undefined;
   number?: number | undefined;
   url?: string | undefined;
   status: PrStatusIndicator | null;
-  onOpenStack: () => void;
+  onOpenList: () => void;
   onOpenPullRequest: (event: MouseEvent<HTMLElement>) => void;
 }) {
   const presentation = resolveThreadPullRequestBadgePresentation({ badge, number, url, status });
   if (presentation === null) return null;
-  const isStack = badge?.kind === "stack";
+  const opensList = threadPullRequestBadgeOpensList(badge);
   const content = (
     <>
       <presentation.Icon aria-hidden className="size-3 shrink-0" />
       {presentation.text}
     </>
   );
-  const linkProps = isStack
+  const linkProps = opensList
     ? {
         onClick: (event: MouseEvent<HTMLElement>) => {
           event.preventDefault();
           event.stopPropagation();
-          onOpenStack();
+          onOpenList();
         },
       }
     : { onClick: onOpenPullRequest };
-  const element = isStack ? (
+  const element = opensList ? (
     <button type="button" />
   ) : (
     <a href={url} target="_blank" rel="noopener noreferrer" />
@@ -259,7 +270,13 @@ export function ThreadPullRequestBadgeControl({
       >
         {content}
       </TooltipTrigger>
-      <TooltipPopup side="top">{presentation.label}</TooltipPopup>
+      <TooltipPopup side="top">
+        {opensList && pullRequests ? (
+          <ThreadPullRequestsMiniList pullRequests={pullRequests} />
+        ) : (
+          presentation.label
+        )}
+      </TooltipPopup>
     </Tooltip>
   );
 }

@@ -1,10 +1,16 @@
-import type { EnvironmentId, PullRequestRef, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  PullRequestRef,
+  ScopedThreadRef,
+  ThreadPullRequestLink,
+} from "@t3tools/contracts";
 import { useAtomValue } from "@effect/atom-react";
 import { useNavigate } from "@tanstack/react-router";
 import { type MouseEvent, useCallback, useMemo } from "react";
 
 import { pullRequestHostOf, type SourceControlProviderKind } from "@t3tools/contracts";
 import { parseChangeRequestUrl, type ChangeRequestLink } from "@t3tools/shared/changeRequestUrl";
+import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   canonicalRepositoryKey,
   sourceControlRepositorySelector,
@@ -354,5 +360,36 @@ export function useOpenPrLink(threadRef?: ScopedThreadRef) {
       return false;
     },
     [openChangeRequest, openLink],
+  );
+}
+
+const PLAIN_CLICK = {
+  metaKey: false,
+  ctrlKey: false,
+  preventDefault: () => undefined,
+  stopPropagation: () => undefined,
+};
+
+/**
+ * Opens each of a thread's linked pull requests in its own right-panel tab beside the thread,
+ * with `currentUrl` last so it is the one left showing. Says whether any of them opened; a link
+ * no project here can read is skipped rather than sent to the browser.
+ */
+export function useOpenThreadPullRequestTabs(threadRef: ScopedThreadRef) {
+  const openChangeRequest = useOpenChangeRequestLink(threadRef);
+  return useCallback(
+    (pullRequests: ReadonlyArray<ThreadPullRequestLink>, currentUrl?: string) => {
+      const links = visibleThreadPullRequests(pullRequests);
+      const ordered = [
+        ...links.filter((link) => link.url !== currentUrl),
+        ...links.filter((link) => link.url === currentUrl),
+      ];
+      let opened = false;
+      for (const link of ordered) {
+        opened = openChangeRequest(PLAIN_CLICK, link.url, threadRef) || opened;
+      }
+      return opened;
+    },
+    [openChangeRequest, threadRef],
   );
 }
