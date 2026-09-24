@@ -5,8 +5,8 @@ import { memo, useMemo } from "react";
 
 import { useRepoBaseBranchStore } from "../repoBaseBranchStore";
 import { usePaginatedBranches } from "../state/queries";
+import { ComposerControl } from "./chat/ComposerControl";
 import { useComposerMenuProps } from "./chat/composerEventScope";
-import { Button } from "./ui/button";
 import {
   Menu,
   MenuGroup,
@@ -47,7 +47,7 @@ export const RepoBaseBranchesMenu = memo(function RepoBaseBranchesMenu({
   return (
     <Menu>
       <MenuTrigger
-        render={<Button variant="ghost-muted" size="xs" />}
+        render={<ComposerControl size="xs" />}
         aria-label="Base branches for the other repos"
         data-composer-context-control
       >
