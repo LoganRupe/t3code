@@ -29,7 +29,7 @@ import {
 import { useComposerDraftStore, type DraftId } from "../composerDraftStore";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { readLocalApi } from "../localApi";
-import { useOpenPrLink } from "../lib/openPullRequestLink";
+import { useOpenPrLink, useOpenThreadPullRequestTabs } from "../lib/openPullRequestLink";
 import { shouldLoadNextBranchPageAfterScroll } from "../state/paginatedBranches";
 import { usePaginatedBranches } from "../state/queries";
 import { useProject, useThreadShell } from "../state/entities";
@@ -689,6 +689,7 @@ export function BranchToolbarBranchSelector({
   const prNumber = currentLinkedPr?.number ?? displayedPr?.number;
   const prUrl = currentLinkedPr?.url ?? displayedPr?.url;
   const openPrLink = useOpenPrLink(threadRef);
+  const openThreadPullRequestTabs = useOpenThreadPullRequestTabs(threadRef);
 
   function selectPickerItem(itemValue: string) {
     highlightedBranchValueRef.current = null;
@@ -801,10 +802,17 @@ export function BranchToolbarBranchSelector({
         <ThreadPullRequestBadgeControl
           variant="ghost"
           badge={prBadge}
+          pullRequests={serverThread?.pullRequests}
           number={prNumber}
           url={prUrl}
           status={displayedPrStatus}
-          onOpenStack={() => useRightPanelStore.getState().open(threadRef, "pull-requests")}
+          onOpenList={() => {
+            // Unrelated PRs (one per repo, say) open a tab each; a stack opens its ordered list.
+            const openedTabs =
+              prBadge?.kind === "pull-request" &&
+              openThreadPullRequestTabs(serverThread?.pullRequests ?? [], prUrl);
+            if (!openedTabs) useRightPanelStore.getState().open(threadRef, "pull-requests");
+          }}
           onOpenPullRequest={(event) => {
             if (prUrl) openPrLink(event, prUrl);
           }}

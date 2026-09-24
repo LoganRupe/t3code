@@ -5,6 +5,7 @@ import {
   ChangeRequestStatusIcon,
   prStatusIndicator,
   resolveThreadPullRequestBadgePresentation,
+  threadPullRequestBadgeOpensList,
 } from "./ThreadStatusIndicators";
 import { newestPullRequestSummary } from "../state/pullRequests";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
@@ -116,6 +117,16 @@ describe("prStatusIndicator", () => {
 
 describe("resolveThreadPullRequestBadgePresentation", () => {
   const url = "https://github.com/pingdotgg/t3code/pull/42";
+
+  it("summarizes unrelated links as a count instead of naming one of them", () => {
+    const badge = { kind: "pull-request", others: 1, state: "open" } as const;
+    expect(resolveThreadPullRequestBadgePresentation({ badge, status: null })).toMatchObject({
+      label: "2 linked pull requests, overall open",
+      text: "+2",
+    });
+    expect(threadPullRequestBadgeOpensList(badge)).toBe(true);
+    expect(threadPullRequestBadgeOpensList({ ...badge, others: 0 })).toBe(false);
+  });
 
   it("returns the pending pull-request badge when no snapshot is available", () => {
     expect(
@@ -232,7 +243,7 @@ describe("resolveThreadPullRequestBadgePresentation", () => {
       ).toEqual({
         Icon: expectedIcon,
         toneClassName: expectedToneClassName,
-        label: `PR #42 - Closed: PR branch, and 2 more linked; overall ${state}`,
+        label: `3 linked pull requests, overall ${state}`,
         text: "+3",
       });
     },
