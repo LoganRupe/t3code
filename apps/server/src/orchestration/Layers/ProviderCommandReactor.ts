@@ -720,6 +720,8 @@ const make = Effect.gen(function* () {
         projects: project ? [project] : [],
       });
     const additionalRoots = manifest ? manifestExtraRoots(manifest) : [];
+    const repoRoots =
+      manifest && additionalRoots.length > 0 ? manifest.roots.map((root) => root.path) : [];
     const refreshWorkspaceSnapshot = effectiveCwd
       ? providerRegistry
           .refreshWorkspaceSnapshot({ instanceId: desiredInstanceId, cwd: effectiveCwd })
@@ -738,6 +740,7 @@ const make = Effect.gen(function* () {
           ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
           ...(thread.title ? { title: thread.title } : {}),
           ...(additionalRoots.length > 0 ? { additionalRoots } : {}),
+          ...(repoRoots.length > 0 ? { repoRoots } : {}),
           modelSelection: desiredModelSelection,
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
           runtimeMode: desiredRuntimeMode,

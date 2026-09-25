@@ -470,13 +470,17 @@ describe("ClaudeAdapterLive", () => {
         provider: ProviderDriverKind.make("claudeAgent"),
         cwd: "/workspace",
         additionalRoots: ["/workspace/api", "/workspace/web"],
+        repoRoots: ["/workspace/api", "/workspace/web"],
         runtimeMode: "full-access",
       });
 
       assert.deepEqual(harness.getLastCreateQueryInput()?.options.systemPrompt, {
         type: "preset",
         preset: "claude_code",
-        append: buildRuntimeInstructions({ harness: "Claude Code", multiRepo: true }),
+        append: buildRuntimeInstructions({
+          harness: "Claude Code",
+          multiRepo: { cwd: "/workspace", repoRoots: ["/workspace/api", "/workspace/web"] },
+        }),
       });
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),

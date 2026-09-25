@@ -40,7 +40,11 @@ import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
-import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import {
+  buildRuntimeInstructions,
+  multiRepoWorkspace,
+  type MultiRepoWorkspace,
+} from "../RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import {
   ProviderAdapterProcessError,
@@ -138,8 +142,8 @@ interface GrokSessionContext {
   session: ProviderSession;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntime.AcpSessionRuntime["Service"];
-  /** The session spans several repository roots. */
-  readonly multiRepo: boolean;
+  /** Set when the session spans several repository roots. */
+  readonly multiRepo: MultiRepoWorkspace | undefined;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
@@ -1293,7 +1297,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             session,
             scope: sessionScope,
             acp,
-            multiRepo: (input.additionalRoots?.length ?? 0) > 0,
+            multiRepo: multiRepoWorkspace(input),
             notificationFiber: undefined,
             pendingApprovals,
             pendingUserInputs,
