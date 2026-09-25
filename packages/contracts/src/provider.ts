@@ -62,6 +62,9 @@ export const ProviderSessionStartInput = Schema.Struct({
   // `additionalDirectories`, Codex `skills/extraRoots/set`) and degrade to the
   // anchor alone where unsupported.
   additionalRoots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  // Every repo root the session works in (the worktrees, in an isolated run).
+  // Unlike `additionalRoots`, it keeps `cwd` when `cwd` is itself a repo root.
+  repoRoots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   resumeCursor: Schema.optional(Schema.Unknown),
