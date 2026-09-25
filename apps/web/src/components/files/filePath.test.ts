@@ -5,6 +5,7 @@ import {
   fileBreadcrumbChildren,
   fileBreadcrumbParent,
   fileBreadcrumbs,
+  isRepoRootPath,
   labelForRoot,
 } from "./filePath";
 
@@ -108,5 +109,15 @@ describe("buildRootLabels", () => {
     expect(labelForRoot(labels, "/work/app")).toBe("app");
     expect(labelForRoot(labels, "/a/shared")).toBe("a/shared");
     expect(labelForRoot(labels, "/b/shared/")).toBe("b/shared");
+  });
+});
+
+describe("isRepoRootPath", () => {
+  it("matches a repo root itself, not a path inside it", () => {
+    const roots = ["/work/app", "/downloads/outlier/"];
+    expect(isRepoRootPath(roots, "/downloads/outlier")).toBe(true);
+    expect(isRepoRootPath(roots, "/work/app/")).toBe(true);
+    expect(isRepoRootPath(roots, "/work/app/src")).toBe(false);
+    expect(isRepoRootPath(undefined, "/work/app")).toBe(false);
   });
 });

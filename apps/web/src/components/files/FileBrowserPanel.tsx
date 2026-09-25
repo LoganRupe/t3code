@@ -137,12 +137,16 @@ export default function FileBrowserPanel({
   }, [multiRepoRootsKey]);
   // Tree paths sit under their repo's label, so an open from outside the tree
   // (a chat link, the file picker) maps onto that key to be found and revealed.
+  // A repo root linked by its absolute path selects that repo's top-level node.
   const selectedLabel =
     rootLabels && selectedRoot ? labelForRoot(rootLabels, selectedRoot) : undefined;
+  const selectedRootLabel =
+    rootLabels && selectedRelativePath ? labelForRoot(rootLabels, selectedRelativePath) : undefined;
   const selectedPath =
-    selectedRelativePath && selectedLabel !== undefined
+    selectedRootLabel ??
+    (selectedRelativePath && selectedLabel !== undefined
       ? `${selectedLabel}/${selectedRelativePath}`
-      : selectedRelativePath;
+      : selectedRelativePath);
   const {
     entries: directoryEntries,
     load,

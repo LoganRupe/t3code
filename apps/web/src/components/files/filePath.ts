@@ -61,6 +61,12 @@ export function fileBreadcrumbParent(directoryPath: string): string | null {
   return separatorIndex === -1 ? "" : directoryPath.slice(0, separatorIndex);
 }
 
+/** Whether `path` is one of `roots`, tolerating a trailing separator on either. */
+export function isRepoRootPath(roots: readonly string[] | undefined, path: string): boolean {
+  const trimmed = path.replace(/[\\/]+$/, "");
+  return roots?.some((root) => root.replace(/[\\/]+$/, "") === trimmed) ?? false;
+}
+
 /** Label for a root, tolerating the server's normalized form (no trailing separator). */
 export function labelForRoot(
   labels: ReadonlyMap<string, string>,
