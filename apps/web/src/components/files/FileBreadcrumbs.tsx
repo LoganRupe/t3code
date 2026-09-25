@@ -22,19 +22,25 @@ import { cn } from "~/lib/utils";
 import { isAbsolutePath } from "~/terminal-links";
 
 import {
+  buildRootLabels,
   type FileBreadcrumb,
   fileBreadcrumbChildren,
   fileBreadcrumbParent,
   fileBreadcrumbs,
+  labelForRoot,
 } from "./filePath";
 import { useProjectEntriesQuery } from "./projectFilesQueryState";
 
 interface FileBreadcrumbsProps {
   readonly cwd: string;
   readonly environmentId: EnvironmentId;
-  readonly onOpenFile: (relativePath: string) => void;
+  readonly onOpenFile: (relativePath: string, root?: string) => void;
   readonly projectName: string;
   readonly relativePath: string;
+  /** Every repo root of a multi-repo project, so the repo crumb matches its file tree label. */
+  readonly repoRoots?: readonly string[] | undefined;
+  /** Repo root that `relativePath` is relative to, when it is not `cwd` (multi-repo). */
+  readonly root?: string | undefined;
   readonly workspaceMutationId: string | null;
 }
 
@@ -267,14 +273,40 @@ function DirectoryBreadcrumb(props: FileBreadcrumbsProps & { readonly crumb: Fil
 
 export function FileBreadcrumbs(props: FileBreadcrumbsProps) {
   const hostPath = isAbsolutePath(props.relativePath);
+  // A file in another repo of a multi-repo project reads "project > repo > path",
+  // and every crumb from the repo down browses and opens within that repo.
+  const repoRoot = props.root && props.root !== props.cwd ? props.root : undefined;
+  const repoRootsKey = props.repoRoots?.join("\0") ?? "";
+  const repoName = useMemo(() => {
+    if (!repoRoot) return undefined;
+    const label = repoRootsKey
+      ? labelForRoot(buildRootLabels(repoRootsKey.split("\0")), repoRoot)
+      : undefined;
+    return label ?? repoRoot.split(/[\\/]/).findLast(Boolean) ?? repoRoot;
+  }, [repoRoot, repoRootsKey]);
   const breadcrumbs = useMemo(
-    () => fileBreadcrumbs(props.projectName, props.relativePath),
-    [props.projectName, props.relativePath],
+    () =>
+      repoName === undefined
+        ? fileBreadcrumbs(props.projectName, props.relativePath)
+        : [
+            { label: props.projectName, path: "", kind: "project" as const },
+            ...fileBreadcrumbs(repoName, props.relativePath),
+          ],
+    [props.projectName, props.relativePath, repoName],
   );
+  const repoProps: FileBreadcrumbsProps =
+    repoRoot && repoName !== undefined
+      ? {
+          ...props,
+          cwd: repoRoot,
+          projectName: repoName,
+          onOpenFile: (relativePath) => props.onOpenFile(relativePath, repoRoot),
+        }
+      : props;
 
   return breadcrumbs.map((crumb, index) => (
     <div
-      key={crumb.path || "project"}
+      key={index === 0 ? "project" : crumb.path || "repo"}
       className="flex min-w-0 shrink-0 items-center"
       data-current-file-crumb={crumb.kind === "file"}
     >
@@ -288,7 +320,7 @@ export function FileBreadcrumbs(props: FileBreadcrumbsProps) {
       ) : hostPath ? (
         <BreadcrumbLabel label={crumb.label} pathLabel={crumb.path} />
       ) : (
-        <DirectoryBreadcrumb {...props} crumb={crumb} />
+        <DirectoryBreadcrumb {...(index === 0 ? props : repoProps)} crumb={crumb} />
       )}
     </div>
   ));

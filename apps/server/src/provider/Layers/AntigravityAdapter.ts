@@ -192,6 +192,8 @@ interface TurnIntent {
 interface SessionContext {
   readonly threadId: ThreadId;
   readonly cwd: string;
+  /** The session spans several repository roots. */
+  readonly multiRepo: boolean;
   readonly nativeSessionId: string;
   readonly scope: Scope.Closeable;
   readonly runtime: Runtime;
@@ -865,6 +867,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
               context = {
                 threadId: input.threadId,
                 cwd,
+                multiRepo: (input.additionalRoots?.length ?? 0) > 0,
                 nativeSessionId: started.sessionId,
                 scope: sessionScope,
                 runtime,
@@ -1085,7 +1088,11 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
                   ...prompt,
                   {
                     type: "text",
-                    text: buildRuntimeInstructions({ harness: "Antigravity", model }),
+                    text: buildRuntimeInstructions({
+                      harness: "Antigravity",
+                      model,
+                      multiRepo: context.multiRepo,
+                    }),
                   },
                 ],
               },

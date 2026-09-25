@@ -2365,8 +2365,11 @@ function useChatMarkdownState({
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
   // Stable dep for the roots array: NUL-joined (paths never contain NUL).
   const repoRootsKey = repoRoots ? repoRoots.join("\0") : "";
+  const roots = useMemo(
+    () => (repoRootsKey ? repoRootsKey.split("\0") : undefined),
+    [repoRootsKey],
+  );
   const markdownFileLinkMetaByHref = useMemo(() => {
-    const roots = repoRootsKey ? repoRootsKey.split("\0") : undefined;
     const metaByHref = new Map<
       string,
       NonNullable<ReturnType<typeof resolveMarkdownFileLinkMeta>>
@@ -2381,18 +2384,18 @@ function useChatMarkdownState({
       }
     }
     return metaByHref;
-  }, [cwd, imageBaseDir, repoRootsKey, text]);
+  }, [cwd, imageBaseDir, roots, text]);
   const inlineCodeFileLinkMetaByText = useMemo(() => {
     const metaByText = new Map<string, MarkdownFileLinkMeta>();
     for (const span of extractInlineCodeSpans(text)) {
       if (metaByText.has(span)) continue;
-      const meta = resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd);
+      const meta = resolveInlineCodeFileLinkMeta(span, cwd, imageBaseDir ?? cwd, roots);
       if (meta) {
         metaByText.set(span, meta);
       }
     }
     return metaByText;
-  }, [cwd, imageBaseDir, text]);
+  }, [cwd, imageBaseDir, roots, text]);
   const fileLinkParentSuffixByPath = useMemo(() => {
     const filePaths = [
       ...[...markdownFileLinkMetaByHref.values()].map((meta) => meta.filePath),
@@ -2544,7 +2547,8 @@ function useChatMarkdownState({
       const isLatestLookup = claimWorkspaceBasenameLookup();
       const openAt = (path: string) =>
         useRightPanelStore.getState().openFile(threadRef, path, line, root);
-      if (!cwd || !needsWorkspaceBasenameLookup(panelPath)) {
+      // A path with an owning repo root is already exact within that repo.
+      if (!cwd || root || !needsWorkspaceBasenameLookup(panelPath)) {
         openAt(panelPath);
         return;
       }
@@ -2559,9 +2563,11 @@ function useChatMarkdownState({
   const revealMarkdownFileInFileManager = useCallback(
     async (fileLinkMeta: MarkdownFileLinkMeta) => {
       const workspaceRelativePath = fileLinkMeta.workspaceRelativePath;
-      const match = workspaceRelativePath
-        ? await findWorkspaceBasenameMatch(workspaceRelativePath)
-        : null;
+      // A path with an owning repo root is already exact within that repo.
+      const match =
+        workspaceRelativePath && !fileLinkMeta.fileRoot
+          ? await findWorkspaceBasenameMatch(workspaceRelativePath)
+          : null;
       const filePath = match && cwd ? resolvePathLinkTarget(match, cwd) : fileLinkMeta.filePath;
       return revealFileInFileManager(filePath);
     },
@@ -2600,6 +2606,7 @@ function useChatMarkdownState({
           displayPath={fileLinkMeta.displayPath}
           panelPath={panelPath}
           line={fileLinkMeta.line}
+          fileRoot={fileLinkMeta.fileRoot}
           label={labelParts.join(" · ")}
           copyMarkdown={copyMarkdown}
           theme={resolvedTheme}
@@ -2668,6 +2675,7 @@ function useChatMarkdownState({
       linkedThreadPullRequestFor,
       resolveThreadPullRequest,
       resolvedTheme,
+      roots,
       serverConfig,
       skills,
       text,
@@ -2698,6 +2706,7 @@ function useChatMarkdownState({
       linkedThreadPullRequestFor,
       resolveThreadPullRequest,
       resolvedTheme,
+      roots,
       serverConfig,
       skills,
       text,
@@ -2845,6 +2854,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       updateThreadPullRequestLink,
       fileLinkChip,
       renderContextReference,
+      roots,
     } = use(ChatMarkdownRendererContext);
     const citation = href ? parseAssistantCitationHref(href) : null;
     if (citation) return <AssistantCitationChip citation={citation} />;
@@ -2860,7 +2870,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
     const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
     const fileLinkMeta = normalizedHref
       ? (markdownFileLinkMetaByHref.get(normalizedHref) ??
-        resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd))
+        resolveMarkdownFileLinkMeta(normalizedHref, cwd, imageBaseDir ?? cwd, roots))
       : null;
     if (!fileLinkMeta) {
       const faviconHost = resolveExternalWebLinkHost(href);
@@ -3063,14 +3073,14 @@ const CHAT_MARKDOWN_COMPONENTS = {
     );
   },
   code: function MarkdownCode({ node, children, className, ...props }) {
-    const { cwd, imageBaseDir, inlineCodeFileLinkMetaByText, fileLinkChip } = use(
+    const { cwd, imageBaseDir, inlineCodeFileLinkMetaByText, fileLinkChip, roots } = use(
       ChatMarkdownRendererContext,
     );
     if (node?.properties?.dataInlineCode != null) {
       const codeText = nodeToPlainText(children);
       const fileLinkMeta =
         inlineCodeFileLinkMetaByText.get(codeText.trim()) ??
-        resolveInlineCodeFileLinkMeta(codeText, cwd, imageBaseDir ?? cwd);
+        resolveInlineCodeFileLinkMeta(codeText, cwd, imageBaseDir ?? cwd, roots);
       if (fileLinkMeta) {
         return fileLinkChip(
           fileLinkMeta,

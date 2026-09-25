@@ -341,6 +341,8 @@ interface OpenCodeSessionContext {
   readonly client: OpencodeClient;
   readonly server: OpenCodeServerConnection;
   readonly directory: string;
+  /** The session spans several repository roots. */
+  readonly multiRepo: boolean;
   openCodeSessionId: string;
   readonly relatedSessionIds: Set<string>;
   readonly resolvedRequestIds: Set<string>;
@@ -3007,6 +3009,7 @@ export function makeOpenCodeAdapter(
           client: started.client,
           server: started.server,
           directory,
+          multiRepo: (input.additionalRoots?.length ?? 0) > 0,
           openCodeSessionId: started.openCodeSession.id,
           relatedSessionIds: new Set([started.openCodeSession.id]),
           resolvedRequestIds: new Set(),
@@ -3283,6 +3286,7 @@ export function makeOpenCodeAdapter(
                     system: buildRuntimeInstructions({
                       harness: "OpenCode",
                       model: `${parsedModel.providerID}/${parsedModel.modelID}`,
+                      multiRepo: context.multiRepo,
                     }),
                     parts: [...(text ? [{ type: "text" as const, text }] : []), ...fileParts],
                   },

@@ -57,6 +57,7 @@ import { DelimitedTablePreview } from "./DelimitedTablePreview";
 import FileBrowserPanel from "./FileBrowserPanel";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
+import { isRootPath } from "./filePath";
 import {
   type FileCommentAnnotationEntry,
   type FileCommentAnnotationGroup,
@@ -965,8 +966,12 @@ export default function FilePreviewPanel({
   // a file surface and the read fails. Keep the breadcrumbs, drop the preview
   // pane, and let the tree fill the surface with the folder revealed. Mutation
   // refresh stays on so the surface notices if the path becomes a file. A host
-  // path cannot be revealed in the workspace tree, so it keeps the read error.
-  const isDirectory = file.isNotFile && !isHostFile;
+  // path cannot be revealed in the workspace tree, so it keeps the read error,
+  // unless it is the workspace root or a repo root, which the tree shows.
+  const isDirectory =
+    file.isNotFile &&
+    (!isHostFile ||
+      (relativePath !== null && isRootPath([cwd, ...(repoRoots ?? [])], relativePath)));
   // Everything preview-related keys off previewPath; a folder has no preview.
   const previewPath = isDirectory ? null : relativePath;
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
@@ -1119,6 +1124,8 @@ export default function FilePreviewPanel({
                 onOpenFile={onOpenFile}
                 projectName={projectName}
                 relativePath={relativePath}
+                repoRoots={repoRoots}
+                root={fileRoot ?? undefined}
                 workspaceMutationId={workspaceMutationId}
               />
             </div>
@@ -1315,6 +1322,7 @@ export default function FilePreviewPanel({
               cwd={cwd}
               projectName={projectName}
               selectedPath={relativePath}
+              selectedRoot={fileRoot ?? undefined}
               selectedPathRevealId={revealRequestId}
               repoRoots={repoRoots}
               onOpenFile={onOpenFile}
