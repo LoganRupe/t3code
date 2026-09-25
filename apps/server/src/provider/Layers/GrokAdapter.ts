@@ -138,6 +138,8 @@ interface GrokSessionContext {
   session: ProviderSession;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntime.AcpSessionRuntime["Service"];
+  /** The session spans several repository roots. */
+  readonly multiRepo: boolean;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
@@ -1290,6 +1292,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             session,
             scope: sessionScope,
             acp,
+            multiRepo: (input.additionalRoots?.length ?? 0) > 0,
             notificationFiber: undefined,
             pendingApprovals,
             pendingUserInputs,
@@ -1646,6 +1649,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       harness: "Grok",
                       model: displayModel,
                       reasoningEffort: normalizeGrokReasoningEffort(requestedTurnReasoningEffort),
+                      multiRepo: ctx.multiRepo,
                     });
               for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1) {
                 yield* Effect.yieldNow;

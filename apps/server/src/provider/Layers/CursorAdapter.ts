@@ -138,6 +138,8 @@ interface CursorSessionContext {
   session: ProviderSession;
   readonly scope: Scope.Closeable;
   readonly acp: AcpSessionRuntime.AcpSessionRuntime["Service"];
+  /** The session spans several repository roots. */
+  readonly multiRepo: boolean;
   notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
@@ -793,6 +795,7 @@ export function makeCursorAdapter(
             session,
             scope: sessionScope,
             acp,
+            multiRepo: (input.additionalRoots?.length ?? 0) > 0,
             notificationFiber: undefined,
             pendingApprovals,
             pendingUserInputs,
@@ -1097,7 +1100,11 @@ export function makeCursorAdapter(
                     ...promptParts,
                     {
                       type: "text",
-                      text: buildRuntimeInstructions({ harness: "Cursor", model: resolvedModel }),
+                      text: buildRuntimeInstructions({
+                        harness: "Cursor",
+                        model: resolvedModel,
+                        multiRepo: ctx.multiRepo,
+                      }),
                     },
                   ],
             })

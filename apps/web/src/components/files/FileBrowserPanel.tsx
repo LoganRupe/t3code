@@ -22,6 +22,7 @@ import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
+import { buildRootLabels, isRootPath, labelForRoot } from "./filePath";
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "./fileTreeExpansion";
 import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
@@ -34,6 +35,8 @@ interface FileBrowserPanelProps {
   projectName: string;
   /** Entry currently open in the surface; revealed and selected in the tree. A directory is expanded. */
   selectedPath: string | null;
+  /** Repo root that `selectedPath` is relative to, when it is not the workspace root. */
+  selectedRoot?: string | undefined;
   /** Bumped when the same path should be revealed again (e.g. re-opened from search). */
   selectedPathRevealId: number;
   // Multi-repo workspaces (#923): when set, list the union of these repo roots
@@ -51,54 +54,6 @@ interface TreeEntryInfo {
 
 function treePath(entry: ProjectEntry): string {
   return entry.kind === "directory" ? `${entry.path}/` : entry.path;
-}
-
-/** Label for a root, tolerating the server's normalized form (no trailing separator). */
-function labelForRoot(labels: ReadonlyMap<string, string>, root: string): string | undefined {
-  const exact = labels.get(root);
-  if (exact !== undefined) return exact;
-  const trimmed = root.replace(/[\\/]+$/, "");
-  for (const [candidate, label] of labels) {
-    if (candidate.replace(/[\\/]+$/, "") === trimmed) return label;
-  }
-  return undefined;
-}
-
-/**
- * Assign each repo root a unique, human-readable label for the tree's top-level
- * grouping. Prefer the folder basename (matching the per-repo git controls);
- * when two roots share a basename, grow the label by parent segments until the
- * labels are distinct.
- */
-function buildRootLabels(roots: readonly string[]): Map<string, string> {
-  const segments = new Map<string, string[]>();
-  for (const root of roots) {
-    segments.set(
-      root,
-      root
-        .replaceAll("\\", "/")
-        .replace(/\/+$/, "")
-        .split("/")
-        .filter((segment) => segment.length > 0),
-    );
-  }
-
-  const labels = new Map<string, string>();
-  for (const root of roots) {
-    const parts = segments.get(root) ?? [];
-    let depth = 1;
-    let label = parts.slice(-depth).join("/") || root;
-    const collidesAtDepth = () =>
-      roots.some(
-        (other) => other !== root && (segments.get(other) ?? []).slice(-depth).join("/") === label,
-      );
-    while (collidesAtDepth() && depth < parts.length) {
-      depth += 1;
-      label = parts.slice(-depth).join("/");
-    }
-    labels.set(root, label);
-  }
-  return labels;
 }
 
 function RefreshFilesButton(props: { isPending: boolean; onRefresh: () => void }) {
@@ -154,7 +109,8 @@ export default function FileBrowserPanel({
   environmentId,
   cwd,
   projectName,
-  selectedPath,
+  selectedPath: selectedRelativePath,
+  selectedRoot,
   selectedPathRevealId,
   repoRoots,
   onOpenFile,
@@ -179,6 +135,21 @@ export default function FileBrowserPanel({
       searchRoots: roots,
     };
   }, [multiRepoRootsKey]);
+  // Tree paths sit under their repo's label, so an open from outside the tree
+  // (a chat link, the file picker) maps onto that key to be found and revealed.
+  // A repo root linked by its absolute path selects that repo's top-level node.
+  // The workspace root is the whole tree, so it selects nothing.
+  const selectedLabel =
+    rootLabels && selectedRoot ? labelForRoot(rootLabels, selectedRoot) : undefined;
+  const selectedRootLabel =
+    rootLabels && selectedRelativePath ? labelForRoot(rootLabels, selectedRelativePath) : undefined;
+  const selectedPath =
+    selectedRootLabel ??
+    (selectedRelativePath && isRootPath([cwd], selectedRelativePath)
+      ? null
+      : selectedRelativePath && selectedLabel !== undefined
+        ? `${selectedLabel}/${selectedRelativePath}`
+        : selectedRelativePath);
   const {
     entries: directoryEntries,
     load,
