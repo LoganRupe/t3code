@@ -62,7 +62,7 @@ export function fileBreadcrumbParent(directoryPath: string): string | null {
 }
 
 /** Whether `path` is one of `roots`, tolerating a trailing separator on either. */
-export function isRepoRootPath(roots: readonly string[] | undefined, path: string): boolean {
+export function isRootPath(roots: readonly string[] | undefined, path: string): boolean {
   const trimmed = path.replace(/[\\/]+$/, "");
   return roots?.some((root) => root.replace(/[\\/]+$/, "") === trimmed) ?? false;
 }

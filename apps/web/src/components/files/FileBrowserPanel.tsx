@@ -22,7 +22,7 @@ import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
-import { buildRootLabels, labelForRoot } from "./filePath";
+import { buildRootLabels, isRootPath, labelForRoot } from "./filePath";
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "./fileTreeExpansion";
 import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
@@ -138,15 +138,18 @@ export default function FileBrowserPanel({
   // Tree paths sit under their repo's label, so an open from outside the tree
   // (a chat link, the file picker) maps onto that key to be found and revealed.
   // A repo root linked by its absolute path selects that repo's top-level node.
+  // The workspace root is the whole tree, so it selects nothing.
   const selectedLabel =
     rootLabels && selectedRoot ? labelForRoot(rootLabels, selectedRoot) : undefined;
   const selectedRootLabel =
     rootLabels && selectedRelativePath ? labelForRoot(rootLabels, selectedRelativePath) : undefined;
   const selectedPath =
     selectedRootLabel ??
-    (selectedRelativePath && selectedLabel !== undefined
-      ? `${selectedLabel}/${selectedRelativePath}`
-      : selectedRelativePath);
+    (selectedRelativePath && isRootPath([cwd], selectedRelativePath)
+      ? null
+      : selectedRelativePath && selectedLabel !== undefined
+        ? `${selectedLabel}/${selectedRelativePath}`
+        : selectedRelativePath);
   const {
     entries: directoryEntries,
     load,

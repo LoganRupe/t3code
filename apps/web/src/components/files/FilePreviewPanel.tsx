@@ -57,7 +57,7 @@ import { DelimitedTablePreview } from "./DelimitedTablePreview";
 import FileBrowserPanel from "./FileBrowserPanel";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
-import { isRepoRootPath } from "./filePath";
+import { isRootPath } from "./filePath";
 import {
   type FileCommentAnnotationEntry,
   type FileCommentAnnotationGroup,
@@ -967,10 +967,11 @@ export default function FilePreviewPanel({
   // pane, and let the tree fill the surface with the folder revealed. Mutation
   // refresh stays on so the surface notices if the path becomes a file. A host
   // path cannot be revealed in the workspace tree, so it keeps the read error,
-  // unless it is a repo root outside the workspace root, which has a tree node.
+  // unless it is the workspace root or a repo root, which the tree shows.
   const isDirectory =
     file.isNotFile &&
-    (!isHostFile || (relativePath !== null && isRepoRootPath(repoRoots, relativePath)));
+    (!isHostFile ||
+      (relativePath !== null && isRootPath([cwd, ...(repoRoots ?? [])], relativePath)));
   // Everything preview-related keys off previewPath; a folder has no preview.
   const previewPath = isDirectory ? null : relativePath;
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
