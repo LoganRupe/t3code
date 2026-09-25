@@ -1119,6 +1119,7 @@ export default function FilePreviewPanel({
                 onOpenFile={onOpenFile}
                 projectName={projectName}
                 relativePath={relativePath}
+                root={fileRoot ?? undefined}
                 workspaceMutationId={workspaceMutationId}
               />
             </div>
