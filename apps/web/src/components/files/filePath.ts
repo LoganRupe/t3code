@@ -60,3 +60,54 @@ export function fileBreadcrumbParent(directoryPath: string): string | null {
   const separatorIndex = directoryPath.lastIndexOf("/");
   return separatorIndex === -1 ? "" : directoryPath.slice(0, separatorIndex);
 }
+
+/** Label for a root, tolerating the server's normalized form (no trailing separator). */
+export function labelForRoot(
+  labels: ReadonlyMap<string, string>,
+  root: string,
+): string | undefined {
+  const exact = labels.get(root);
+  if (exact !== undefined) return exact;
+  const trimmed = root.replace(/[\\/]+$/, "");
+  for (const [candidate, label] of labels) {
+    if (candidate.replace(/[\\/]+$/, "") === trimmed) return label;
+  }
+  return undefined;
+}
+
+/**
+ * Assign each repo root a unique, human-readable label for the tree's top-level
+ * grouping. Prefer the folder basename (matching the per-repo git controls);
+ * when two roots share a basename, grow the label by parent segments until the
+ * labels are distinct.
+ */
+export function buildRootLabels(roots: readonly string[]): Map<string, string> {
+  const segments = new Map<string, string[]>();
+  for (const root of roots) {
+    segments.set(
+      root,
+      root
+        .replaceAll("\\", "/")
+        .replace(/\/+$/, "")
+        .split("/")
+        .filter((segment) => segment.length > 0),
+    );
+  }
+
+  const labels = new Map<string, string>();
+  for (const root of roots) {
+    const parts = segments.get(root) ?? [];
+    let depth = 1;
+    let label = parts.slice(-depth).join("/") || root;
+    const collidesAtDepth = () =>
+      roots.some(
+        (other) => other !== root && (segments.get(other) ?? []).slice(-depth).join("/") === label,
+      );
+    while (collidesAtDepth() && depth < parts.length) {
+      depth += 1;
+      label = parts.slice(-depth).join("/");
+    }
+    labels.set(root, label);
+  }
+  return labels;
+}
