@@ -25,4 +25,11 @@ describe("buildRuntimeInstructions", () => {
     expect(instructions).toContain("through the Cursor harness.");
     expect(instructions).not.toContain("reasoning effort");
   });
+
+  it("asks for absolute file paths only when the session spans several repos", () => {
+    expect(buildRuntimeInstructions({ harness: "Codex", multiRepo: true })).toContain(
+      "<multi_repo_workspace>",
+    );
+    expect(buildRuntimeInstructions({ harness: "Codex" })).not.toContain("<multi_repo_workspace>");
+  });
 });

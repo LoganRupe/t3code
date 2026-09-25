@@ -34,6 +34,8 @@ interface FileBrowserPanelProps {
   projectName: string;
   /** Entry currently open in the surface; revealed and selected in the tree. A directory is expanded. */
   selectedPath: string | null;
+  /** Repo root that `selectedPath` is relative to, when it is not the workspace root. */
+  selectedRoot?: string | undefined;
   /** Bumped when the same path should be revealed again (e.g. re-opened from search). */
   selectedPathRevealId: number;
   // Multi-repo workspaces (#923): when set, list the union of these repo roots
@@ -154,7 +156,8 @@ export default function FileBrowserPanel({
   environmentId,
   cwd,
   projectName,
-  selectedPath,
+  selectedPath: selectedRelativePath,
+  selectedRoot,
   selectedPathRevealId,
   repoRoots,
   onOpenFile,
@@ -179,6 +182,14 @@ export default function FileBrowserPanel({
       searchRoots: roots,
     };
   }, [multiRepoRootsKey]);
+  // Tree paths sit under their repo's label, so an open from outside the tree
+  // (a chat link, the file picker) maps onto that key to be found and revealed.
+  const selectedLabel =
+    rootLabels && selectedRoot ? labelForRoot(rootLabels, selectedRoot) : undefined;
+  const selectedPath =
+    selectedRelativePath && selectedLabel !== undefined
+      ? `${selectedLabel}/${selectedRelativePath}`
+      : selectedRelativePath;
   const {
     entries: directoryEntries,
     load,
