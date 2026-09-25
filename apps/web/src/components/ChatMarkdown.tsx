@@ -2563,9 +2563,11 @@ function useChatMarkdownState({
   const revealMarkdownFileInFileManager = useCallback(
     async (fileLinkMeta: MarkdownFileLinkMeta) => {
       const workspaceRelativePath = fileLinkMeta.workspaceRelativePath;
-      const match = workspaceRelativePath
-        ? await findWorkspaceBasenameMatch(workspaceRelativePath)
-        : null;
+      // A path with an owning repo root is already exact within that repo.
+      const match =
+        workspaceRelativePath && !fileLinkMeta.fileRoot
+          ? await findWorkspaceBasenameMatch(workspaceRelativePath)
+          : null;
       const filePath = match && cwd ? resolvePathLinkTarget(match, cwd) : fileLinkMeta.filePath;
       return revealFileInFileManager(filePath);
     },

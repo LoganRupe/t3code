@@ -3,29 +3,19 @@ When the t3-code MCP server exposes link_pull_request, you must use it to regist
 </pull_request_linking>`;
 
 const MULTI_REPO_FILE_PATH_INSTRUCTIONS = `<multi_repo_workspace>
-MANDATORY RULE: In this workspace, every file or directory path that you write in a response MUST be a full absolute path. There are no exceptions.
+This workspace contains more than one git repository, and the same relative path, such as src/index.ts, can exist in several of them. The user's client turns a path written in inline code, such as \`/abs/path/file.ts\`, into a link that opens the file. It opens a relative path against the workspace root, so that link opens the wrong file or none. Write every file and directory path in inline code as a full absolute path that starts with "/" (or a drive letter on Windows), each time you mention it, in prose, tables, lists, and summaries alike. Code blocks and text meant to be pasted elsewhere keep their usual paths.
 
-Why: this workspace contains more than one git repository. The same relative path, for example .graft/config.json, can exist in several of these repositories. A relative path, a shortened path, or a bare file name does not identify one file. The user's client opens it against the workspace root, so it opens the wrong file or no file.
+Tools print relative paths: git status and grep print them relative to the directory they ran in, and git diff, git show, git log, and git stash show print them relative to the repository root. Put that directory's absolute path in front of each one.
 
-The rule applies:
-- to every mention of a path, in every part of the response: prose, inline code, links, lists, tables, headings, recommendations, and summaries.
-- to each mention separately. If you wrote the absolute path of a file earlier in the same response, write the full absolute path again. You are not permitted to shorten it.
-- to paths that you copy from tool output. git status, git diff, grep, rg, ls, and find print relative paths. Convert each path to an absolute path before you write it.
+<example>
+git -C <repository root> stash show lists dir/file.py. Write \`<repository root>/dir/file.py\`, with the real absolute path of that repository in place of <repository root>.
+</example>
 
-Do NOT write:
-- a relative path, for example \`.graft/config.json\` or \`src/index.ts\`.
-- a path that starts with "./" or "../".
-- a bare file or directory name that stands for a specific file or directory, for example \`config.json\` or \`.graft\`.
-- "~" or an environment variable in place of the start of a path.
-
-Build each absolute path from this template:
-<base directory>/<relative path>
-- <relative path> is the path as the tool printed it.
-- <base directory> is the absolute path of the directory that the relative path starts from. For git diff and git show, it is the root of the repository that the command ran in. For git status, grep, rg, ls, and find, it is the directory that the command ran in: its working directory, or the directory given to cd or git -C.
-- Example: the command git -C <repository root> status prints .graft/config.json. Write \`<repository root>/.graft/config.json\`, with the real absolute path of that repository in place of <repository root>.
-- If you do not know which repository or directory a path belongs to, find out with a tool before you write the path. For example, run git rev-parse --show-toplevel in that directory. Do not guess.
-
-MANDATORY CHECK before you send each response: find every file and directory path in the response. If a path does not start with "/" (or a drive letter on Windows), replace it with the full absolute path. Do this check again for paths in the last part of the response, because shortened paths occur most often there.
+Replies in this workspace have slipped in these ways. Before you send a response, check it for each one:
+- a path written in full once, then shortened on a later mention or in the closing summary
+- a list of files copied from git output, such as the files in a stash, commit, or diff
+- a submodule path, or a repository written as \`~/name\`
+- a bare file name, such as \`README.md\`, that stands for a specific file
 </multi_repo_workspace>`;
 
 /** Shared runtime context; omit model and effort when the harness manages them dynamically. */
