@@ -757,6 +757,7 @@ describe("ThreadPullRequestReactor", () => {
           Layer.provide(
             Layer.succeed(RepositoryIdentityResolver, {
               resolve: () => Effect.succeed(project.repositoryIdentity),
+              resolveMany: () => Effect.succeed([project.repositoryIdentity]),
             }),
           ),
           Layer.provideMerge(SqlitePersistenceMemory),

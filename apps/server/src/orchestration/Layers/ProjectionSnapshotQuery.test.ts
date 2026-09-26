@@ -3577,6 +3577,11 @@ it.effect(
               resolved.push(root);
               return null;
             }),
+          resolveMany: (roots) =>
+            Effect.sync(() => {
+              resolved.push(...roots);
+              return [];
+            }),
         }),
       ),
       Layer.provideMerge(SqlitePersistenceMemory),
@@ -3635,22 +3640,23 @@ it.effect(
 );
 
 it.effect("reads one sweep thread and its projects like the shell snapshot", () => {
+  const acmeWeb = {
+    canonicalKey: "github.com/acme/web",
+    provider: "github",
+    displayName: "acme/web",
+    locator: {
+      source: "git-remote" as const,
+      remoteName: "origin",
+      remoteUrl: "https://github.com/acme/web.git",
+    },
+  };
   const layer = OrchestrationProjectionSnapshotQueryLive.pipe(
     Layer.provide(ThreadBackgroundLiveness.layer),
     Layer.provide(ThreadPlanProgress.layer),
     Layer.provide(
       Layer.succeed(RepositoryIdentityResolver.RepositoryIdentityResolver, {
-        resolve: () =>
-          Effect.succeed({
-            canonicalKey: "github.com/acme/web",
-            provider: "github",
-            displayName: "acme/web",
-            locator: {
-              source: "git-remote" as const,
-              remoteName: "origin",
-              remoteUrl: "https://github.com/acme/web.git",
-            },
-          }),
+        resolve: () => Effect.succeed(acmeWeb),
+        resolveMany: () => Effect.succeed([acmeWeb]),
       }),
     ),
     Layer.provideMerge(SqlitePersistenceMemory),
@@ -3713,6 +3719,11 @@ it.effect("reads a full sweep from unsettled threads and every project", () => {
           Effect.sync(() => {
             resolved.push(root);
             return null;
+          }),
+        resolveMany: (roots) =>
+          Effect.sync(() => {
+            resolved.push(...roots);
+            return [];
           }),
       }),
     ),
