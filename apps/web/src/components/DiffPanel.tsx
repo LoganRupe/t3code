@@ -246,19 +246,19 @@ function BranchDiffRepoSection({
       <Tooltip>
         <TooltipTrigger
           render={
-            <div className="diff-render-group-header sticky top-0 z-10 mt-2 mb-1 flex items-center gap-2 rounded-md bg-background/95 px-2 py-1 text-xs font-medium text-muted-foreground backdrop-blur first:mt-0" />
+            <div className="sticky top-0 z-10 mt-2 mb-1 flex items-center gap-2 rounded-md bg-background/95 px-2 py-1 text-xs font-medium text-muted-foreground backdrop-blur first:mt-0" />
           }
         >
           <span className="truncate text-foreground/90">{repoRootBaseName(repoRoot)}</span>
           <span className="text-muted-foreground/70">{countLabel}</span>
-          {source?.truncated === true && <span className="text-amber-500/80">truncated</span>}
+          {source?.truncated === true && <span className="text-warning">truncated</span>}
         </TooltipTrigger>
         <TooltipPopup side="bottom" className="max-w-80 whitespace-normal">
           <span className="font-mono break-all">{cwd}</span>
         </TooltipPopup>
       </Tooltip>
       {preview.error && files.length === 0 && !rawPatch ? (
-        <p className="px-2 pb-2 text-2xs text-red-500/80">{preview.error}</p>
+        <p className="px-2 pb-2 text-2xs text-destructive">{preview.error}</p>
       ) : rawPatch ? (
         <div className="space-y-2 px-2 pb-2">
           <p className="text-2xs text-muted-foreground/75">{rawPatch.reason}</p>
@@ -935,7 +935,7 @@ export default function DiffPanel({
       <div
         key={themedFileKey}
         data-diff-file-path={filePath}
-        className="diff-render-file group/diff-file mb-2 rounded-md first:mt-2 last:mb-0"
+        className="group/diff-file mb-2 rounded-md first:mt-2 last:mb-0"
         onClickCapture={(event) => {
           const nativeEvent = event.nativeEvent as MouseEvent;
           const composedPath = nativeEvent.composedPath?.() ?? [];
@@ -1516,7 +1516,7 @@ export default function DiffPanel({
                         <Tooltip key={`diff-group:${group.repoRoot}`}>
                           <TooltipTrigger
                             render={
-                              <div className="diff-render-group-header sticky top-0 z-10 mt-2 mb-1 flex items-center gap-2 rounded-md bg-background/95 px-2 py-1 text-xs font-medium text-muted-foreground backdrop-blur first:mt-0" />
+                              <div className="sticky top-0 z-10 mt-2 mb-1 flex items-center gap-2 rounded-md bg-background/95 px-2 py-1 text-xs font-medium text-muted-foreground backdrop-blur first:mt-0" />
                             }
                           >
                             <span className="truncate text-foreground/90">{group.displayName}</span>
