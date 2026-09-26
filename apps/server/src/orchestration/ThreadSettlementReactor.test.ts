@@ -1524,7 +1524,10 @@ describe("ThreadSettlementReactor", () => {
           Layer.provide(ThreadBackgroundLiveness.layer),
           Layer.provide(ThreadPlanProgress.layer),
           Layer.provide(
-            Layer.succeed(RepositoryIdentityResolver, { resolve: () => Effect.succeed(null) }),
+            Layer.succeed(RepositoryIdentityResolver, {
+              resolve: () => Effect.succeed(null),
+              resolveMany: () => Effect.succeed([]),
+            }),
           ),
           Layer.provideMerge(SqlitePersistenceMemory),
         ),
