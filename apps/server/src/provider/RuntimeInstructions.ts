@@ -18,20 +18,54 @@ Replies in this workspace have slipped in these ways. Before you send a response
 - a bare file name, such as \`README.md\`, that stands for a specific file
 </multi_repo_workspace>`;
 
+/** A session that spans more than one repository root. */
+export interface MultiRepoWorkspace {
+  /** The session's working directory: the workspace folder, or one of the repo roots. */
+  readonly cwd?: string | undefined;
+  /** Every repository root of the project, in workspace order. */
+  readonly repoRoots: ReadonlyArray<string>;
+}
+
+/** The multi-repo context for a session start, or undefined when it has a single root. */
+export function multiRepoWorkspace(input: {
+  readonly cwd?: string | undefined;
+  readonly additionalRoots?: ReadonlyArray<string> | undefined;
+  readonly repoRoots?: ReadonlyArray<string> | undefined;
+}): MultiRepoWorkspace | undefined {
+  if ((input.additionalRoots?.length ?? 0) === 0) return undefined;
+  return { cwd: input.cwd, repoRoots: input.repoRoots ?? [] };
+}
+
+// Claude Code leaves repo roots inside its working directory out of the
+// environment block it shows the model, and the other providers get no root
+// list at all, so name the repos here.
+function projectRepositoriesInstructions(workspace: MultiRepoWorkspace): string {
+  if (workspace.repoRoots.length === 0) return "";
+  const repos = workspace.repoRoots.map((root) => `- ${root}`).join("\n");
+  const anchor =
+    workspace.cwd && !workspace.repoRoots.includes(workspace.cwd)
+      ? `\nThe working directory, ${workspace.cwd}, is the project's workspace folder, not a repository. Folders under it that are not listed above are not part of the project, so there is no need to search it for more repositories.`
+      : "";
+  return `\n\n<project_repositories>\nThis project's repositories are:\n${repos}${anchor}\n</project_repositories>`;
+}
+
 /** Shared runtime context; omit model and effort when the harness manages them dynamically. */
 export function buildRuntimeInstructions(runtime: {
   readonly harness: string;
   readonly model?: string | undefined;
   readonly reasoningEffort?: string | undefined;
-  /** True when the session spans more than one repository root. */
-  readonly multiRepo?: boolean | undefined;
+  /** Set when the session spans more than one repository root. */
+  readonly multiRepo?: MultiRepoWorkspace | undefined;
 }): string {
   const harness = toSingleLine(runtime.harness);
   const model = toSingleLine(runtime.model ?? "");
   const effort = toSingleLine(runtime.reasoningEffort ?? "");
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${model}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
-  return `<runtime_info>In case you're asked: you are running in T3 Code through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}${runtime.multiRepo ? `\n\n${MULTI_REPO_FILE_PATH_INSTRUCTIONS}` : ""}`;
+  const multiRepo = runtime.multiRepo
+    ? `\n\n${MULTI_REPO_FILE_PATH_INSTRUCTIONS}${projectRepositoriesInstructions(runtime.multiRepo)}`
+    : "";
+  return `<runtime_info>In case you're asked: you are running in T3 Code through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images and videos in your response using Markdown with absolute file paths.</runtime_info>\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}${multiRepo}`;
 }
 
 function toSingleLine(value: string): string {

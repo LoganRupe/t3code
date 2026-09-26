@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
+import { buildRuntimeInstructions, multiRepoWorkspace } from "./RuntimeInstructions.ts";
 
 describe("buildRuntimeInstructions", () => {
   it("requires explicit registration of every PR and stack layer", () => {
@@ -27,9 +27,44 @@ describe("buildRuntimeInstructions", () => {
   });
 
   it("asks for absolute file paths only when the session spans several repos", () => {
-    expect(buildRuntimeInstructions({ harness: "Codex", multiRepo: true })).toContain(
-      "<multi_repo_workspace>",
-    );
+    expect(
+      buildRuntimeInstructions({ harness: "Codex", multiRepo: { repoRoots: ["/a", "/b"] } }),
+    ).toContain("<multi_repo_workspace>");
     expect(buildRuntimeInstructions({ harness: "Codex" })).not.toContain("<multi_repo_workspace>");
+  });
+
+  it("names the repos and says a workspace folder anchor is not a repo", () => {
+    const instructions = buildRuntimeInstructions({
+      harness: "Claude Code",
+      multiRepo: { cwd: "/home/me", repoRoots: ["/home/me/api", "/elsewhere/web"] },
+    });
+    expect(instructions).toContain(
+      "This project's repositories are:\n- /home/me/api\n- /elsewhere/web\n",
+    );
+    expect(instructions).toContain(
+      "The working directory, /home/me, is the project's workspace folder, not a repository.",
+    );
+  });
+
+  it("does not call the working directory a workspace folder when it is a repo root", () => {
+    const instructions = buildRuntimeInstructions({
+      harness: "Claude Code",
+      multiRepo: { cwd: "/wt/api", repoRoots: ["/wt/api", "/wt/web"] },
+    });
+    expect(instructions).toContain("- /wt/api\n- /wt/web");
+    expect(instructions).not.toContain("workspace folder");
+  });
+});
+
+describe("multiRepoWorkspace", () => {
+  it("is set only when the session has roots beyond its working directory", () => {
+    expect(multiRepoWorkspace({ cwd: "/wt/api", repoRoots: ["/wt/api"] })).toBeUndefined();
+    expect(
+      multiRepoWorkspace({
+        cwd: "/home/me",
+        additionalRoots: ["/home/me/api"],
+        repoRoots: ["/home/me/api"],
+      }),
+    ).toEqual({ cwd: "/home/me", repoRoots: ["/home/me/api"] });
   });
 });

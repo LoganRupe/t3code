@@ -912,6 +912,7 @@ describe("ProviderCommandReactor", () => {
         expect(multiCall?.[1]).toMatchObject({
           cwd: "/tmp/multi-workspace",
           additionalRoots: ["/tmp/multi-workspace/backend", "/tmp/oss/frontend"],
+          repoRoots: ["/tmp/multi-workspace/backend", "/tmp/oss/frontend"],
         });
       }),
   );

@@ -43,7 +43,11 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from "../Errors.ts";
-import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import {
+  buildRuntimeInstructions,
+  multiRepoWorkspace,
+  type MultiRepoWorkspace,
+} from "../RuntimeInstructions.ts";
 import { type OpenCodeAdapterShape } from "../Services/OpenCodeAdapter.ts";
 import {
   buildOpenCodePermissionRules,
@@ -341,8 +345,8 @@ interface OpenCodeSessionContext {
   readonly client: OpencodeClient;
   readonly server: OpenCodeServerConnection;
   readonly directory: string;
-  /** The session spans several repository roots. */
-  readonly multiRepo: boolean;
+  /** Set when the session spans several repository roots. */
+  readonly multiRepo: MultiRepoWorkspace | undefined;
   openCodeSessionId: string;
   readonly relatedSessionIds: Set<string>;
   readonly resolvedRequestIds: Set<string>;
@@ -3009,7 +3013,7 @@ export function makeOpenCodeAdapter(
           client: started.client,
           server: started.server,
           directory,
-          multiRepo: (input.additionalRoots?.length ?? 0) > 0,
+          multiRepo: multiRepoWorkspace(input),
           openCodeSessionId: started.openCodeSession.id,
           relatedSessionIds: new Set([started.openCodeSession.id]),
           resolvedRequestIds: new Set(),

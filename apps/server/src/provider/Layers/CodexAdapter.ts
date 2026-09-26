@@ -2279,6 +2279,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           ...(input.additionalRoots && input.additionalRoots.length > 0
             ? { additionalRoots: input.additionalRoots }
             : {}),
+          ...(input.repoRoots && input.repoRoots.length > 0 ? { repoRoots: input.repoRoots } : {}),
           binaryPath: codexConfig.binaryPath,
           launchArgs: resolveCodexLaunchArgs(codexConfig.launchArgs, options?.environment),
           ...(options?.environment ? { environment: options.environment } : {}),

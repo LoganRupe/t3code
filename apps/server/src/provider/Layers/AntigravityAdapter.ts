@@ -36,7 +36,11 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { ServerConfig } from "../../config.ts";
-import { buildRuntimeInstructions } from "../RuntimeInstructions.ts";
+import {
+  buildRuntimeInstructions,
+  multiRepoWorkspace,
+  type MultiRepoWorkspace,
+} from "../RuntimeInstructions.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import type { AntigravityAuth } from "../AntigravityAuth.ts";
 import {
@@ -192,8 +196,8 @@ interface TurnIntent {
 interface SessionContext {
   readonly threadId: ThreadId;
   readonly cwd: string;
-  /** The session spans several repository roots. */
-  readonly multiRepo: boolean;
+  /** Set when the session spans several repository roots. */
+  readonly multiRepo: MultiRepoWorkspace | undefined;
   readonly nativeSessionId: string;
   readonly scope: Scope.Closeable;
   readonly runtime: Runtime;
@@ -867,7 +871,7 @@ export const makeAntigravityAdapter = Effect.fn("makeAntigravityAdapter")(functi
               context = {
                 threadId: input.threadId,
                 cwd,
-                multiRepo: (input.additionalRoots?.length ?? 0) > 0,
+                multiRepo: multiRepoWorkspace(input),
                 nativeSessionId: started.sessionId,
                 scope: sessionScope,
                 runtime,

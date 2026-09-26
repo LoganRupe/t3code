@@ -1,5 +1,5 @@
 import type { ProviderInteractionMode } from "@t3tools/contracts";
-import { buildRuntimeInstructions } from "./RuntimeInstructions.ts";
+import { buildRuntimeInstructions, type MultiRepoWorkspace } from "./RuntimeInstructions.ts";
 
 const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
@@ -195,7 +195,7 @@ ${browserToolInstructions(browserToolsAvailable)}
 export interface CodexRuntimeInfo {
   readonly model: string;
   readonly reasoningEffort: string;
-  readonly multiRepo?: boolean | undefined;
+  readonly multiRepo?: MultiRepoWorkspace | undefined;
 }
 
 export function buildCodexDeveloperInstructions(
