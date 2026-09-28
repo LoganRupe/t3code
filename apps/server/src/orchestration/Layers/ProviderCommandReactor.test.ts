@@ -916,6 +916,90 @@ describe("ProviderCommandReactor", () => {
         expect(multiCall?.[1]).toMatchObject({
           cwd: "/tmp/multi-workspace",
           additionalRoots: ["/tmp/multi-workspace/backend", "/tmp/oss/frontend"],
+          repoRoots: ["/tmp/multi-workspace/backend", "/tmp/oss/frontend"],
+        });
+      }),
+  );
+
+  effectIt.effect(
+    "launches a multi-repo worktree run with every worktree, including the anchor",
+    () =>
+      Effect.gen(function* () {
+        const harness = yield* Effect.promise(() => createHarness());
+        const now = "2026-01-01T00:00:00.000Z";
+        const multiModelSelection = {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-5-codex",
+        };
+
+        yield* harness.engine.dispatch({
+          type: "project.create",
+          commandId: CommandId.make("cmd-project-create-multi-wt"),
+          projectId: asProjectId("project-multi-wt"),
+          title: "Multi Repo Project",
+          workspaceRoot: "/tmp/multi-workspace",
+          repoRoots: ["/tmp/multi-workspace/backend", "/tmp/oss/frontend"],
+          defaultModelSelection: multiModelSelection,
+          createdAt: now,
+        });
+        yield* harness.engine.dispatch({
+          type: "thread.create",
+          commandId: CommandId.make("cmd-thread-create-multi-wt"),
+          threadId: ThreadId.make("thread-multi-wt"),
+          projectId: asProjectId("project-multi-wt"),
+          title: "Multi Worktree Thread",
+          modelSelection: multiModelSelection,
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          branch: "t3code/multi",
+          worktreePath: "/tmp/worktrees/thread-multi-wt/backend",
+          worktrees: [
+            {
+              repoRoot: "/tmp/multi-workspace/backend",
+              worktreePath: "/tmp/worktrees/thread-multi-wt/backend",
+            },
+            {
+              repoRoot: "/tmp/oss/frontend",
+              worktreePath: "/tmp/worktrees/thread-multi-wt/frontend",
+            },
+          ],
+          createdAt: now,
+        });
+
+        yield* harness.engine.dispatch({
+          type: "thread.turn.start",
+          commandId: CommandId.make("cmd-turn-start-multi-wt"),
+          threadId: ThreadId.make("thread-multi-wt"),
+          message: {
+            messageId: asMessageId("user-message-multi-wt"),
+            role: "user",
+            text: "edit both repos",
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: "approval-required",
+          createdAt: now,
+        });
+
+        yield* Effect.promise(() =>
+          waitFor(() =>
+            harness.startSession.mock.calls.some(
+              (call) => call[0] === ThreadId.make("thread-multi-wt"),
+            ),
+          ),
+        );
+        const call = harness.startSession.mock.calls.find(
+          (entry) => entry[0] === ThreadId.make("thread-multi-wt"),
+        );
+        // The session anchors in the first worktree, so `additionalRoots`
+        // leaves it out while `repoRoots` keeps it.
+        expect(call?.[1]).toMatchObject({
+          cwd: "/tmp/worktrees/thread-multi-wt/backend",
+          additionalRoots: ["/tmp/worktrees/thread-multi-wt/frontend"],
+          repoRoots: [
+            "/tmp/worktrees/thread-multi-wt/backend",
+            "/tmp/worktrees/thread-multi-wt/frontend",
+          ],
         });
       }),
   );
