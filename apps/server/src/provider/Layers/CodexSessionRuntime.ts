@@ -45,6 +45,7 @@ import {
   buildCodexDeveloperInstructions,
   type T3CodeToolAvailability,
 } from "../CodexDeveloperInstructions.ts";
+import { multiRepoWorkspace, type MultiRepoWorkspace } from "../RuntimeInstructions.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
 
 const PROVIDER = ProviderDriverKind.make("codex");
@@ -183,6 +184,8 @@ export interface CodexSessionRuntimeOptions {
    * registered after thread open via `skills/extraRoots/set`.
    */
   readonly additionalRoots?: ReadonlyArray<string>;
+  /** Every repo root the session works in, including `cwd` when it is one. */
+  readonly repoRoots?: ReadonlyArray<string>;
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
@@ -597,7 +600,7 @@ function buildCodexTurnInstructions(input: {
   readonly modelName?: string;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
   readonly browserToolsAvailable?: boolean | T3CodeToolAvailability;
-  readonly multiRepo?: boolean;
+  readonly multiRepo?: MultiRepoWorkspace | undefined;
 }): Pick<CodexTurnStartParamsWithCollaborationMode, "collaborationMode" | "additionalContext"> {
   if (input.interactionMode === undefined) {
     return {};
@@ -640,8 +643,8 @@ export function buildTurnStartParams(input: {
   readonly interactionMode?: ProviderInteractionMode;
   /** Defaults to true so callers that predate the agent-access gate are unchanged. */
   readonly browserToolsAvailable?: boolean | T3CodeToolAvailability;
-  /** The session spans several repository roots. */
-  readonly multiRepo?: boolean;
+  /** Set when the session has roots beyond its working directory. */
+  readonly multiRepo?: MultiRepoWorkspace | undefined;
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
@@ -664,7 +667,7 @@ export function buildTurnStartParams(input: {
     ...(input.modelName ? { modelName: input.modelName } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
     browserToolsAvailable: input.browserToolsAvailable ?? true,
-    ...(input.multiRepo ? { multiRepo: true } : {}),
+    ...(input.multiRepo ? { multiRepo: input.multiRepo } : {}),
   });
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
@@ -2608,7 +2611,7 @@ export const makeCodexSessionRuntime = (
               options.appServerArgs,
               options.mcpCapabilities,
             ),
-            multiRepo: (options.additionalRoots?.length ?? 0) > 0,
+            multiRepo: multiRepoWorkspace(options),
           });
           yield* Ref.set(lastAdditionalContextRef, params.additionalContext);
           const rawResponse = yield* client.raw.request("turn/start", params);

@@ -13,6 +13,7 @@ import {
   buildCodexAdditionalContext,
   buildCodexDeveloperInstructions,
 } from "../CodexDeveloperInstructions.ts";
+import type { MultiRepoWorkspace } from "../RuntimeInstructions.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
@@ -297,7 +298,7 @@ describe("buildTurnStartParams", () => {
 
   it.effect("asks a multi-repo session for absolute file paths", () =>
     Effect.gen(function* () {
-      const instructions = function* (multiRepo: boolean) {
+      const instructions = function* (multiRepo: MultiRepoWorkspace | undefined) {
         const params = yield* buildTurnStartParams({
           threadId: "provider-thread-1",
           runtimeMode: "full-access",
@@ -308,8 +309,13 @@ describe("buildTurnStartParams", () => {
         return params.additionalContext?.t3_code_runtime?.value ?? "";
       };
 
-      NodeAssert.match(yield* instructions(true), /<multi_repo_workspace>/);
-      NodeAssert.doesNotMatch(yield* instructions(false), /<multi_repo_workspace>/);
+      const multiRepo = yield* instructions({
+        cwd: "/work",
+        repoRoots: ["/work/api", "/work/web"],
+      });
+      NodeAssert.match(multiRepo, /<multi_repo_workspace>/);
+      NodeAssert.match(multiRepo, /- \/work\/api\n- \/work\/web/);
+      NodeAssert.doesNotMatch(yield* instructions(undefined), /<multi_repo_workspace>/);
     }),
   );
 
