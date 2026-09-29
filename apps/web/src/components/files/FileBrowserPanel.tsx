@@ -22,7 +22,8 @@ import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
-import { buildRootLabels, isRootPath, labelForRoot } from "./filePath";
+import { isRootPath, labelForRoot } from "./filePath";
+import { type ProjectFileRoot, projectFileRootsKey } from "~/lib/projectFileRoots";
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "./fileTreeExpansion";
 import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
@@ -42,7 +43,7 @@ interface FileBrowserPanelProps {
   // Multi-root projects (#923): when set, list the union of these roots (repos,
   // or the folders a `.code-workspace` lists) and group the tree by root.
   // Omitted/single-entry keeps single-root behavior.
-  roots?: readonly string[] | undefined;
+  roots?: readonly ProjectFileRoot[] | undefined;
   onOpenFile: (relativePath: string, root?: string) => void;
   onRefreshSelectedFile?: () => void;
   workspaceMutationId: string | null;
@@ -124,16 +125,18 @@ export default function FileBrowserPanel({
   // Multi-repo workspaces (#923): each repo is a top-level node named by its
   // label, and every tree path below it is prefixed with that label so
   // same-named files across repos don't collide.
-  const multiRootsKey = roots && roots.length > 1 ? roots.join("\0") : "";
+  const multiRootsKey = roots && roots.length > 1 ? projectFileRootsKey(roots) : "";
   const { rootLabels, directoryRoots, searchRoots } = useMemo(() => {
     if (!multiRootsKey)
       return { rootLabels: null, directoryRoots: undefined, searchRoots: undefined };
-    const roots = multiRootsKey.split("\0");
-    const rootLabels = buildRootLabels(roots);
+    const directoryRoots = multiRootsKey.split("\0\0").map((pair) => {
+      const [label = "", root = ""] = pair.split("\0");
+      return { root, label };
+    });
     return {
-      rootLabels,
-      directoryRoots: roots.map((root) => ({ root, label: rootLabels.get(root) ?? root })),
-      searchRoots: roots,
+      rootLabels: new Map(directoryRoots.map(({ root, label }) => [root, label])),
+      directoryRoots,
+      searchRoots: directoryRoots.map(({ root }) => root),
     };
   }, [multiRootsKey]);
   // Tree paths sit under their repo's label, so an open from outside the tree

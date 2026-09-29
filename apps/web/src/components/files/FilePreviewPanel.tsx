@@ -58,6 +58,7 @@ import FileBrowserPanel from "./FileBrowserPanel";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { isRootPath } from "./filePath";
+import { type ProjectFileRoot, projectFileRootsKey } from "~/lib/projectFileRoots";
 import {
   type FileCommentAnnotationEntry,
   type FileCommentAnnotationGroup,
@@ -105,7 +106,7 @@ interface FilePreviewPanelProps {
   revealLine: number | null;
   revealRequestId: number;
   // Multi-root projects (#923): roots to list/group in the file tree.
-  roots?: readonly string[] | undefined;
+  roots?: readonly ProjectFileRoot[] | undefined;
   // Owning root of the currently-open file. Reads/writes resolve against this
   // root (it may be a different repo than the anchor `cwd`). Null = anchor.
   fileRoot?: string | null | undefined;
@@ -970,7 +971,9 @@ export default function FilePreviewPanel({
   // unless it is the workspace root or a repo root, which the tree shows.
   const isDirectory =
     file.isNotFile &&
-    (!isHostFile || (relativePath !== null && isRootPath([cwd, ...(roots ?? [])], relativePath)));
+    (!isHostFile ||
+      (relativePath !== null &&
+        isRootPath([cwd, ...(roots?.map(({ root }) => root) ?? [])], relativePath)));
   // Everything preview-related keys off previewPath; a folder has no preview.
   const previewPath = isDirectory ? null : relativePath;
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
@@ -1315,8 +1318,10 @@ export default function FilePreviewPanel({
                 : "min-w-0 flex-1",
             )}
           >
+            {/* The tree caches folders by label, so a root that changes path under
+                the same label must remount it rather than show the old contents. */}
             <FileBrowserPanel
-              key={`${environmentId}:${cwd}`}
+              key={`${environmentId}:${cwd}:${projectFileRootsKey(roots)}`}
               environmentId={environmentId}
               cwd={cwd}
               projectName={projectName}
