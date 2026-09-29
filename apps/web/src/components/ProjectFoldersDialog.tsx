@@ -93,8 +93,12 @@ export function ProjectFoldersDialog({
   // Filesystem RPCs are driven through the environment atoms (the old imperative
   // `readEnvironmentApi().filesystem.*` accessor was removed). Reads run via a
   // query runner; the write goes through the command atom and re-resolves the file.
+  // Refresh rather than reuse the cached read: the chat view keeps it alive for
+  // its files panel, so a stale entry would outlive both an edit made in VS Code
+  // and a save from this dialog.
   const readWorkspaceFile = useAtomQueryRunner(filesystemEnvironment.readWorkspaceFile, {
     reportFailure: false,
+    refresh: true,
   });
   const writeWorkspaceFile = useAtomCommand(filesystemEnvironment.writeWorkspaceFile, {
     reportFailure: false,
@@ -225,6 +229,10 @@ export function ProjectFoldersDialog({
           repoRoots: resolved.repoRoots,
         },
       });
+      void readWorkspaceFile({
+        environmentId: target.environmentId,
+        input: { workspaceFilePath: workspaceFile },
+      });
       const missing = resolved.folders.filter((folder) => !folder.exists);
       if (missing.length > 0) {
         toastManager.add({
@@ -247,7 +255,15 @@ export function ProjectFoldersDialog({
     } finally {
       setSaving(false);
     }
-  }, [folders, onClose, target, updateProject, workspaceFile, writeWorkspaceFile]);
+  }, [
+    folders,
+    onClose,
+    readWorkspaceFile,
+    target,
+    updateProject,
+    workspaceFile,
+    writeWorkspaceFile,
+  ]);
 
   return (
     <Dialog

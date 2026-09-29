@@ -39,9 +39,10 @@ interface FileBrowserPanelProps {
   selectedRoot?: string | undefined;
   /** Bumped when the same path should be revealed again (e.g. re-opened from search). */
   selectedPathRevealId: number;
-  // Multi-repo workspaces (#923): when set, list the union of these repo roots
-  // and group the tree by repo. Omitted/single-entry keeps single-root behavior.
-  repoRoots?: readonly string[] | undefined;
+  // Multi-root projects (#923): when set, list the union of these roots (repos,
+  // or the folders a `.code-workspace` lists) and group the tree by root.
+  // Omitted/single-entry keeps single-root behavior.
+  roots?: readonly string[] | undefined;
   onOpenFile: (relativePath: string, root?: string) => void;
   onRefreshSelectedFile?: () => void;
   workspaceMutationId: string | null;
@@ -112,7 +113,7 @@ export default function FileBrowserPanel({
   selectedPath: selectedRelativePath,
   selectedRoot,
   selectedPathRevealId,
-  repoRoots,
+  roots,
   onOpenFile,
   onRefreshSelectedFile,
   workspaceMutationId,
@@ -123,18 +124,18 @@ export default function FileBrowserPanel({
   // Multi-repo workspaces (#923): each repo is a top-level node named by its
   // label, and every tree path below it is prefixed with that label so
   // same-named files across repos don't collide.
-  const multiRepoRootsKey = repoRoots && repoRoots.length > 1 ? repoRoots.join("\0") : "";
+  const multiRootsKey = roots && roots.length > 1 ? roots.join("\0") : "";
   const { rootLabels, directoryRoots, searchRoots } = useMemo(() => {
-    if (!multiRepoRootsKey)
+    if (!multiRootsKey)
       return { rootLabels: null, directoryRoots: undefined, searchRoots: undefined };
-    const roots = multiRepoRootsKey.split("\0");
+    const roots = multiRootsKey.split("\0");
     const rootLabels = buildRootLabels(roots);
     return {
       rootLabels,
       directoryRoots: roots.map((root) => ({ root, label: rootLabels.get(root) ?? root })),
       searchRoots: roots,
     };
-  }, [multiRepoRootsKey]);
+  }, [multiRootsKey]);
   // Tree paths sit under their repo's label, so an open from outside the tree
   // (a chat link, the file picker) maps onto that key to be found and revealed.
   // A repo root linked by its absolute path selects that repo's top-level node.

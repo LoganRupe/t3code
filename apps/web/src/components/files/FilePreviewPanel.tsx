@@ -104,8 +104,8 @@ interface FilePreviewPanelProps {
   availableEditors: ReadonlyArray<EditorId>;
   revealLine: number | null;
   revealRequestId: number;
-  // Multi-repo workspaces (#923): repo roots to list/group in the file tree.
-  repoRoots?: readonly string[] | undefined;
+  // Multi-root projects (#923): roots to list/group in the file tree.
+  roots?: readonly string[] | undefined;
   // Owning root of the currently-open file. Reads/writes resolve against this
   // root (it may be a different repo than the anchor `cwd`). Null = anchor.
   fileRoot?: string | null | undefined;
@@ -927,7 +927,7 @@ export default function FilePreviewPanel({
   availableEditors,
   revealLine,
   revealRequestId,
-  repoRoots,
+  roots,
   fileRoot,
   onOpenFile,
   onPendingChange,
@@ -970,8 +970,7 @@ export default function FilePreviewPanel({
   // unless it is the workspace root or a repo root, which the tree shows.
   const isDirectory =
     file.isNotFile &&
-    (!isHostFile ||
-      (relativePath !== null && isRootPath([cwd, ...(repoRoots ?? [])], relativePath)));
+    (!isHostFile || (relativePath !== null && isRootPath([cwd, ...(roots ?? [])], relativePath)));
   // Everything preview-related keys off previewPath; a folder has no preview.
   const previewPath = isDirectory ? null : relativePath;
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
@@ -1124,7 +1123,7 @@ export default function FilePreviewPanel({
                 onOpenFile={onOpenFile}
                 projectName={projectName}
                 relativePath={relativePath}
-                repoRoots={repoRoots}
+                roots={roots}
                 root={fileRoot ?? undefined}
                 workspaceMutationId={workspaceMutationId}
               />
@@ -1324,7 +1323,7 @@ export default function FilePreviewPanel({
               selectedPath={relativePath}
               selectedRoot={fileRoot ?? undefined}
               selectedPathRevealId={revealRequestId}
-              repoRoots={repoRoots}
+              roots={roots}
               onOpenFile={onOpenFile}
               workspaceMutationId={workspaceMutationId}
               {...(previewPath && !isMedia && !isPdf

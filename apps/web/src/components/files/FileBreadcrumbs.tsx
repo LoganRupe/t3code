@@ -37,8 +37,8 @@ interface FileBreadcrumbsProps {
   readonly onOpenFile: (relativePath: string, root?: string) => void;
   readonly projectName: string;
   readonly relativePath: string;
-  /** Every repo root of a multi-repo project, so the repo crumb matches its file tree label. */
-  readonly repoRoots?: readonly string[] | undefined;
+  /** Every root of a multi-root project, so the root crumb matches its file tree label. */
+  readonly roots?: readonly string[] | undefined;
   /** Repo root that `relativePath` is relative to, when it is not `cwd` (multi-repo). */
   readonly root?: string | undefined;
   readonly workspaceMutationId: string | null;
@@ -276,14 +276,14 @@ export function FileBreadcrumbs(props: FileBreadcrumbsProps) {
   // A file in another repo of a multi-repo project reads "project > repo > path",
   // and every crumb from the repo down browses and opens within that repo.
   const repoRoot = props.root && props.root !== props.cwd ? props.root : undefined;
-  const repoRootsKey = props.repoRoots?.join("\0") ?? "";
+  const rootsKey = props.roots?.join("\0") ?? "";
   const repoName = useMemo(() => {
     if (!repoRoot) return undefined;
-    const label = repoRootsKey
-      ? labelForRoot(buildRootLabels(repoRootsKey.split("\0")), repoRoot)
+    const label = rootsKey
+      ? labelForRoot(buildRootLabels(rootsKey.split("\0")), repoRoot)
       : undefined;
     return label ?? repoRoot.split(/[\\/]/).findLast(Boolean) ?? repoRoot;
-  }, [repoRoot, repoRootsKey]);
+  }, [repoRoot, rootsKey]);
   const breadcrumbs = useMemo(
     () =>
       repoName === undefined

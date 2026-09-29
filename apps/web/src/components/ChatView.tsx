@@ -343,6 +343,8 @@ import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnect
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
+import { filesystemEnvironment } from "../state/filesystem";
+import { resolveProjectFileRoots } from "../lib/projectFileRoots";
 import { vcsEnvironment } from "../state/vcs";
 import {
   environmentServerConfigsAtom,
@@ -3671,11 +3673,26 @@ export default function ChatView(props: ChatViewProps) {
           : null,
     [multiRepoStatusRoots, gitStatusCwd],
   );
-  // @-mention file search spans every repo root for a multi-repo workspace
-  // (#923); single-repo projects search the worktree-aware `gitCwd` alone.
-  const mentionRoots = useMemo(
-    () => (isMultiRepo ? (activeProject?.repoRoots ?? null) : null),
-    [isMultiRepo, activeProject?.repoRoots],
+  // The files panel and @-mention search span the folders a `.code-workspace`
+  // lists, while git surfaces stay on `repoRoots`. Null searches the
+  // worktree-aware cwd alone.
+  const workspaceFileQuery = useEnvironmentQuery(
+    projectWorkspaceFile === null
+      ? null
+      : filesystemEnvironment.readWorkspaceFile({
+          environmentId,
+          input: { workspaceFilePath: projectWorkspaceFile },
+        }),
+  );
+  const workspaceFolders = workspaceFileQuery.data?.folders ?? null;
+  const projectFileRoots = useMemo(
+    () =>
+      resolveProjectFileRoots({
+        workspaceFolders,
+        repoRoots: activeProject?.repoRoots,
+        worktrees: threadWorktrees,
+      }),
+    [workspaceFolders, activeProject?.repoRoots, threadWorktrees],
   );
   // Single-repo git query scoped to the anchor root, backing the branch-sync,
   // PR-checkout, and refresh flows; the multi-repo status/diff surfaces use
@@ -9769,7 +9786,7 @@ export default function ChatView(props: ChatViewProps) {
           composerDraftTarget={composerDraftTarget}
           keybindings={keybindings}
           availableEditors={availableEditors}
-          repoRoots={isMultiRepo ? (activeProject?.repoRoots ?? undefined) : undefined}
+          roots={projectFileRoots ?? undefined}
           relativePath={
             renderedRightPanelSurface.kind === "file"
               ? renderedRightPanelSurface.relativePath
@@ -10196,7 +10213,7 @@ export default function ChatView(props: ChatViewProps) {
                             timelineOverflows={timelineOverflows}
                             onComposerOverlayHeightChange={publishComposerOverlayHeight}
                             onRestingChange={onComposerRestingChange}
-                            mentionRoots={mentionRoots}
+                            mentionRoots={projectFileRoots}
                             promptRef={promptRef}
                             composerImagesRef={composerImagesRef}
                             composerFilesRef={composerFilesRef}
