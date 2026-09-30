@@ -199,6 +199,20 @@ function wrapCommandForCompletion(
   }
 }
 
+const TERMINAL_ID_MAX_LENGTH = 128;
+
+/**
+ * The setup terminal's id. Ids over the terminal limit keep a hash of the full
+ * id, so two repos whose suffixes differ only past the limit still get their
+ * own terminal instead of one stopping the other's script.
+ */
+export function setupTerminalId(scriptId: string, suffix?: string): string {
+  const id = suffix ? `setup-${scriptId}-${suffix}` : `setup-${scriptId}`;
+  if (id.length <= TERMINAL_ID_MAX_LENGTH) return id;
+  const hash = NodeCrypto.createHash("sha256").update(id).digest("hex").slice(0, 12);
+  return `${id.slice(0, TERMINAL_ID_MAX_LENGTH - hash.length - 1)}-${hash}`;
+}
+
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
@@ -354,10 +368,7 @@ export const make = Effect.gen(function* () {
     }
 
     const terminalId =
-      input.preferredTerminalId ??
-      (input.terminalIdSuffix
-        ? `setup-${script.id}-${input.terminalIdSuffix}`.slice(0, 128)
-        : `setup-${script.id}`);
+      input.preferredTerminalId ?? setupTerminalId(script.id, input.terminalIdSuffix);
     const cwd = input.worktreePath;
     const env = projectScriptRuntimeEnv({
       project: { cwd: project.workspaceRoot },
