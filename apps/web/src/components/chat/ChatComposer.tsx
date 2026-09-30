@@ -4,6 +4,8 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { runtimeModeConfig, runtimeModeOptions } from "./runtimeModeConfig";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { AttachmentFilePreview } from "../files/AttachmentFilePreview";
+import { labelForRoot } from "../files/filePath";
+import { type ProjectFileRoot } from "../../lib/projectFileRoots";
 import { Dialog, DialogPopup, DialogTitle } from "../ui/dialog";
 import { filterComposerPullRequestMatches } from "@t3tools/shared/composerPullRequestMatches";
 import { importPastedComposerText, readPastedComposerContext } from "../composerInlineTokenPaste";
@@ -1428,9 +1430,9 @@ export interface ChatComposerProps {
    * effect, so it is current before the chat view measures the overlay.
    */
   onRestingChange: (resting: boolean) => void;
-  // Multi-repo workspaces (#923): roots to union for @-mention file search.
-  // Omitted/`null` for single-repo projects, which search `gitCwd` alone.
-  mentionRoots: ReadonlyArray<string> | null;
+  // Multi-root projects (#923): roots to union for @-mention file search, with
+  // the label each result is described under. `null` searches `gitCwd` alone.
+  mentionRoots: ReadonlyArray<ProjectFileRoot> | null;
 
   // Refs the parent needs kept in sync
   promptRef: React.RefObject<string>;
@@ -2268,10 +2270,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
+  const mentionRootPaths = useMemo(
+    () => mentionRoots?.map(({ root }) => root) ?? null,
+    [mentionRoots],
+  );
+  const mentionRootLabels = useMemo(
+    () => new Map(mentionRoots?.map(({ root, label }) => [root, label])),
+    [mentionRoots],
+  );
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,
-    roots: isPathTrigger ? mentionRoots : null,
+    roots: isPathTrigger ? mentionRootPaths : null,
     query: isPathTrigger ? pathTriggerQuery : null,
   });
   const compactSlashCommandAvailable =
@@ -2360,7 +2370,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         ...(entry.root ? { root: entry.root } : {}),
         label: basenameOfPath(entry.path),
         description: entry.root
-          ? `${basenameOfPath(entry.root)}/${entry.parentPath ?? ""}`.replace(/\/$/, "")
+          ? `${labelForRoot(mentionRootLabels, entry.root) ?? basenameOfPath(entry.root)}/${entry.parentPath ?? ""}`.replace(
+              /\/$/,
+              "",
+            )
           : (entry.parentPath ?? entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/")))),
       }));
     }
@@ -2497,6 +2510,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     compactSlashCommandAvailable,
     composerTrigger,
     exactPullRequestLookup.data,
+    mentionRootLabels,
     planModeUiEnabled,
     pullRequestLookup.data,
     pullRequestProjectId,
