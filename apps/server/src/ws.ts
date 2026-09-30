@@ -1103,9 +1103,12 @@ const makeWsRpcLayer = (
           let targetWorktreeRepoRoot = bootstrap?.prepareWorktree?.projectCwd ?? null;
           // Extra per-repo worktrees of a multi-repo fan-out, removed on cancel.
           const claimedCousinWorktrees: Array<{ repoRoot: string; worktreePath: string }> = [];
-          // The setup script's terminal, once started. Cancel closes only this
-          // one so terminals the user opened meanwhile survive.
-          let setupTerminalId: string | null = null;
+          // Every worktree of a multi-repo fan-out, anchor first. The setup
+          // script runs in each of them.
+          let fannedOutWorktrees: ReadonlyArray<{ repoRoot: string; worktreePath: string }> = [];
+          // The setup scripts' terminals, once started. Cancel closes only
+          // these so terminals the user opened meanwhile survive.
+          const setupTerminalIds: Array<string> = [];
 
           // Set once the checkout starts; see the session.set below.
           let preparingSessionSet = false;
@@ -1226,120 +1229,176 @@ const makeWsRpcLayer = (
           const threadId = command.threadId;
           const track = (effect: Effect.Effect<void>) => (tracked ? effect : Effect.void);
 
-          // Starts the setup script. For tracked bootstraps it returns the
-          // effect that waits for the script to exit and records the outcome
-          // on the card; whether the agent stage waits on it depends on the
-          // script's `async` flag. Returns null when nothing is left to await.
-          // Untracked callers keep the old fire-and-forget behavior.
+          // Starts the setup script in the thread's worktree, or in every
+          // worktree of a multi-repo fan-out. For tracked bootstraps it
+          // returns the effect that waits for the scripts to exit and records
+          // the outcome on the card; whether the agent stage waits on it
+          // depends on the script's `async` flag. Returns null when nothing is
+          // left to await. Untracked callers keep the old fire-and-forget
+          // behavior.
           const runSetupProgram = () =>
             Effect.gen(function* () {
               if (!bootstrap?.runSetupScript || !targetWorktreePath) {
                 yield* track(worktreeSetupTracker.stageStatus(threadId, "setup-script", "skipped"));
                 return null;
               }
-              const worktreePath = targetWorktreePath;
+              const anchorWorktreePath = targetWorktreePath;
+              const targets =
+                fannedOutWorktrees.length > 0
+                  ? fannedOutWorktrees
+                  : [{ repoRoot: targetWorktreeRepoRoot, worktreePath: anchorWorktreePath }];
+              // Several runs share one card stage, so each line and failure is
+              // labelled with the repo it came from.
+              const labelFor = (worktreePath: string) =>
+                targets.length > 1 ? (worktreePath.split(/[\\/]/).at(-1) ?? null) : null;
               const requestedAt = yield* nowIso;
               yield* track(worktreeSetupTracker.stageStatus(threadId, "setup-script", "running"));
-              const setupResult = yield* projectSetupScriptRunner
-                .runForThread({
-                  threadId,
-                  ...(targetProjectId ? { projectId: targetProjectId } : {}),
-                  ...(targetProjectCwd ? { projectCwd: targetProjectCwd } : {}),
-                  worktreePath,
-                  ...(tracked
-                    ? {
-                        observeCompletion: {
-                          onOutputLine: (line) =>
-                            worktreeSetupTracker.appendTail(threadId, "setup-script", line),
+              type SetupLaunch = {
+                readonly label: string | null;
+                readonly outcome:
+                  | "no-script"
+                  | "failed"
+                  | ProjectSetupScriptRunner.ProjectSetupScriptRunnerResultStarted;
+              };
+              const launches = yield* Effect.forEach(
+                targets,
+                (target): Effect.Effect<SetupLaunch> => {
+                  const worktreePath = target.worktreePath;
+                  const label = labelFor(worktreePath);
+                  return projectSetupScriptRunner
+                    .runForThread({
+                      threadId,
+                      ...(targetProjectId ? { projectId: targetProjectId } : {}),
+                      ...(targetProjectCwd ? { projectCwd: targetProjectCwd } : {}),
+                      worktreePath,
+                      ...(target.repoRoot ? { repoRoot: target.repoRoot } : {}),
+                      // The anchor keeps the plain id so its terminal is the one
+                      // the card and existing links open.
+                      ...(label && worktreePath !== anchorWorktreePath
+                        ? { terminalIdSuffix: label }
+                        : {}),
+                      ...(tracked
+                        ? {
+                            observeCompletion: {
+                              onOutputLine: (line) =>
+                                worktreeSetupTracker.appendTail(
+                                  threadId,
+                                  "setup-script",
+                                  label ? `[${label}] ${line}` : line,
+                                ),
+                            },
+                          }
+                        : {}),
+                    })
+                    .pipe(
+                      Effect.matchEffect({
+                        onFailure: (error) =>
+                          recordSetupScriptLaunchFailure({
+                            error,
+                            requestedAt,
+                            worktreePath,
+                          }).pipe(Effect.as<SetupLaunch>({ label, outcome: "failed" })),
+                        onSuccess: (setupResult) => {
+                          if (setupResult.status !== "started") {
+                            return Effect.succeed<SetupLaunch>({ label, outcome: "no-script" });
+                          }
+                          setupTerminalIds.push(setupResult.terminalId);
+                          return recordSetupScriptStarted({
+                            requestedAt,
+                            worktreePath,
+                            scriptId: setupResult.scriptId,
+                            scriptName: setupResult.scriptName,
+                            terminalId: setupResult.terminalId,
+                          }).pipe(Effect.as<SetupLaunch>({ label, outcome: setupResult }));
                         },
-                      }
-                    : {}),
-                })
-                .pipe(
-                  Effect.matchEffect({
-                    onFailure: (error) =>
-                      recordSetupScriptLaunchFailure({
-                        error,
-                        requestedAt,
-                        worktreePath,
-                      }).pipe(
-                        Effect.andThen(
-                          track(
-                            worktreeSetupTracker.stageStatus(
-                              threadId,
-                              "setup-script",
-                              "failed",
-                              "failed to start",
-                            ),
-                          ),
-                        ),
-                        Effect.as(null),
+                      }),
+                    );
+                },
+              );
+              const started = launches.flatMap((launch) =>
+                typeof launch.outcome === "string" ? [] : [{ ...launch, result: launch.outcome }],
+              );
+              const failedToStart = launches.filter((launch) => launch.outcome === "failed");
+              const withLabel = (label: string | null, detail: string) =>
+                label ? `${label}: ${detail}` : detail;
+              const firstStarted = started[0];
+              if (!firstStarted) {
+                yield* track(
+                  failedToStart.length > 0
+                    ? worktreeSetupTracker.stageStatus(
+                        threadId,
+                        "setup-script",
+                        "failed",
+                        failedToStart
+                          .map((launch) => withLabel(launch.label, "failed to start"))
+                          .join(", "),
+                      )
+                    : worktreeSetupTracker.stageStatus(
+                        threadId,
+                        "setup-script",
+                        "skipped",
+                        "no setup script",
                       ),
-                    onSuccess: (setupResult) => {
-                      if (setupResult.status !== "started") {
-                        return track(
-                          worktreeSetupTracker.stageStatus(
-                            threadId,
-                            "setup-script",
-                            "skipped",
-                            "no setup script",
-                          ),
-                        ).pipe(Effect.as(null));
-                      }
-                      setupTerminalId = setupResult.terminalId;
-                      return recordSetupScriptStarted({
-                        requestedAt,
-                        worktreePath,
-                        scriptId: setupResult.scriptId,
-                        scriptName: setupResult.scriptName,
-                        terminalId: setupResult.terminalId,
-                      }).pipe(
-                        Effect.andThen(
-                          track(
-                            worktreeSetupTracker.update(threadId, (snapshot) => ({
-                              ...snapshot,
-                              setupScript: {
-                                name: setupResult.scriptName,
-                                command: setupResult.scriptCommand,
-                                terminalId: setupResult.terminalId,
-                              },
-                            })),
-                          ),
-                        ),
-                        Effect.as(setupResult),
-                      );
-                    },
-                  }),
                 );
-              if (!tracked || !setupResult?.completion) {
+                return null;
+              }
+              yield* track(
+                worktreeSetupTracker.update(threadId, (snapshot) => ({
+                  ...snapshot,
+                  setupScript: {
+                    name: firstStarted.result.scriptName,
+                    command: firstStarted.result.scriptCommand,
+                    terminalId: firstStarted.result.terminalId,
+                  },
+                })),
+              );
+              const observed = started.flatMap(({ label, result }) =>
+                result.completion ? [{ label, completion: result.completion }] : [],
+              );
+              if (!tracked || observed.length === 0) {
                 return null;
               }
               // The setup script is best effort, like the untracked path: a
               // failed install must not throw away the worktree the user just
               // waited for. The card keeps the failed stage and its terminal.
-              // Forked right away so the terminal listener behind `completion`
-              // is always consumed, even when the turn dispatch fails before
-              // anyone would otherwise wait on it. The tracker update is a
-              // no-op once the snapshot has been dropped.
-              const completionFiber = yield* setupResult.completion.pipe(
-                Effect.flatMap((completion) => {
-                  if (completion.exitCode === 0) {
-                    return worktreeSetupTracker.stageStatus(threadId, "setup-script", "done");
-                  }
-                  const detail =
-                    completion.exitCode === null
-                      ? "terminal closed before the script finished"
-                      : `exit ${completion.exitCode}`;
-                  return worktreeSetupTracker.stageStatus(
-                    threadId,
-                    "setup-script",
-                    "failed",
-                    detail,
-                  );
+              // Forked right away so the terminal listeners behind
+              // `completion` are always consumed, even when the turn dispatch
+              // fails before anyone would otherwise wait on them. The tracker
+              // update is a no-op once the snapshot has been dropped.
+              const completionFiber = yield* Effect.forEach(
+                observed,
+                ({ label, completion }) =>
+                  completion.pipe(
+                    Effect.map(({ exitCode }) =>
+                      exitCode === 0
+                        ? null
+                        : withLabel(
+                            label,
+                            exitCode === null
+                              ? "terminal closed before the script finished"
+                              : `exit ${exitCode}`,
+                          ),
+                    ),
+                  ),
+                { concurrency: "unbounded" },
+              ).pipe(
+                Effect.flatMap((exitFailures) => {
+                  const failures = [
+                    ...failedToStart.map((launch) => withLabel(launch.label, "failed to start")),
+                    ...exitFailures.filter((failure) => failure !== null),
+                  ];
+                  return failures.length === 0
+                    ? worktreeSetupTracker.stageStatus(threadId, "setup-script", "done")
+                    : worktreeSetupTracker.stageStatus(
+                        threadId,
+                        "setup-script",
+                        "failed",
+                        failures.join(", "),
+                      );
                 }),
                 Effect.forkDetach,
               );
-              if (!setupResult.async) {
+              if (!firstStarted.result.async) {
                 yield* Fiber.join(completionFiber);
                 return null;
               }
@@ -1723,6 +1782,7 @@ const makeWsRpcLayer = (
                 repoRoot: entry.repoRoot,
                 worktreePath: entry.worktreePath,
               }));
+              fannedOutWorktrees = worktrees;
               // Give the fanned-out run its own `.code-workspace` so "Open in"
               // lands on the worktrees rather than the original checkouts. It
               // lives in the per-thread directory, so it goes when that does.
@@ -1866,17 +1926,18 @@ const makeWsRpcLayer = (
               if (Cause.hasInterruptsOnly(cause)) {
                 // A user cancel interrupts the forked bootstrap fiber. The
                 // created thread is rolled back like any other failure so the
-                // draft returns to the composer. The setup terminal is closed
-                // first so a still-running script cannot hold files open in
-                // the worktree while git removes it. Closing kills the
+                // draft returns to the composer. The setup terminals are
+                // closed first so a still-running script cannot hold files
+                // open in a worktree while git removes it. Closing kills the
                 // process asynchronously, so the removal retries briefly.
-                const closeSetupTerminal = setupTerminalId
-                  ? terminalManager.close({
-                      threadId,
-                      terminalId: setupTerminalId,
-                      deleteHistory: true,
-                    })
-                  : Effect.void;
+                const closeSetupTerminal = Effect.forEach(
+                  setupTerminalIds,
+                  (terminalId) =>
+                    terminalManager
+                      .close({ threadId, terminalId, deleteHistory: true })
+                      .pipe(Effect.ignoreCause({ log: true })),
+                  { discard: true },
+                );
                 const removeCreatedWorktree =
                   tracked && targetWorktreePath && targetWorktreeRepoRoot
                     ? closeSetupTerminal.pipe(
