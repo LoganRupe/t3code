@@ -149,6 +149,75 @@ describe("ProjectSetupScriptRunner", () => {
     );
   });
 
+  it.effect("gives a multi-repo cousin its own terminal and its original repo root", () => {
+    const open = vi.fn(() =>
+      Effect.succeed({
+        threadId: "thread-1",
+        terminalId: "setup-default-setup-web",
+        cwd: "/repo/worktrees/t/web",
+        worktreePath: "/repo/worktrees/t/web",
+        status: "running" as const,
+        pid: 123,
+        history: "",
+        exitCode: null,
+        exitSignal: null,
+        label: "setup-default-setup-web",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    return Effect.gen(function* () {
+      const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+      yield* runner.runForThread({
+        threadId: "thread-1",
+        projectId: "project-1",
+        worktreePath: "/repo/worktrees/t/web",
+        repoRoot: "/repo/web",
+        terminalIdSuffix: "web",
+      });
+      expect(open).toHaveBeenCalledWith({
+        threadId: "thread-1",
+        terminalId: "setup-default-setup-web",
+        cwd: "/repo/worktrees/t/web",
+        worktreePath: "/repo/worktrees/t/web",
+        env: {
+          T3CODE_PROJECT_ROOT: "/repo/project",
+          T3CODE_WORKTREE_PATH: "/repo/worktrees/t/web",
+          T3CODE_REPO_ROOT: "/repo/web",
+          NO_COLOR: "1",
+          FORCE_COLOR: "0",
+        },
+      });
+    }).pipe(
+      Effect.provide(
+        testLayer(
+          makeProject([]),
+          { open, write: () => Effect.void },
+          ServerSettings.layerTest({
+            defaultProjectScripts: [
+              {
+                id: "default-setup",
+                name: "Setup",
+                command: "npm install",
+                icon: "configure",
+                runOnWorktreeCreate: true,
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+  });
+
+  it("keeps long setup terminal ids distinct within the terminal id limit", () => {
+    const repoPrefix = "service-".repeat(20);
+    const api = ProjectSetupScriptRunner.setupTerminalId("setup", `${repoPrefix}api`);
+    const web = ProjectSetupScriptRunner.setupTerminalId("setup", `${repoPrefix}web`);
+    expect(api).not.toBe(web);
+    expect(api.length).toBeLessThanOrEqual(128);
+    expect(web.length).toBeLessThanOrEqual(128);
+    expect(ProjectSetupScriptRunner.setupTerminalId("setup", "web")).toBe("setup-setup-web");
+  });
+
   it.effect("returns no-script when no setup script exists", () => {
     const open = vi.fn(() => Effect.die("unexpected open"));
     const write = vi.fn(() => Effect.die("unexpected write"));
