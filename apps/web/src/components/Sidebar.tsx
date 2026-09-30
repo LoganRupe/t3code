@@ -1,4 +1,5 @@
 import { requestCustomSnooze } from "./CustomSnoozeDialog";
+import { ProjectFoldersDialog, type ProjectFoldersDialogTarget } from "./ProjectFoldersDialog";
 import { useSupportsMultiplePullRequests } from "~/hooks/useSupportsMultiplePullRequests";
 import { resolveThreadCurrentPullRequestLink } from "@t3tools/shared/threadPullRequests";
 import { useAtomValue } from "@effect/atom-react";
@@ -2544,6 +2545,9 @@ export default function Sidebar() {
     },
     [isMobile, router, setOpenMobile],
   );
+  const [projectFoldersTarget, setProjectFoldersTarget] =
+    useState<ProjectFoldersDialogTarget | null>(null);
+  const closeProjectFoldersDialog = useCallback(() => setProjectFoldersTarget(null), []);
   // Anchor for the scope popup: the header search field, not its icon trigger.
   const headerSearchRef = useRef<HTMLDivElement | null>(null);
   // Safari can send a click after Ctrl+click opens settings. Ignore that one
@@ -4073,10 +4077,11 @@ export default function Sidebar() {
         }
         const thread = threadByKeyRef.current.get(threadKey);
         if (!thread) return;
-        const threadWorkspacePath =
-          thread.worktreePath ??
-          projectByKey.get(`${thread.environmentId}:${thread.projectId}`)?.workspaceRoot ??
-          null;
+        // The physical project this thread lives in, not its group: a group
+        // can span checkouts on several environments.
+        const threadProject =
+          projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null;
+        const threadWorkspacePath = thread.worktreePath ?? threadProject?.workspaceRoot ?? null;
         // Un-settle pins the thread active until real activity clears the pin.
         // Environments without
         // the settlement capability get no lifecycle items at all.
@@ -4117,6 +4122,7 @@ export default function Sidebar() {
                     isActive: projectScopeKey === threadProjectGroup.projectKey,
                   }
                 : null,
+              hasWorkspaceFile: Boolean(threadProject?.workspaceFile),
               isPinned,
               isSettled,
               autoSettleEnabled: thread.autoSettleDisabledAt == null,
@@ -4160,6 +4166,16 @@ export default function Sidebar() {
             return;
           case "project-settings":
             if (threadProjectGroup) openProjectSettings(threadProjectGroup);
+            return;
+          case "manage-folders":
+            if (threadProject?.workspaceFile) {
+              setProjectFoldersTarget({
+                environmentId: threadProject.environmentId,
+                projectId: threadProject.id,
+                title: threadProject.title,
+                workspaceFile: threadProject.workspaceFile,
+              });
+            }
             return;
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
@@ -5023,6 +5039,7 @@ export default function Sidebar() {
         </SidebarGroup>
       </SidebarContent>
       <SidebarChromeFooter />
+      <ProjectFoldersDialog target={projectFoldersTarget} onClose={closeProjectFoldersDialog} />
     </>
   );
 }

@@ -10,6 +10,7 @@ export type ThreadActionMenuId =
   | "new-thread-on-branch"
   | "filter-by-project"
   | "project-settings"
+  | "manage-folders"
   | "pin"
   | "unpin"
   | "settle"
@@ -41,6 +42,11 @@ export interface ThreadActionMenuState {
     /** True when the list is already scoped to this thread's project. */
     readonly isActive: boolean;
   } | null;
+  /**
+   * True when the thread's project is backed by a `.code-workspace` file.
+   * Plain-folder projects have no folder list to manage.
+   */
+  readonly hasWorkspaceFile: boolean;
   readonly isPinned: boolean;
   readonly isSettled: boolean;
   /** False while the user has turned automatic settlement off for this thread. */
@@ -177,6 +183,9 @@ export function buildThreadActionMenuItems(
       ],
     },
     { id: "project-settings", label: "Project settings", icon: "settings" },
+    ...(state.hasWorkspaceFile
+      ? [{ id: "manage-folders" as const, label: "Manage folders...", icon: "folder" }]
+      : []),
     // Archive removes the thread from the sidebar while keeping its
     // conversation under Settings > Archived threads — distinct from Settle
     // (stays visible in the Settled shelf) and Delete (clears history for
