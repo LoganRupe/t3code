@@ -5,6 +5,7 @@ import { buildThreadActionMenuItems, type ThreadActionMenuState } from "./thread
 const baseState: ThreadActionMenuState = {
   branch: null,
   projectFilter: null,
+  hasWorkspaceFile: false,
   isPinned: false,
   isSettled: false,
   autoSettleEnabled: true,
@@ -80,6 +81,16 @@ describe("buildThreadActionMenuItems", () => {
     expect(items[filterIndex]).toMatchObject({ label: "Show all projects", icon: "folder-tree" });
     expect(items[filterIndex - 1]?.id).toBe("mark-unread");
     expect(items[filterIndex + 1]?.id).toBe("auto-settle");
+  });
+
+  it("offers Manage folders next to project settings only for workspace-file projects", () => {
+    expect(ids(baseState)).not.toContain("manage-folders");
+    const items = buildThreadActionMenuItems({ ...baseState, hasWorkspaceFile: true });
+    const settingsIndex = items.findIndex((item) => item.id === "project-settings");
+    expect(items[settingsIndex + 1]).toMatchObject({
+      id: "manage-folders",
+      label: "Manage folders...",
+    });
   });
 
   it("includes branch items only for threads with a branch", () => {

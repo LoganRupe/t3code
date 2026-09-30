@@ -9,8 +9,9 @@ import {
 import { canSnooze, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
 import type { ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 
+import type { ProjectFoldersDialogTarget } from "../components/ProjectFoldersDialog";
 import { resolveSnoozePresets } from "../components/Sidebar.snooze";
 import {
   buildThreadActionMenuItems,
@@ -61,6 +62,9 @@ function failureToast(title: string, error: unknown) {
  * Unlike the sidebar, settle and snooze here never navigate away: the caller
  * is acting on the thread they are reading, and ChatView's parked-thread
  * banner already offers the way back.
+ *
+ * "Manage folders..." opens in place: the caller renders
+ * `ProjectFoldersDialog` with the returned `projectFoldersTarget`.
  */
 export function useThreadActionMenu(input: {
   readonly threadRef: ScopedThreadRef | null;
@@ -71,6 +75,9 @@ export function useThreadActionMenu(input: {
   const { threadRef, projectCwd, onStartRename } = input;
   const router = useRouter();
   const projects = useProjects();
+  const [projectFoldersTarget, setProjectFoldersTarget] =
+    useState<ProjectFoldersDialogTarget | null>(null);
+  const closeProjectFolders = useCallback(() => setProjectFoldersTarget(null), []);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
   const logicalProjectKeyByPhysicalKey = useMemo(
@@ -141,11 +148,16 @@ export function useThreadActionMenu(input: {
         };
         const isRegeneratingTitle = thread.titleRegeneration != null;
         const snoozePresets = resolveSnoozePresets(now, timestampFormat);
+        const project = projects.find(
+          (candidate) =>
+            candidate.environmentId === thread.environmentId && candidate.id === thread.projectId,
+        );
         const items = buildThreadActionMenuItems({
           branch: thread.branch ?? null,
           // The chat header has no project-scoped thread list behind the
           // menu, so the "Filter by project" affordance is sidebar-only.
           projectFilter: null,
+          hasWorkspaceFile: Boolean(project?.workspaceFile),
           isPinned: thread.pinnedAt != null,
           isSettled: supports.settlement && thread.settledOverride === "settled",
           autoSettleEnabled: thread.autoSettleDisabledAt == null,
@@ -182,11 +194,6 @@ export function useThreadActionMenu(input: {
         };
         switch (action) {
           case "project-settings": {
-            const project = projects.find(
-              (candidate) =>
-                candidate.environmentId === thread.environmentId &&
-                candidate.id === thread.projectId,
-            );
             if (!project) return;
             const projectKey =
               logicalProjectKeyByPhysicalKey.get(derivePhysicalProjectKey(project)) ??
@@ -197,6 +204,16 @@ export function useThreadActionMenu(input: {
             });
             return;
           }
+          case "manage-folders":
+            if (project?.workspaceFile) {
+              setProjectFoldersTarget({
+                environmentId: project.environmentId,
+                projectId: project.id,
+                title: project.title,
+                workspaceFile: project.workspaceFile,
+              });
+            }
+            return;
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.
@@ -358,5 +375,5 @@ export function useThreadActionMenu(input: {
     void readLocalApi()?.contextMenu.close();
   }, []);
 
-  return { openMenu, closeMenu };
+  return { openMenu, closeMenu, projectFoldersTarget, closeProjectFolders };
 }
