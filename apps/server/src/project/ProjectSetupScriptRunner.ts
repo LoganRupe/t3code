@@ -59,7 +59,15 @@ export interface ProjectSetupScriptRunnerInput {
   readonly projectId?: string;
   readonly projectCwd?: string;
   readonly worktreePath: string;
+  /**
+   * The checkout `worktreePath` was created from, exposed to the script as
+   * `T3CODE_REPO_ROOT`. A multi-repo project's root is not a repo, so this is
+   * how a script finds files such as `.env` to copy from the original repo.
+   */
+  readonly repoRoot?: string;
   readonly preferredTerminalId?: string;
+  /** Appended to the default terminal id so one thread can run several setups. */
+  readonly terminalIdSuffix?: string;
   /**
    * Wrap the command so the shell reports its exit code back through the
    * terminal stream, and forward cleaned output lines while it runs. The
@@ -345,11 +353,16 @@ export const make = Effect.gen(function* () {
       } as const;
     }
 
-    const terminalId = input.preferredTerminalId ?? `setup-${script.id}`;
+    const terminalId =
+      input.preferredTerminalId ??
+      (input.terminalIdSuffix
+        ? `setup-${script.id}-${input.terminalIdSuffix}`.slice(0, 128)
+        : `setup-${script.id}`);
     const cwd = input.worktreePath;
     const env = projectScriptRuntimeEnv({
       project: { cwd: project.workspaceRoot },
       worktreePath: input.worktreePath,
+      ...(input.repoRoot ? { extraEnv: { T3CODE_REPO_ROOT: input.repoRoot } } : {}),
     });
     const observe = input.observeCompletion;
     const completionToken = observe ? NodeCrypto.randomUUID().replaceAll("-", "") : null;

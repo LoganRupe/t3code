@@ -12166,6 +12166,166 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("runs the setup script in every worktree of a multi-repo run", () =>
+    Effect.gen(function* () {
+      const anchorRepoRoot = "/tmp/workspace/api";
+      const cousinRepoRoot = "/tmp/workspace/web";
+      const dispatchedCommands: Array<OrchestrationCommand> = [];
+      const runForThread = vi.fn(
+        (
+          input: Parameters<
+            ProjectSetupScriptRunner.ProjectSetupScriptRunner["Service"]["runForThread"]
+          >[0],
+        ) =>
+          Effect.succeed({
+            status: "started" as const,
+            scriptId: "setup",
+            scriptName: "Setup",
+            scriptCommand: "npm install",
+            terminalId: input.terminalIdSuffix
+              ? `setup-setup-${input.terminalIdSuffix}`
+              : "setup-setup",
+            cwd: input.worktreePath,
+            async: false,
+            completion: (input.observeCompletion?.onOutputLine?.("installed") ?? Effect.void).pipe(
+              // Only the cousin's install fails.
+              Effect.as({ exitCode: input.repoRoot === cousinRepoRoot ? 1 : 0, durationMs: 1 }),
+            ),
+          }),
+      );
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            execute: () => Effect.succeed(SUCCESSFUL_GIT_EXECUTION),
+            resolveDefaultBranchName: () => Effect.succeed(null),
+            createWorktree: (input) =>
+              Effect.succeed({
+                worktree: { refName: "t3code/bootstrap-refName", path: `${input.cwd}-worktree` },
+              }),
+          },
+          vcsDriver: {
+            isInsideWorkTree: () => Effect.succeed(true),
+          },
+          gitManager: {
+            localStatus: () =>
+              Effect.succeed({
+                isRepo: true,
+                hasPrimaryRemote: true,
+                isDefaultRef: true,
+                refName: "main",
+                hasWorkingTreeChanges: false,
+                workingTree: { files: [], insertions: 0, deletions: 0 },
+              }),
+          },
+          projectionSnapshotQuery: {
+            getProjectShellById: () =>
+              Effect.succeed(
+                Option.some({
+                  id: defaultProjectId,
+                  title: "Workspace",
+                  workspaceRoot: "/tmp/workspace",
+                  workspaceFile: "/tmp/workspace/project.code-workspace",
+                  repoRoots: [anchorRepoRoot, cousinRepoRoot],
+                  defaultModelSelection: null,
+                  scripts: [],
+                  createdAt: "2026-01-01T00:00:00.000Z",
+                  updatedAt: "2026-01-01T00:00:00.000Z",
+                }),
+              ),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                dispatchedCommands.push(command);
+                return { sequence: dispatchedCommands.length };
+              }),
+            readEvents: () => Stream.empty,
+          },
+          projectSetupScriptRunner: {
+            runForThread,
+          },
+        },
+      });
+
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-bootstrap-multi-repo-setup"),
+            threadId: ThreadId.make("thread-bootstrap-multi-repo-setup"),
+            message: {
+              messageId: MessageId.make("msg-bootstrap-multi-repo-setup"),
+              role: "user",
+              text: "hello",
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: "Bootstrap Thread",
+                modelSelection: defaultModelSelection,
+                runtimeMode: "full-access",
+                interactionMode: "default",
+                branch: "main",
+                worktreePath: null,
+                createdAt,
+              },
+              prepareWorktree: {
+                projectCwd: "/tmp/workspace",
+                baseBranch: "main",
+                branch: "t3code/bootstrap-refName",
+              },
+              runSetupScript: true,
+            },
+            createdAt,
+          }),
+        ),
+      );
+
+      // Each repo's worktree runs the script against its own original
+      // checkout. The cousin gets its own terminal; the anchor keeps the
+      // terminal id the card links to.
+      assert.deepEqual(
+        runForThread.mock.calls.map(([input]) => ({
+          worktreePath: input.worktreePath,
+          repoRoot: input.repoRoot,
+          terminalIdSuffix: input.terminalIdSuffix,
+        })),
+        [
+          {
+            worktreePath: `${anchorRepoRoot}-worktree`,
+            repoRoot: anchorRepoRoot,
+            terminalIdSuffix: undefined,
+          },
+          {
+            worktreePath: `${cousinRepoRoot}-worktree`,
+            repoRoot: cousinRepoRoot,
+            terminalIdSuffix: "web-worktree",
+          },
+        ],
+      );
+
+      // One card stage covers both runs: output and failures name the repo.
+      const outcome = dispatchedCommands.findLast(
+        (command) =>
+          command.type === "thread.activity.append" && command.activity.kind === "worktree-setup",
+      );
+      assertTrue(outcome?.type === "thread.activity.append");
+      const snapshot = outcome.activity.payload as WorktreeSetupSnapshot;
+      const setupStage = snapshot.stages.find((stage) => stage.id === "setup-script");
+      assert.equal(setupStage?.status, "failed");
+      assert.equal(setupStage?.detail, "web-worktree: exit 1");
+      assert.deepEqual(setupStage?.tail, ["[api-worktree] installed", "[web-worktree] installed"]);
+      assertTrue(dispatchedCommands.some((command) => command.type === "thread.turn.start"));
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("bases each multi-repo cousin on its pick, else its own default branch", () =>
     Effect.gen(function* () {
       // A `.code-workspace` project's `projectCwd` is the directory holding
