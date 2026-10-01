@@ -226,4 +226,24 @@ describe("plain workspace folders", () => {
     expect(manifest.plainFolders.map((folder) => folder.path)).toEqual(["/notes"]);
     expect(manifestPlainFolderGrants(manifest)).toEqual(["/notes"]);
   });
+
+  it("leaves out a folder inside a newly listed repository, and one that holds a repository", () => {
+    const manifest = buildWorkspaceManifest({
+      worktreePath: null,
+      worktrees: [{ repoRoot: "/work/backend", worktreePath: "/worktrees/t/backend" }],
+      workspaceRoot: "/work",
+      repoRoots: ["/work/backend"],
+      workspaceFolders: [
+        { absolutePath: "/work", exists: true, isGit: false },
+        { absolutePath: "/work/backend", exists: true, isGit: true },
+        { absolutePath: "/oss/added-later", exists: true, isGit: true },
+        { absolutePath: "/oss/added-later/docs", exists: true, isGit: false },
+        { absolutePath: "/oss", exists: true, isGit: false },
+        { absolutePath: "/notes", exists: true, isGit: false },
+      ],
+    });
+
+    // Granting any of the others would reach an original checkout from the isolated run.
+    expect(manifest.plainFolders.map((folder) => folder.path)).toEqual(["/notes"]);
+  });
 });

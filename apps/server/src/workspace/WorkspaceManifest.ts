@@ -16,7 +16,7 @@
  *     `additionalDirectories`, Codex `skills/extraRoots/set`); providers that
  *     lack the mechanism degrade to the anchor alone.
  *   - `plainFolders` are the folders the `.code-workspace` lists that are not
- *     repositories. They are never copied: an isolated run works in the
+ *     repositories and neither sit inside nor contain one. They are never copied: an isolated run works in the
  *     originals, beside its worktrees, and checkpoints do not cover them.
  *
  * Pure and provider-agnostic — the per-provider adapters consume the manifest.
@@ -75,18 +75,30 @@ export interface WorkspaceManifestFolder {
 
 // A listed folder that is a repo root, or sits inside one, already belongs to
 // that repository (and to its worktree in an isolated run), so it is not plain.
-// `isGit` covers a repository listed after `repoRoots` was last recorded.
+// A folder holding a repository is not plain either: granting it would hand an
+// isolated run the original checkout. The repositories are the recorded
+// `repoRoots` plus any listed git folder, which covers one added since.
 function toPlainFolders(
   folders: ReadonlyArray<WorkspaceManifestFolder>,
   repoRoots: ReadonlyArray<string>,
 ): ReadonlyArray<WorkspaceManifestRoot> {
+  const repositories = [
+    ...repoRoots,
+    ...folders
+      .filter((folder) => folder.exists && folder.isGit)
+      .map((folder) => folder.absolutePath),
+  ];
   return toRoots(
     folders
       .filter(
         (folder) =>
           folder.exists &&
           !folder.isGit &&
-          !repoRoots.some((repoRoot) => isSameOrInside(folder.absolutePath, repoRoot)),
+          !repositories.some(
+            (repository) =>
+              isSameOrInside(folder.absolutePath, repository) ||
+              isSameOrInside(repository, folder.absolutePath),
+          ),
       )
       .map((folder) => folder.absolutePath),
   );

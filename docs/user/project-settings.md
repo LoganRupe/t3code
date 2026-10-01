@@ -106,9 +106,11 @@ A project opened from a `.code-workspace` file gives agents every folder the fil
 or not the folder is a git repository. A change to the file applies to the next session a
 thread starts.
 
-Folders that are not repositories are never copied. A thread working in its own worktrees edits
+Folders outside every repository are never copied. A thread working in its own worktrees edits
 the same folder as every other thread, and changes made there are not part of checkpoints or the
-diff panel, so reverting a turn leaves them in place.
+diff panel, so reverting a turn leaves them in place. A listed folder inside a repository belongs
+to that repository and is covered like the rest of it. A folder that holds a repository is not
+given to agents on its own; list the folders inside it instead.
 
 ## Keep the default branch current
 
