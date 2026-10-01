@@ -87,4 +87,19 @@ describe("buildRootLabels", () => {
     expect(labelForRoot(labels, "/a/shared")).toBe("a/shared");
     expect(labelForRoot(labels, "/b/shared/")).toBe("b/shared");
   });
+
+  it("never gives one root a label that is a path prefix of another's", () => {
+    // /y/api/docs grows to api/docs to differ from /z/docs, which would nest it under /x/api.
+    const labels = buildRootLabels(["/x/api", "/y/api/docs", "/z/docs"]);
+    expect(labelForRoot(labels, "/x/api")).toBe("x/api");
+    expect(labelForRoot(labels, "/y/api/docs")).toBe("api/docs");
+    expect(labelForRoot(labels, "/z/docs")).toBe("z/docs");
+  });
+
+  it("grows the longer label when the shorter one is already the whole path", () => {
+    const labels = buildRootLabels(["/api", "/y/api/docs", "/z/docs"]);
+    expect(labelForRoot(labels, "/api")).toBe("api");
+    expect(labelForRoot(labels, "/y/api/docs")).toBe("y/api/docs");
+    expect(labelForRoot(labels, "/z/docs")).toBe("z/docs");
+  });
 });

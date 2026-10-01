@@ -59,7 +59,9 @@ export function labelForRoot(
  * Assign each repo root a unique, human-readable label for the tree's top-level
  * grouping. Prefer the folder basename (matching the per-repo git controls);
  * when two roots share a basename, grow the label by parent segments until the
- * labels are distinct.
+ * labels are distinct. Labels double as slash-delimited tree paths, so no label
+ * may be a path prefix of another either: `api` beside `api/docs` would put the
+ * second root where the first root's own `docs` folder belongs.
  */
 export function buildRootLabels(roots: readonly string[]): Map<string, string> {
   const segments = new Map<string, string[]>();
@@ -74,20 +76,29 @@ export function buildRootLabels(roots: readonly string[]): Map<string, string> {
     );
   }
 
-  const labels = new Map<string, string>();
-  for (const root of roots) {
+  const unique = [...segments.keys()];
+  const depths = new Map(unique.map((root) => [root, 1]));
+  const labelOf = (root: string) => {
     const parts = segments.get(root) ?? [];
-    let depth = 1;
-    let label = parts.slice(-depth).join("/") || root;
-    const collidesAtDepth = () =>
-      roots.some(
-        (other) => other !== root && (segments.get(other) ?? []).slice(-depth).join("/") === label,
-      );
-    while (collidesAtDepth() && depth < parts.length) {
-      depth += 1;
-      label = parts.slice(-depth).join("/");
+    return parts.slice(-(depths.get(root) ?? 1)).join("/") || root;
+  };
+  const canGrow = (root: string) => (depths.get(root) ?? 1) < (segments.get(root)?.length ?? 0);
+
+  // Each pass grows every root that collides with this pass's labels, so the
+  // result does not depend on root order. Labels stop at the full path.
+  for (;;) {
+    const labels = new Map(unique.map((root) => [root, labelOf(root)]));
+    const growing = new Set<string>();
+    for (const [root, label] of labels) {
+      for (const [other, otherLabel] of labels) {
+        if (other === root) continue;
+        if (label === otherLabel && canGrow(root)) growing.add(root);
+        if (otherLabel.startsWith(`${label}/`)) growing.add(canGrow(root) ? root : other);
+      }
     }
-    labels.set(root, label);
+    const grown = [...growing].filter(canGrow);
+    if (grown.length === 0) break;
+    for (const root of grown) depths.set(root, (depths.get(root) ?? 1) + 1);
   }
-  return labels;
+  return new Map(roots.map((root) => [root, labelOf(root)]));
 }
