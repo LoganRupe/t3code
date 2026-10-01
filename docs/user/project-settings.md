@@ -100,6 +100,16 @@ When no image is found, web and desktop show a two-character monogram with a col
 from the icon palette, derived from the saved project name. For example, `Nebula` becomes `NA`,
 `Silver Orchard` becomes `SO`, and `M7 Forge` becomes `M7`.
 
+## Folders in a workspace file project
+
+A project opened from a `.code-workspace` file gives agents every folder the file lists, whether
+or not the folder is a git repository. A change to the file applies to the next session a
+thread starts.
+
+Folders that are not repositories are never copied. A thread working in its own worktrees edits
+the same folder as every other thread, and changes made there are not part of checkpoints or the
+diff panel, so reverting a turn leaves them in place.
+
 ## Keep the default branch current
 
 In Source Control, enable **Automatically pull** to keep the default-branch checkout up to date

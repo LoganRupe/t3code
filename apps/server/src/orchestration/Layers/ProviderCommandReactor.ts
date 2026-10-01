@@ -34,7 +34,12 @@ import * as Stream from "effect/Stream";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 
 import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
-import { buildWorkspaceManifest, manifestExtraRoots } from "../../workspace/WorkspaceManifest.ts";
+import { makeWorkspaceFile } from "../../workspace/WorkspaceFile.ts";
+import {
+  buildWorkspaceManifest,
+  manifestExtraRoots,
+  manifestPlainFolderGrants,
+} from "../../workspace/WorkspaceManifest.ts";
 import { increment, orchestrationEventsProcessedTotal } from "../../observability/Metrics.ts";
 import {
   ProviderAdapterProcessError,
@@ -221,6 +226,7 @@ const make = Effect.gen(function* () {
   const gitWorkflow = yield* GitWorkflowService;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const workspaceFile = yield* makeWorkspaceFile;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
   const textGeneration = yield* TextGeneration;
   const serverSettingsService = yield* ServerSettingsService;
@@ -473,6 +479,24 @@ const make = Effect.gen(function* () {
   });
 
   /**
+   * The folders a project's `.code-workspace` lists, read when a provider
+   * session starts so the agent can reach the ones that are not repositories.
+   * An unreadable file leaves the session with its repositories only.
+   */
+  const readWorkspaceFolders = (threadId: ThreadId, workspaceFilePath: string | undefined) =>
+    workspaceFilePath === undefined
+      ? Effect.succeed([])
+      : workspaceFile.read(workspaceFilePath).pipe(
+          Effect.map((resolved) => resolved.folders),
+          Effect.catch((cause) =>
+            Effect.logWarning(
+              "provider command reactor could not read the workspace file; starting with repositories only",
+              { threadId, workspaceFilePath, cause },
+            ).pipe(Effect.as([])),
+          ),
+        );
+
+  /**
    * Recreates a thread's worktree from its branch when the directory has
    * disappeared. Provider sessions resume into the persisted cwd, so a missing
    * worktree makes every later turn fail as a bogus "session not found".
@@ -710,14 +734,15 @@ const make = Effect.gen(function* () {
     // Multi-repo workspaces (D1): launch with a resolved manifest. The session
     // anchors at the `.code-workspace` dir (or the single repo / worktree) and
     // the agent is handed every repo root as an additional visible directory.
-    const manifest = project
-      ? buildWorkspaceManifest({
+    const manifestInput = project
+      ? {
           worktreePath: thread.worktreePath ?? null,
           worktrees: thread.worktrees,
           workspaceRoot: project.workspaceRoot,
           repoRoots: project.repoRoots ?? [],
-        })
+        }
       : undefined;
+    const manifest = manifestInput ? buildWorkspaceManifest(manifestInput) : undefined;
     const effectiveCwd =
       manifest?.anchor ??
       resolveThreadWorkspaceCwd({
@@ -746,20 +771,36 @@ const make = Effect.gen(function* () {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderDriverKind;
     }) =>
-      providerService
-        .startSession(threadId, {
+      Effect.gen(function* () {
+        // Read here, not per turn: a `.code-workspace` edit applies to the next
+        // session start. Plain folders ride `additionalRoots` to be reachable,
+        // but stay out of `repoRoots`, which drives git-facing behaviour.
+        const sessionManifest = manifestInput
+          ? buildWorkspaceManifest({
+              ...manifestInput,
+              workspaceFolders: yield* readWorkspaceFolders(threadId, project?.workspaceFile),
+            })
+          : undefined;
+        const plainFolders = sessionManifest?.plainFolders.map((folder) => folder.path) ?? [];
+        const sessionRoots = [
+          ...additionalRoots,
+          ...(sessionManifest ? manifestPlainFolderGrants(sessionManifest) : []),
+        ];
+        return yield* providerService.startSession(threadId, {
           threadId,
           ...(preferredProvider ? { provider: preferredProvider } : {}),
           providerInstanceId: desiredInstanceId,
           ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
           ...(sessionTitle ? { title: sessionTitle } : {}),
-          ...(additionalRoots.length > 0 ? { additionalRoots } : {}),
+          ...(sessionRoots.length > 0 ? { additionalRoots: sessionRoots } : {}),
           ...(repoRoots.length > 0 ? { repoRoots } : {}),
+          ...(plainFolders.length > 0 ? { plainFolders } : {}),
+          ...(plainFolders.length > 0 && sessionManifest?.isolated ? { isolatedRun: true } : {}),
           modelSelection: desiredModelSelection,
           ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
           runtimeMode: desiredRuntimeMode,
-        })
-        .pipe(Effect.tap(() => refreshWorkspaceSnapshot));
+        });
+      }).pipe(Effect.tap(() => refreshWorkspaceSnapshot));
 
     const bindSessionToThread = (session: ProviderSession) =>
       Effect.gen(function* () {

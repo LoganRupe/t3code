@@ -15,6 +15,9 @@
  *     read and edit. Providers expose this natively (Claude `--add-dir` /
  *     `additionalDirectories`, Codex `skills/extraRoots/set`); providers that
  *     lack the mechanism degrade to the anchor alone.
+ *   - `plainFolders` are the folders the `.code-workspace` lists that are not
+ *     repositories. They are never copied: an isolated run works in the
+ *     originals, beside its worktrees, and checkpoints do not cover them.
  *
  * Pure and provider-agnostic — the per-provider adapters consume the manifest.
  *
@@ -33,6 +36,10 @@ export interface WorkspaceManifest {
   readonly anchor: string;
   /** Authoritative set of agent-visible roots, in order, deduped. */
   readonly roots: ReadonlyArray<WorkspaceManifestRoot>;
+  /** Listed folders that exist and are not repositories, in file order, deduped. */
+  readonly plainFolders: ReadonlyArray<WorkspaceManifestRoot>;
+  /** Whether the roots are worktrees, which leaves `plainFolders` as shared originals. */
+  readonly isolated: boolean;
 }
 
 function basenameOf(input: string): string {
@@ -53,6 +60,35 @@ function toRoots(paths: ReadonlyArray<string>): ReadonlyArray<WorkspaceManifestR
   return roots;
 }
 
+function isSameOrInside(candidate: string, parent: string): boolean {
+  if (candidate === parent) return true;
+  if (/[\\/]$/.test(parent)) return candidate.startsWith(parent);
+  return candidate.startsWith(`${parent}/`) || candidate.startsWith(`${parent}\\`);
+}
+
+/** One folder a `.code-workspace` lists, as `WorkspaceFile.read` resolves it. */
+export interface WorkspaceManifestFolder {
+  readonly absolutePath: string;
+  readonly exists: boolean;
+}
+
+// A listed folder that is a repo root, or sits inside one, already belongs to
+// that repository (and to its worktree in an isolated run), so it is not plain.
+function toPlainFolders(
+  folders: ReadonlyArray<WorkspaceManifestFolder>,
+  repoRoots: ReadonlyArray<string>,
+): ReadonlyArray<WorkspaceManifestRoot> {
+  return toRoots(
+    folders
+      .filter(
+        (folder) =>
+          folder.exists &&
+          !repoRoots.some((repoRoot) => isSameOrInside(folder.absolutePath, repoRoot)),
+      )
+      .map((folder) => folder.absolutePath),
+  );
+}
+
 /** One isolated-run worktree, keyed by the repo root it was created from. */
 export interface WorkspaceManifestWorktree {
   readonly repoRoot: string;
@@ -70,13 +106,19 @@ export interface WorkspaceManifestWorktree {
  * Otherwise the manifest spans every `repoRoot`, falling back to
  * `[workspaceRoot]` when none are recorded (single-root and pre-migration
  * projects), preserving today's single-root launch behavior exactly.
+ *
+ * `workspaceFolders` is every folder the project's `.code-workspace` lists. The
+ * ones that exist and are not repositories become `plainFolders` in every mode:
+ * an isolated run keeps the originals beside its worktrees.
  */
 export function buildWorkspaceManifest(input: {
   readonly worktreePath: string | null;
   readonly worktrees?: ReadonlyArray<WorkspaceManifestWorktree> | undefined;
   readonly workspaceRoot: string;
   readonly repoRoots: ReadonlyArray<string>;
+  readonly workspaceFolders?: ReadonlyArray<WorkspaceManifestFolder> | undefined;
 }): WorkspaceManifest {
+  const plainFolders = toPlainFolders(input.workspaceFolders ?? [], input.repoRoots);
   const worktrees = input.worktrees ?? [];
   if (worktrees.length > 0) {
     const anchorEntry =
@@ -85,6 +127,8 @@ export function buildWorkspaceManifest(input: {
     return {
       anchor,
       roots: toRoots(worktrees.map((entry) => entry.worktreePath)),
+      plainFolders,
+      isolated: true,
     };
   }
 
@@ -92,6 +136,8 @@ export function buildWorkspaceManifest(input: {
     return {
       anchor: input.worktreePath,
       roots: toRoots([input.worktreePath]),
+      plainFolders,
+      isolated: true,
     };
   }
 
@@ -99,7 +145,19 @@ export function buildWorkspaceManifest(input: {
   return {
     anchor: input.workspaceRoot,
     roots: toRoots(rootPaths),
+    plainFolders,
+    isolated: false,
   };
+}
+
+/**
+ * The plain folders to grant beside the extra roots. A plain folder inside the
+ * anchor is left out, since the session already runs there.
+ */
+export function manifestPlainFolderGrants(manifest: WorkspaceManifest): ReadonlyArray<string> {
+  return manifest.plainFolders
+    .map((folder) => folder.path)
+    .filter((path) => !isSameOrInside(path, manifest.anchor));
 }
 
 /**
@@ -107,7 +165,9 @@ export function buildWorkspaceManifest(input: {
  * plus extra roots (e.g. Claude `additionalDirectories`). Always includes the
  * anchor so single-root launches are byte-for-byte unchanged.
  */
-export function manifestDirectories(manifest: WorkspaceManifest): ReadonlyArray<string> {
+export function manifestDirectories(
+  manifest: Pick<WorkspaceManifest, "anchor" | "roots">,
+): ReadonlyArray<string> {
   const seen = new Set<string>();
   const directories: string[] = [];
   for (const path of [manifest.anchor, ...manifest.roots.map((root) => root.path)]) {
@@ -123,7 +183,9 @@ export function manifestDirectories(manifest: WorkspaceManifest): ReadonlyArray<
  * (e.g. Codex `skills/extraRoots/set`). Excludes the anchor itself, since the
  * session already runs there.
  */
-export function manifestExtraRoots(manifest: WorkspaceManifest): ReadonlyArray<string> {
+export function manifestExtraRoots(
+  manifest: Pick<WorkspaceManifest, "anchor" | "roots">,
+): ReadonlyArray<string> {
   const seen = new Set<string>([manifest.anchor]);
   const roots: string[] = [];
   for (const root of manifest.roots) {

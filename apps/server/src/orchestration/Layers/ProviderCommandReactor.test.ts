@@ -1004,6 +1004,119 @@ describe("ProviderCommandReactor", () => {
       }),
   );
 
+  // A real `.code-workspace` on disk: one repo, a plain folder under the
+  // workspace folder, one outside it, and one that no longer exists.
+  const startWorkspaceFileThread = (input: {
+    readonly key: string;
+    readonly writeWorkspaceFile: boolean;
+  }) =>
+    Effect.gen(function* () {
+      const harness = yield* Effect.promise(() => createHarness());
+      const now = "2026-01-01T00:00:00.000Z";
+      const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3code-reactor-ws-"));
+      createdBaseDirs.add(root);
+      const workspaceRoot = NodePath.join(root, "work");
+      const backend = NodePath.join(workspaceRoot, "backend");
+      const docs = NodePath.join(workspaceRoot, "docs");
+      const notes = NodePath.join(root, "notes");
+      for (const dir of [NodePath.join(backend, ".git"), docs, notes]) {
+        NodeFS.mkdirSync(dir, { recursive: true });
+      }
+      const workspaceFile = NodePath.join(workspaceRoot, "work.code-workspace");
+      if (input.writeWorkspaceFile) {
+        NodeFS.writeFileSync(
+          workspaceFile,
+          '{ "folders": [{ "path": "backend" }, { "path": "docs" }, { "path": "../notes" }, { "path": "gone" }] }',
+        );
+      }
+      const modelSelection = {
+        instanceId: ProviderInstanceId.make("codex"),
+        model: "gpt-5-codex",
+      };
+      const projectId = asProjectId(`project-${input.key}`);
+      const threadId = ThreadId.make(`thread-${input.key}`);
+
+      yield* harness.engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make(`cmd-project-create-${input.key}`),
+        projectId,
+        title: "Workspace File Project",
+        workspaceRoot,
+        workspaceFile,
+        repoRoots: [backend],
+        defaultModelSelection: modelSelection,
+        createdAt: now,
+      });
+      yield* harness.engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`cmd-thread-create-${input.key}`),
+        threadId,
+        projectId,
+        title: "Workspace File Thread",
+        modelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        branch: null,
+        worktreePath: null,
+        createdAt: now,
+      });
+      yield* harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make(`cmd-turn-start-${input.key}`),
+        threadId,
+        message: {
+          messageId: asMessageId(`user-message-${input.key}`),
+          role: "user",
+          text: "update the notes",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      });
+
+      yield* Effect.promise(() =>
+        waitFor(() => harness.startSession.mock.calls.some((call) => call[0] === threadId)),
+      );
+      const call = harness.startSession.mock.calls.find((entry) => entry[0] === threadId);
+      return { startInput: call?.[1], workspaceRoot, backend, docs, notes };
+    });
+
+  effectIt.effect("starts a workspace-file session with the plain folders the file lists", () =>
+    Effect.gen(function* () {
+      const { startInput, workspaceRoot, backend, docs, notes } = yield* startWorkspaceFileThread({
+        key: "plain-folders",
+        writeWorkspaceFile: true,
+      });
+
+      // `docs` sits inside the cwd, so only `notes` needs a grant. Neither is a
+      // repo root, and the missing `gone` folder is skipped.
+      expect(startInput).toMatchObject({
+        cwd: workspaceRoot,
+        additionalRoots: [backend, notes],
+        repoRoots: [backend],
+        plainFolders: [docs, notes],
+      });
+      expect(startInput).not.toHaveProperty("isolatedRun");
+    }),
+  );
+
+  effectIt.effect("starts with the repos only when the workspace file cannot be read", () =>
+    Effect.gen(function* () {
+      const { startInput, workspaceRoot, backend } = yield* startWorkspaceFileThread({
+        key: "unreadable-workspace-file",
+        writeWorkspaceFile: false,
+      });
+
+      expect(startInput).toMatchObject({
+        cwd: workspaceRoot,
+        additionalRoots: [backend],
+        repoRoots: [backend],
+      });
+      expect(startInput).not.toHaveProperty("plainFolders");
+    }),
+  );
+
   it("reacts to thread.turn.start by ensuring session and sending provider turn", async () => {
     const harness = await createHarness();
     const now = "2026-01-01T00:00:00.000Z";

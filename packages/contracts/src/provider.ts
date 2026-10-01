@@ -65,6 +65,13 @@ export const ProviderSessionStartInput = Schema.Struct({
   // Every repo root the session works in (the worktrees, in an isolated run).
   // Unlike `additionalRoots`, it keeps `cwd` when `cwd` is itself a repo root.
   repoRoots: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  // Project folders that are not git repositories, from the project's
+  // `.code-workspace`. Never in `repoRoots`; the ones outside `cwd` are also in
+  // `additionalRoots` so providers with native roots can reach them.
+  plainFolders: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
+  // Set when the session runs in worktrees: `plainFolders` are then the
+  // original folders, shared with other runs.
+  isolatedRun: Schema.optional(Schema.Boolean),
   title: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
   resumeCursor: Schema.optional(Schema.Unknown),
