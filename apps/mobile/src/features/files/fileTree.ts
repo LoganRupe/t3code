@@ -1,3 +1,4 @@
+import type { ProjectFileRoot } from "@t3tools/client-runtime/project-file-roots";
 import type { ProjectEntry } from "@t3tools/contracts";
 import { normalizeSearchQuery, scoreQueryMatch } from "@t3tools/shared/searchRanking";
 
@@ -119,6 +120,45 @@ export function buildFileTree(entries: ReadonlyArray<ProjectEntry>): ReadonlyArr
   }
 
   return [...root.children.values()].sort(compareNodes).map(freezeNode);
+}
+
+const trimTrailingSeparators = (path: string) => path.replace(/[\\/]+$/, "");
+
+/**
+ * A multi-root tree nests each root's files under its label. Returns the root
+ * a tree path sits in and the path inside that root, empty for the root's own
+ * node. Null for a path under no root, such as an ancestor of a nested label.
+ */
+export function resolveRootedTreePath(
+  roots: ReadonlyArray<ProjectFileRoot>,
+  treePath: string,
+): (ProjectFileRoot & { readonly relativePath: string }) | null {
+  // The longest label wins, so a label containing "/" beats a shorter one it extends.
+  let owner: ProjectFileRoot | null = null;
+  for (const candidate of roots) {
+    const { label } = candidate;
+    if (treePath !== label && !treePath.startsWith(`${label}/`)) continue;
+    if (owner === null || label.length > owner.label.length) owner = candidate;
+  }
+  return owner ? { ...owner, relativePath: treePath.slice(owner.label.length + 1) } : null;
+}
+
+/**
+ * Tree path a multi-root tree lists an absolute file path under, or null when
+ * no root holds it. A root nested in another claims its own files.
+ */
+export function rootedTreePath(
+  roots: ReadonlyArray<ProjectFileRoot>,
+  absolutePath: string,
+): string | null {
+  const normalized = absolutePath.replaceAll("\\", "/");
+  let match: { readonly prefix: string; readonly label: string } | null = null;
+  for (const { root, label } of roots) {
+    const prefix = `${trimTrailingSeparators(root).replaceAll("\\", "/")}/`;
+    if (!normalized.startsWith(prefix)) continue;
+    if (match === null || prefix.length > match.prefix.length) match = { prefix, label };
+  }
+  return match ? `${match.label}/${normalized.slice(match.prefix.length)}` : null;
 }
 
 export function defaultExpandedTreePaths(nodes: ReadonlyArray<FileTreeNode>): ReadonlySet<string> {

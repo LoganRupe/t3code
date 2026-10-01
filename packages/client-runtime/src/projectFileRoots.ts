@@ -3,8 +3,6 @@ import type {
   OrchestrationThreadWorktree,
 } from "@t3tools/contracts";
 
-import { buildRootLabels } from "../components/files/filePath";
-
 /** A folder the files panel and @-mention search span, and the name it shows under. */
 export interface ProjectFileRoot {
   readonly root: string;
@@ -41,4 +39,55 @@ export function resolveProjectFileRoots(input: {
 /** Stable string identity for a root list, for memo and component keys. */
 export function projectFileRootsKey(roots: readonly ProjectFileRoot[] | undefined | null): string {
   return roots?.map(({ label, root }) => `${label}\0${root}`).join("\0\0") ?? "";
+}
+
+/** Label for a root, tolerating the server's normalized form (no trailing separator). */
+export function labelForRoot(
+  labels: ReadonlyMap<string, string>,
+  root: string,
+): string | undefined {
+  const exact = labels.get(root);
+  if (exact !== undefined) return exact;
+  const trimmed = root.replace(/[\\/]+$/, "");
+  for (const [candidate, label] of labels) {
+    if (candidate.replace(/[\\/]+$/, "") === trimmed) return label;
+  }
+  return undefined;
+}
+
+/**
+ * Assign each repo root a unique, human-readable label for the tree's top-level
+ * grouping. Prefer the folder basename (matching the per-repo git controls);
+ * when two roots share a basename, grow the label by parent segments until the
+ * labels are distinct.
+ */
+export function buildRootLabels(roots: readonly string[]): Map<string, string> {
+  const segments = new Map<string, string[]>();
+  for (const root of roots) {
+    segments.set(
+      root,
+      root
+        .replaceAll("\\", "/")
+        .replace(/\/+$/, "")
+        .split("/")
+        .filter((segment) => segment.length > 0),
+    );
+  }
+
+  const labels = new Map<string, string>();
+  for (const root of roots) {
+    const parts = segments.get(root) ?? [];
+    let depth = 1;
+    let label = parts.slice(-depth).join("/") || root;
+    const collidesAtDepth = () =>
+      roots.some(
+        (other) => other !== root && (segments.get(other) ?? []).slice(-depth).join("/") === label,
+      );
+    while (collidesAtDepth() && depth < parts.length) {
+      depth += 1;
+      label = parts.slice(-depth).join("/");
+    }
+    labels.set(root, label);
+  }
+  return labels;
 }

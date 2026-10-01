@@ -1,12 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  buildRootLabels,
   fileBreadcrumbChildren,
   fileBreadcrumbParent,
   fileBreadcrumbs,
   isRootPath,
-  labelForRoot,
 } from "./filePath";
 
 describe("fileBreadcrumbs", () => {
@@ -100,15 +98,6 @@ describe("fileBreadcrumbParent", () => {
     ["", null],
   ])("returns the parent of %j", (path, expected) => {
     expect(fileBreadcrumbParent(path)).toBe(expected);
-  });
-});
-
-describe("buildRootLabels", () => {
-  it("labels roots by folder name and grows the label when names collide", () => {
-    const labels = buildRootLabels(["/work/app", "/a/shared", "/b/shared"]);
-    expect(labelForRoot(labels, "/work/app")).toBe("app");
-    expect(labelForRoot(labels, "/a/shared")).toBe("a/shared");
-    expect(labelForRoot(labels, "/b/shared/")).toBe("b/shared");
   });
 });
 

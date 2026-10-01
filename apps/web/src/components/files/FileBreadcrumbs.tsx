@@ -18,7 +18,7 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
 import { useTheme } from "~/hooks/useTheme";
 import { useWorkspaceMutationRefresh } from "~/hooks/useWorkspaceMutationRefresh";
-import { type ProjectFileRoot } from "~/lib/projectFileRoots";
+import { labelForRoot, type ProjectFileRoot } from "@t3tools/client-runtime/project-file-roots";
 import { cn } from "~/lib/utils";
 import { isAbsolutePath } from "~/terminal-links";
 
@@ -27,7 +27,6 @@ import {
   fileBreadcrumbChildren,
   fileBreadcrumbParent,
   fileBreadcrumbs,
-  labelForRoot,
 } from "./filePath";
 import { useProjectEntriesQuery } from "./projectFilesQueryState";
 

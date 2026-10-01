@@ -267,6 +267,10 @@
       "types": "./src/threadPullRequestCompatibility.ts",
       "default": "./src/threadPullRequestCompatibility.ts"
     },
+    "./project-file-roots": {
+      "types": "./src/projectFileRoots.ts",
+      "default": "./src/projectFileRoots.ts"
+    },
     "./file-preview": {
       "types": "./src/filePreview.ts",
       "default": "./src/filePreview.ts"

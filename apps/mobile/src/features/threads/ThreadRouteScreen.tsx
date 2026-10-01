@@ -85,7 +85,9 @@ import {
   useAdaptiveWorkspacePaneRole,
   useRegisterWorkspaceInspector,
 } from "../layout/AdaptiveWorkspaceLayout";
+import { fileRoutePathSegments } from "../files/filePath";
 import { ThreadFileNavigatorPane } from "../files/thread-file-navigator-pane";
+import { useSelectedThreadFileRoots } from "../files/useProjectFileRoots";
 import {
   ThreadInspectorContentStack,
   type ThreadInspectorMode,
@@ -550,7 +552,7 @@ function ThreadRouteContent(
       const params = {
         environmentId: String(selectedThread.environmentId),
         threadId: String(selectedThread.id),
-        path: path.split("/").filter((segment) => segment.length > 0),
+        path: fileRoutePathSegments(path),
       };
       if (fileInspector.supported) {
         navigation.navigate("ThreadFile", params);
@@ -575,12 +577,14 @@ function ThreadRouteContent(
     ),
     [inspectorHeaderInset, props.route.params],
   );
+  const fileRoots = useSelectedThreadFileRoots();
   const FilesInspector = useCallback(
     () =>
       selectedThread !== null && selectedThreadCwd !== null ? (
         <ThreadFileNavigatorPane
           cwd={selectedThreadCwd}
           environmentId={selectedThread.environmentId}
+          fileRoots={fileRoots}
           headerInset={inspectorHeaderInset}
           projectName={selectedThreadProject?.title ?? "Files"}
           selectedPath={null}
@@ -588,6 +592,7 @@ function ThreadRouteContent(
         />
       ) : null,
     [
+      fileRoots,
       handleSelectInspectorFile,
       inspectorHeaderInset,
       selectedThread,

@@ -1,3 +1,4 @@
+import { labelForRoot, projectFileRootsKey } from "@t3tools/client-runtime/project-file-roots";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -7,18 +8,48 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
 import { useDebouncedValue } from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";
+import { resolveRootedTreePath, rootedTreePath } from "./fileTree";
+import type { ProjectFileRootsState } from "./useProjectFileRoots";
 
+/**
+ * Entries for the file tree, loaded a directory at a time.
+ *
+ * With `fileRoots`, the top level is one directory per root (its label) and
+ * every path below is prefixed with that label, so same-named files across
+ * roots don't collide. `filePath` and `treePath` convert between those tree
+ * paths and the absolute paths file routes and reads take.
+ */
 export function useFileTreeEntries(input: {
   readonly cwd: string | null;
   readonly environmentId: EnvironmentId | null;
   readonly searchQuery: string;
+  readonly fileRoots?: ProjectFileRootsState | undefined;
 }) {
-  const { cwd, environmentId } = input;
+  const { environmentId } = input;
+  const rootsPending = input.fileRoots?.pending ?? false;
+  const refreshRoots = input.fileRoots?.refresh;
+  // The fallback roots can show unlisted folders, so nothing loads until the folder list has.
+  const cwd = rootsPending ? null : input.cwd;
+  const rootsKey = projectFileRootsKey(input.fileRoots?.roots);
+  const roots = useMemo(
+    () =>
+      rootsKey
+        ? rootsKey.split("\0\0").map((pair) => {
+            const [label = "", root = ""] = pair.split("\0");
+            return { root, label };
+          })
+        : null,
+    [rootsKey],
+  );
+  const rootLabels = useMemo(
+    () => (roots ? new Map(roots.map(({ root, label }) => [root, label])) : null),
+    [roots],
+  );
   const searching = input.searchQuery.trim().length > 0;
   const query = input.searchQuery.trim().slice(0, 256);
   const debouncedQuery = useDebouncedValue(query, 200);
   const root = useEnvironmentQuery(
-    cwd !== null && environmentId !== null
+    cwd !== null && environmentId !== null && roots === null
       ? projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath: "" } })
       : null,
   );
@@ -26,7 +57,12 @@ export function useFileTreeEntries(input: {
     searching && debouncedQuery.length > 0 && cwd !== null && environmentId !== null
       ? projectEnvironment.searchEntries({
           environmentId,
-          input: { cwd, query: debouncedQuery, limit: 200 },
+          input: {
+            cwd,
+            query: debouncedQuery,
+            limit: 200,
+            ...(roots ? { roots: roots.map(({ root }) => root) } : {}),
+          },
         })
       : null,
   );
@@ -41,7 +77,7 @@ export function useFileTreeEntries(input: {
       pending: new Map<string, AbortController>(),
       errors: new Map<string, string>(),
     }),
-    [cwd, environmentId],
+    [cwd, environmentId, roots],
   );
   useEffect(
     () => () => {
@@ -61,12 +97,20 @@ export function useFileTreeEntries(input: {
       ) {
         return;
       }
+      const source = roots
+        ? resolveRootedTreePath(roots, directoryPath)
+        : { root: cwd, label: "", relativePath: directoryPath };
+      // Not under any root label (an ancestor of a nested label): nothing to load.
+      if (source === null) return;
       const controller = new AbortController();
       directories.requested.add(directoryPath);
       directories.pending.set(directoryPath, controller);
       directories.errors.delete(directoryPath);
       render();
-      const atom = projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath } });
+      const atom = projectEnvironment.listEntries({
+        environmentId,
+        input: { cwd: source.root, directoryPath: source.relativePath },
+      });
       appAtomRegistry.refresh(atom);
       return executeAtomQuery(appAtomRegistry, atom, {
         signal: controller.signal,
@@ -78,10 +122,17 @@ export function useFileTreeEntries(input: {
         if (result._tag === "Success") {
           directories.entries.set(
             directoryPath,
-            result.value.entries.filter(
-              (entry) =>
-                entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) === directoryPath,
-            ),
+            result.value.entries
+              .filter(
+                (entry) =>
+                  entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) ===
+                  source.relativePath,
+              )
+              .map((entry) =>
+                roots
+                  ? { ...entry, path: `${source.label}/${entry.path}`, root: source.root }
+                  : entry,
+              ),
           );
         } else {
           const error = Cause.squash(result.cause);
@@ -93,14 +144,23 @@ export function useFileTreeEntries(input: {
         render();
       });
     },
-    [cwd, directories, environmentId],
+    [cwd, directories, environmentId, roots],
   );
   const { refresh: refreshRoot, data: rootData } = root;
   const { refresh: refreshSearch, data: searchData } = search;
   const snapshot = useMemo(() => {
     const merged = new Map<string, ProjectEntry>();
     if (searching) {
-      for (const entry of searchData?.entries ?? []) merged.set(entry.path, entry);
+      for (const entry of searchData?.entries ?? []) {
+        if (rootLabels === null) {
+          merged.set(entry.path, entry);
+          continue;
+        }
+        const label = entry.root ? labelForRoot(rootLabels, entry.root) : undefined;
+        if (label === undefined) continue;
+        const path = `${label}/${entry.path}`;
+        merged.set(path, { ...entry, path });
+      }
     }
     const reachableDirectories = new Set<string>();
     const visit = (items: ReadonlyArray<ProjectEntry>) => {
@@ -112,11 +172,16 @@ export function useFileTreeEntries(input: {
         }
       }
     };
-    visit((rootData?.entries ?? []).filter((entry) => !entry.path.includes("/")));
+    visit(
+      roots
+        ? roots.map(({ root, label }) => ({ path: label, kind: "directory" as const, root }))
+        : (rootData?.entries ?? []).filter((entry) => !entry.path.includes("/")),
+    );
     return { revision, entries: [...merged.values()], reachableDirectories };
-  }, [directories, revision, rootData, searchData, searching]);
+  }, [directories, revision, rootData, rootLabels, roots, searchData, searching]);
 
   const refresh = useCallback(() => {
+    refreshRoots?.();
     refreshRoot();
     if (searching) refreshSearch();
     const paths = new Set(
@@ -140,10 +205,22 @@ export function useFileTreeEntries(input: {
     directories,
     loadDirectory,
     refreshRoot,
+    refreshRoots,
     refreshSearch,
     searching,
     snapshot.reachableDirectories,
   ]);
+  const filePath = useCallback(
+    (treePath: string) => {
+      const owner = roots ? resolveRootedTreePath(roots, treePath) : null;
+      return owner ? `${owner.root.replace(/[\\/]+$/, "")}/${owner.relativePath}` : treePath;
+    },
+    [roots],
+  );
+  const treePath = useCallback(
+    (path: string | null) => (roots && path !== null ? rootedTreePath(roots, path) : path),
+    [roots],
+  );
 
   return {
     entries: snapshot.entries,
@@ -153,6 +230,7 @@ export function useFileTreeEntries(input: {
       [...directories.errors].find(([path]) => snapshot.reachableDirectories.has(path))?.[1] ??
       null,
     isPending:
+      rootsPending ||
       root.isPending ||
       directories.pending.size > 0 ||
       (searching && (query !== debouncedQuery || search.isPending)),
@@ -160,5 +238,7 @@ export function useFileTreeEntries(input: {
     loadedDirectories: new Set(directories.entries.keys()),
     loadDirectory,
     refresh,
+    filePath,
+    treePath,
   };
 }

@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 import type { ProjectEntry } from "@t3tools/contracts";
 
-import { buildFileTree, defaultExpandedTreePaths, flattenFileTree } from "./fileTree";
+import {
+  buildFileTree,
+  defaultExpandedTreePaths,
+  flattenFileTree,
+  resolveRootedTreePath,
+  rootedTreePath,
+} from "./fileTree";
 
 const entries = [
   { kind: "file", path: "README.md" },
@@ -97,5 +103,41 @@ describe("mobile file tree helpers", () => {
     const tree = buildFileTree(entries);
 
     expect([...defaultExpandedTreePaths(tree)]).toEqual(["src"]);
+  });
+});
+
+describe("multi-root tree paths", () => {
+  const roots = [
+    { root: "/wt/api-5c882f59", label: "api" },
+    { root: "/ws/a/docs", label: "a/docs" },
+    { root: "/ws/b/docs/", label: "b/docs" },
+    { root: "/ws/a/docs/drafts", label: "drafts" },
+  ];
+
+  it("resolves a tree path to its root and the path inside it", () => {
+    expect(resolveRootedTreePath(roots, "api/src/main.ts")).toMatchObject({
+      root: "/wt/api-5c882f59",
+      relativePath: "src/main.ts",
+    });
+    expect(resolveRootedTreePath(roots, "a/docs")).toMatchObject({
+      root: "/ws/a/docs",
+      relativePath: "",
+    });
+    expect(resolveRootedTreePath(roots, "b/docs/plan.md")).toMatchObject({
+      root: "/ws/b/docs/",
+      relativePath: "plan.md",
+    });
+  });
+
+  it("resolves nothing for a path under no root", () => {
+    expect(resolveRootedTreePath(roots, "a")).toBeNull();
+    expect(resolveRootedTreePath(roots, "apis/main.ts")).toBeNull();
+  });
+
+  it("maps an absolute path back under the innermost root that holds it", () => {
+    expect(rootedTreePath(roots, "/wt/api-5c882f59/src/main.ts")).toBe("api/src/main.ts");
+    expect(rootedTreePath(roots, "/ws/b/docs/plan.md")).toBe("b/docs/plan.md");
+    expect(rootedTreePath(roots, "/ws/a/docs/drafts/todo.md")).toBe("drafts/todo.md");
+    expect(rootedTreePath(roots, "/ws/api/src/main.ts")).toBeNull();
   });
 });

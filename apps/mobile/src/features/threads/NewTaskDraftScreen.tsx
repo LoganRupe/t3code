@@ -128,6 +128,7 @@ import { selectIncomingShareAttachmentsForServer } from "../sharing/incoming-sha
 import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
 import { fileRoutePathSegments } from "../files/filePath";
+import { useProjectFileRoots } from "../files/useProjectFileRoots";
 
 function NewTaskWorkspaceIcon(props: {
   readonly workspaceMode: "local" | "worktree";
@@ -453,6 +454,11 @@ export function NewTaskDraftScreen(props: {
     () => composerStripAttachments(flow.attachments),
     [flow.attachments],
   );
+  const { roots: mentionRoots } = useProjectFileRoots({
+    environmentId: selectedProject?.environmentId ?? null,
+    project: selectedProject,
+    worktrees: undefined,
+  });
   const composerMenu = useComposerCommandMenu({
     draftMessage: flow.prompt,
     ownerKey: flow.draftKey,
@@ -462,6 +468,7 @@ export function NewTaskDraftScreen(props: {
       : null,
     pullRequestRepository: selectedProject?.repositoryIdentity?.displayName ?? null,
     projectCwd: composerWorkspaceCwd,
+    mentionRoots,
     selectedProviderStatus: flow.selectedProviderStatus,
     hasThread: false,
     hasCompactableConversation: false,
