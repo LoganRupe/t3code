@@ -88,6 +88,7 @@ import {
   shouldWriteThreadErrorToCurrentServerThread,
   waitForRevertedMessage,
   prepareRevertedMessageAttachments,
+  resolveProjectGitCwd,
 } from "./ChatView.logic";
 
 describe("agent browser close confirmation", () => {
@@ -2430,5 +2431,22 @@ describe("worktree setup visibility", () => {
       ...settledDone,
       sequence: 9,
     });
+  });
+});
+
+describe("resolveProjectGitCwd", () => {
+  it("uses the repo of a workspace file that lists one repo", () => {
+    expect(resolveProjectGitCwd({ workspaceRoot: "/ws", repoRoots: ["/ws/api"] })).toBe("/ws/api");
+  });
+
+  it("keeps the workspace root of an ordinary project", () => {
+    expect(resolveProjectGitCwd({ workspaceRoot: "/repo", repoRoots: ["/repo"] })).toBe("/repo");
+    expect(resolveProjectGitCwd({ workspaceRoot: "/repo" })).toBe("/repo");
+  });
+
+  it("leaves multi-repo projects on the workspace root, since their git surfaces fan out", () => {
+    expect(resolveProjectGitCwd({ workspaceRoot: "/ws", repoRoots: ["/ws/api", "/ws/web"] })).toBe(
+      "/ws",
+    );
   });
 });

@@ -25,6 +25,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { resolveAnchorRepoRoot } from "@t3tools/shared/git";
 import { videoMimeType } from "@t3tools/shared/video";
 import {
   appendCodexArtifactTemplateUsePrompt,
@@ -1384,4 +1385,20 @@ export function restorePlanFollowUpComposer(input: {
     prompt: input.snapshot.prompt,
     detectTrigger: true,
   });
+}
+
+/**
+ * The checkout the chat view's single-repo git surfaces run in: status, the
+ * header's git actions, checkout switching and PR checkout. A `.code-workspace`
+ * project's `workspaceRoot` is only the folder holding the file, so a
+ * workspace with one repo uses that repo. Multi-repo projects keep
+ * `workspaceRoot` here because their git surfaces fan out per repo instead.
+ */
+export function resolveProjectGitCwd(project: {
+  readonly workspaceRoot: string;
+  readonly repoRoots?: ReadonlyArray<string> | undefined;
+}): string {
+  return (project.repoRoots?.length ?? 0) > 1
+    ? project.workspaceRoot
+    : resolveAnchorRepoRoot(project);
 }
