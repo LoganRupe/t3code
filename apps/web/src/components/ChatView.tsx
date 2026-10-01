@@ -485,6 +485,7 @@ import {
   codexArtifactTemplatePromptToAppend,
   waitForStartedServerThread,
   shouldRefocusComposerOnWindowFocus,
+  resolveProjectGitCwd,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
 import { useLocalStorage } from "~/hooks/useLocalStorage";
@@ -3653,7 +3654,8 @@ export default function ChatView(props: ChatViewProps) {
   // repo root, swapping in the thread's worktree for roots an isolated run
   // covers. A single-repo project uses the worktree-aware status cwd.
   const isMultiRepo = (activeProject?.repoRoots?.length ?? 0) > 1;
-  const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
+  const projectGitCwd = activeProject ? resolveProjectGitCwd(activeProject) : null;
+  const gitStatusCwd = activeThread?.worktreePath ?? projectGitCwd;
   const threadWorktrees = activeThread?.worktrees;
   const multiRepoStatusRoots = useMemo(() => {
     if (!isMultiRepo || !activeProject?.repoRoots) return null;
@@ -6300,7 +6302,7 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeBranchMismatchKey, showBranchMismatchBanner]);
   const handleSwitchCheckoutToThread = useCallback(async () => {
     if (
-      !activeProjectCwd ||
+      !projectGitCwd ||
       !activeThread ||
       !localCheckoutBranchMismatch ||
       isRestoringThreadBranch
@@ -6311,7 +6313,7 @@ export default function ChatView(props: ChatViewProps) {
     const checkoutResult = await switchGitRef({
       environmentId,
       input: {
-        cwd: activeProjectCwd,
+        cwd: projectGitCwd,
         refName: localCheckoutBranchMismatch.threadBranch,
       },
     });
@@ -6354,7 +6356,7 @@ export default function ChatView(props: ChatViewProps) {
     setIsRestoringThreadBranch(false);
     scheduleComposerFocus();
   }, [
-    activeProjectCwd,
+    projectGitCwd,
     activeThread,
     environmentId,
     gitStatusQuery,
@@ -9906,7 +9908,7 @@ export default function ChatView(props: ChatViewProps) {
             keybindings={keybindings}
             availableEditors={availableEditors}
             rightPanelOpen={rightPanelOpen}
-            gitCwd={gitCwd}
+            gitCwd={gitStatusCwd}
             onNewThreadInProject={handleNewThreadInActiveProject}
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
@@ -10364,7 +10366,7 @@ export default function ChatView(props: ChatViewProps) {
                 open
                 environmentId={activeThread.environmentId}
                 threadId={activeThread.id}
-                cwd={activeProject?.workspaceRoot ?? null}
+                cwd={projectGitCwd}
                 initialReference={pullRequestDialogState.initialReference}
                 onOpenChange={(open) => {
                   if (!open) {
