@@ -70,10 +70,12 @@ function isSameOrInside(candidate: string, parent: string): boolean {
 export interface WorkspaceManifestFolder {
   readonly absolutePath: string;
   readonly exists: boolean;
+  readonly isGit: boolean;
 }
 
 // A listed folder that is a repo root, or sits inside one, already belongs to
 // that repository (and to its worktree in an isolated run), so it is not plain.
+// `isGit` covers a repository listed after `repoRoots` was last recorded.
 function toPlainFolders(
   folders: ReadonlyArray<WorkspaceManifestFolder>,
   repoRoots: ReadonlyArray<string>,
@@ -83,6 +85,7 @@ function toPlainFolders(
       .filter(
         (folder) =>
           folder.exists &&
+          !folder.isGit &&
           !repoRoots.some((repoRoot) => isSameOrInside(folder.absolutePath, repoRoot)),
       )
       .map((folder) => folder.absolutePath),

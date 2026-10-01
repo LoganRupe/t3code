@@ -141,11 +141,11 @@ describe("plain workspace folders", () => {
     repoRoots: ["/work/backend", "/oss/frontend"],
   };
   const workspaceFolders = [
-    { absolutePath: "/work/backend", exists: true },
-    { absolutePath: "/oss/frontend", exists: true },
-    { absolutePath: "/work/docs", exists: true },
-    { absolutePath: "/notes", exists: true },
-    { absolutePath: "/work/gone", exists: false },
+    { absolutePath: "/work/backend", exists: true, isGit: true },
+    { absolutePath: "/oss/frontend", exists: true, isGit: true },
+    { absolutePath: "/work/docs", exists: true, isGit: false },
+    { absolutePath: "/notes", exists: true, isGit: false },
+    { absolutePath: "/work/gone", exists: false, isGit: false },
   ];
 
   it("has none without a workspace folder list, and leaves the manifest as before", () => {
@@ -201,11 +201,29 @@ describe("plain workspace folders", () => {
       worktreePath: null,
       ...project,
       workspaceFolders: [
-        { absolutePath: "/work/backend/docs", exists: true },
-        { absolutePath: "/work/backend-notes", exists: true },
+        { absolutePath: "/work/backend/docs", exists: true, isGit: false },
+        { absolutePath: "/work/backend-notes", exists: true, isGit: false },
       ],
     });
 
     expect(manifest.plainFolders.map((folder) => folder.path)).toEqual(["/work/backend-notes"]);
+  });
+
+  it("never treats a repository as plain, even one missing from the recorded repo roots", () => {
+    const manifest = buildWorkspaceManifest({
+      worktreePath: null,
+      worktrees: [{ repoRoot: "/work/backend", worktreePath: "/worktrees/t/backend" }],
+      workspaceRoot: "/work",
+      repoRoots: ["/work/backend"],
+      workspaceFolders: [
+        { absolutePath: "/work/backend", exists: true, isGit: true },
+        { absolutePath: "/work/added-later", exists: true, isGit: true },
+        { absolutePath: "/notes", exists: true, isGit: false },
+      ],
+    });
+
+    // The new checkout stays out of the isolated run instead of being granted as an original.
+    expect(manifest.plainFolders.map((folder) => folder.path)).toEqual(["/notes"]);
+    expect(manifestPlainFolderGrants(manifest)).toEqual(["/notes"]);
   });
 });
