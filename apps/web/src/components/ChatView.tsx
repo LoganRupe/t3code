@@ -3673,9 +3673,9 @@ export default function ChatView(props: ChatViewProps) {
           : null,
     [multiRepoStatusRoots, gitStatusCwd],
   );
-  // The files panel and @-mention search span the folders a `.code-workspace`
-  // lists, while git surfaces stay on `repoRoots`. Null searches the
-  // worktree-aware cwd alone.
+  // The files panel, @-mention search and chat file links span the folders a
+  // `.code-workspace` lists, while git surfaces stay on `repoRoots`. Null
+  // searches the worktree-aware cwd alone.
   const workspaceFileQuery = useEnvironmentQuery(
     projectWorkspaceFile === null
       ? null
@@ -3685,6 +3685,12 @@ export default function ChatView(props: ChatViewProps) {
         }),
   );
   const workspaceFolders = workspaceFileQuery.data?.folders ?? null;
+  // The first read of the folder list has not settled. The files panel holds
+  // its tree until then, since the fallback roots can show unlisted folders.
+  const projectFileRootsPending =
+    projectWorkspaceFile !== null &&
+    workspaceFileQuery.data === null &&
+    workspaceFileQuery.error === null;
   const projectFileRoots = useMemo(
     () =>
       resolveProjectFileRoots({
@@ -3693,6 +3699,10 @@ export default function ChatView(props: ChatViewProps) {
         worktrees: threadWorktrees,
       }),
     [workspaceFolders, activeProject?.repoRoots, threadWorktrees],
+  );
+  const fileLinkRoots = useMemo(
+    () => projectFileRoots?.map(({ root }) => root),
+    [projectFileRoots],
   );
   // Single-repo git query scoped to the anchor root, backing the branch-sync,
   // PR-checkout, and refresh flows; the multi-repo status/diff surfaces use
@@ -9787,6 +9797,8 @@ export default function ChatView(props: ChatViewProps) {
           keybindings={keybindings}
           availableEditors={availableEditors}
           roots={projectFileRoots ?? undefined}
+          rootsPending={projectFileRootsPending}
+          onRefreshRoots={workspaceFileQuery.refresh}
           relativePath={
             renderedRightPanelSurface.kind === "file"
               ? renderedRightPanelSurface.relativePath
@@ -10003,9 +10015,7 @@ export default function ChatView(props: ChatViewProps) {
                     ? (heldPaintContext?.markdownCwd ?? undefined)
                     : (gitCwd ?? undefined)
                 }
-                markdownRepoRoots={
-                  !paintOnlyDisplayedTimeline && isMultiRepo ? activeProject?.repoRoots : undefined
-                }
+                markdownRepoRoots={paintOnlyDisplayedTimeline ? undefined : fileLinkRoots}
                 resolvedTheme={resolvedTheme}
                 timestampFormat={timestampFormat}
                 workspaceRoot={

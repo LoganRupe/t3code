@@ -46,6 +46,8 @@ interface FileBrowserPanelProps {
   roots?: readonly ProjectFileRoot[] | undefined;
   onOpenFile: (relativePath: string, root?: string) => void;
   onRefreshSelectedFile?: () => void;
+  /** Re-resolves `roots`, so a refresh also picks up a changed root list. */
+  onRefreshRoots?: () => void;
   workspaceMutationId: string | null;
 }
 
@@ -117,6 +119,7 @@ export default function FileBrowserPanel({
   roots,
   onOpenFile,
   onRefreshSelectedFile,
+  onRefreshRoots,
   workspaceMutationId,
 }: FileBrowserPanelProps) {
   const { resolvedTheme } = useTheme();
@@ -439,6 +442,7 @@ export default function FileBrowserPanel({
     refresh();
     if (query.trim()) pathSearch.refresh();
     onRefreshSelectedFile?.();
+    onRefreshRoots?.();
   };
   useWorkspaceMutationRefresh({
     mutationId: workspaceMutationId,

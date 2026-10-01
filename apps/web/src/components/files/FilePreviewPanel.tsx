@@ -107,6 +107,10 @@ interface FilePreviewPanelProps {
   revealRequestId: number;
   // Multi-root projects (#923): roots to list/group in the file tree.
   roots?: readonly ProjectFileRoot[] | undefined;
+  // True while `roots` is still being resolved; the file tree waits for it.
+  rootsPending?: boolean | undefined;
+  // Re-resolves `roots` from their source when the user refreshes the tree.
+  onRefreshRoots?: (() => void) | undefined;
   // Owning root of the currently-open file. Reads/writes resolve against this
   // root (it may be a different repo than the anchor `cwd`). Null = anchor.
   fileRoot?: string | null | undefined;
@@ -929,6 +933,8 @@ export default function FilePreviewPanel({
   revealLine,
   revealRequestId,
   roots,
+  rootsPending,
+  onRefreshRoots,
   fileRoot,
   onOpenFile,
   onPendingChange,
@@ -1320,21 +1326,24 @@ export default function FilePreviewPanel({
           >
             {/* The tree caches folders by label, so a root that changes path under
                 the same label must remount it rather than show the old contents. */}
-            <FileBrowserPanel
-              key={`${environmentId}:${cwd}:${projectFileRootsKey(roots)}`}
-              environmentId={environmentId}
-              cwd={cwd}
-              projectName={projectName}
-              selectedPath={relativePath}
-              selectedRoot={fileRoot ?? undefined}
-              selectedPathRevealId={revealRequestId}
-              roots={roots}
-              onOpenFile={onOpenFile}
-              workspaceMutationId={workspaceMutationId}
-              {...(previewPath && !isMedia && !isPdf
-                ? { onRefreshSelectedFile: file.refresh }
-                : {})}
-            />
+            {rootsPending ? null : (
+              <FileBrowserPanel
+                key={`${environmentId}:${cwd}:${projectFileRootsKey(roots)}`}
+                environmentId={environmentId}
+                cwd={cwd}
+                projectName={projectName}
+                selectedPath={relativePath}
+                selectedRoot={fileRoot ?? undefined}
+                selectedPathRevealId={revealRequestId}
+                roots={roots}
+                onOpenFile={onOpenFile}
+                workspaceMutationId={workspaceMutationId}
+                {...(onRefreshRoots ? { onRefreshRoots } : {})}
+                {...(previewPath && !isMedia && !isPdf
+                  ? { onRefreshSelectedFile: file.refresh }
+                  : {})}
+              />
+            )}
           </aside>
         ) : null}
       </div>
