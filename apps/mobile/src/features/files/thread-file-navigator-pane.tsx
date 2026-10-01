@@ -1,3 +1,4 @@
+import { projectFileRootsKey } from "@t3tools/client-runtime/project-file-roots";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { SymbolView } from "../../components/AppSymbol";
 import { MaterialScreenContent } from "../../components/MaterialScreenContent";
@@ -18,12 +19,14 @@ import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { FileTreeBrowser } from "./FileTreeBrowser";
 import { useFileTreeEntries } from "./useFileTreeEntries";
+import type { ProjectFileRootsState } from "./useProjectFileRoots";
 import { preloadWorkspaceFileContents } from "./preload-workspace-file";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 
 export function ThreadFileNavigatorPane(props: {
   readonly cwd: string;
   readonly environmentId: EnvironmentId;
+  readonly fileRoots?: ProjectFileRootsState | undefined;
   readonly headerInset: number;
   readonly projectName: string;
   readonly selectedPath: string | null;
@@ -40,17 +43,24 @@ export function ThreadFileNavigatorPane(props: {
     environmentId: props.environmentId,
     cwd: props.cwd,
     searchQuery,
+    fileRoots: props.fileRoots,
   });
+  const { filePath } = entriesQuery;
+  const { onSelectFile } = props;
   const handlePreviewFile = useCallback(
-    (relativePath: string) => {
+    (path: string) => {
       preloadWorkspaceFileContents({
         cwd: props.cwd,
         environmentId: props.environmentId,
-        relativePath,
+        relativePath: filePath(path),
         theme: highlightTheme,
       });
     },
-    [highlightTheme, props.cwd, props.environmentId],
+    [filePath, highlightTheme, props.cwd, props.environmentId],
+  );
+  const handleSelectFile = useCallback(
+    (path: string) => onSelectFile(filePath(path)),
+    [filePath, onSelectFile],
   );
   const nativeHeaderRightBarButtonItems = useMemo(
     () =>
@@ -71,7 +81,11 @@ export function ThreadFileNavigatorPane(props: {
 
   const fileTree = (
     <FileTreeBrowser
-      key={JSON.stringify([props.environmentId, props.cwd])}
+      key={JSON.stringify([
+        props.environmentId,
+        props.cwd,
+        projectFileRootsKey(props.fileRoots?.roots),
+      ])}
       entries={entriesQuery.entries}
       loadedDirectories={entriesQuery.loadedDirectories}
       onLoadDirectory={entriesQuery.loadDirectory}
@@ -79,10 +93,10 @@ export function ThreadFileNavigatorPane(props: {
       isPending={entriesQuery.isPending}
       searchQuery={searchQuery}
       searchTruncated={entriesQuery.searchTruncated}
-      selectedPath={props.selectedPath}
+      selectedPath={entriesQuery.treePath(props.selectedPath)}
       onPreviewFile={handlePreviewFile}
       onRefresh={entriesQuery.refresh}
-      onSelectFile={props.onSelectFile}
+      onSelectFile={handleSelectFile}
     />
   );
 

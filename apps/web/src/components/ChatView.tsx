@@ -344,7 +344,7 @@ import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../termina
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { useEnvironmentQuery } from "../state/query";
 import { filesystemEnvironment } from "../state/filesystem";
-import { resolveProjectFileRoots } from "../lib/projectFileRoots";
+import { resolveProjectFileRoots } from "@t3tools/client-runtime/project-file-roots";
 import { vcsEnvironment } from "../state/vcs";
 import {
   environmentServerConfigsAtom,

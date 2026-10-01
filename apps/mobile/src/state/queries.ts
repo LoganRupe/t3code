@@ -64,6 +64,8 @@ export interface ComposerPathSearchTarget {
   readonly environmentId: EnvironmentId | null;
   readonly cwd: string | null;
   readonly query: string | null;
+  // A `.code-workspace` project searches the union of these roots; entries come back tagged.
+  readonly roots?: ReadonlyArray<string> | null | undefined;
 }
 
 export function useDebouncedValue<A>(value: A, delayMs: number): A {
@@ -320,13 +322,15 @@ export function usePaginatedBranches(target: VcsRefTarget) {
 }
 
 export function useComposerPathSearch(target: ComposerPathSearchTarget) {
+  const rootsKey = target.roots?.join("\0") ?? "";
   const normalizedTarget = useMemo(
     () => ({
       environmentId: target.environmentId,
       cwd: target.cwd,
       query: normalizeComposerPathSearchQuery(target.query),
+      roots: rootsKey ? rootsKey.split("\0") : null,
     }),
-    [target.cwd, target.environmentId, target.query],
+    [rootsKey, target.cwd, target.environmentId, target.query],
   );
   const debouncedTarget = useDebouncedValue(normalizedTarget, COMPOSER_PATH_SEARCH_DEBOUNCE_MS);
   const result = useEnvironmentQuery(
@@ -339,6 +343,7 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget) {
             cwd: debouncedTarget.cwd,
             query: debouncedTarget.query,
             limit: COMPOSER_PATH_SEARCH_LIMIT,
+            ...(debouncedTarget.roots ? { roots: debouncedTarget.roots } : {}),
           },
         })
       : null,

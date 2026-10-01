@@ -40,6 +40,8 @@ import type { ComposerEditorSelection } from "../../components/ComposerEditor";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useComposerPathSearch, useComposerPullRequestSearch } from "../../state/queries";
+import { labelForRoot, type ProjectFileRoot } from "@t3tools/client-runtime/project-file-roots";
+import { basename } from "../files/filePath";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
 import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
 
@@ -165,6 +167,7 @@ export function useComposerCommandMenu({
   ownerKey,
   environmentId,
   projectCwd,
+  mentionRoots = null,
   pullRequestProjectId = null,
   pullRequestRepository = null,
   selectedProviderStatus,
@@ -180,6 +183,8 @@ export function useComposerCommandMenu({
   readonly ownerKey: string | null;
   readonly environmentId: EnvironmentId | null;
   readonly projectCwd: string | null;
+  /** Folders @-mention search spans for a `.code-workspace` project; null searches `projectCwd`. */
+  readonly mentionRoots?: ReadonlyArray<ProjectFileRoot> | null;
   readonly pullRequestProjectId?: ProjectId | null;
   readonly pullRequestRepository?: string | null;
   readonly selectedProviderStatus: ServerProvider | null;
@@ -300,6 +305,7 @@ export function useComposerCommandMenu({
     environmentId,
     cwd: trigger?.kind === "path" ? projectCwd : null,
     query: trigger?.kind === "path" ? trigger.query : null,
+    roots: mentionRoots?.map(({ root }) => root),
   });
   const pullRequestSearch = useComposerPullRequestSearch({
     environmentId,
@@ -447,15 +453,22 @@ export function useComposerCommandMenu({
     }
 
     if (trigger.kind === "path") {
+      const rootLabels = new Map(mentionRoots?.map(({ root, label }) => [root, label]));
       return pathSearch.entries.map((entry) => {
         const parts = entry.path.split("/");
+        const parent = parts.slice(0, -1).join("/");
+        // Multi-root entries can share a relative path across roots, so the
+        // owning root keys the id, labels the description and anchors the link.
+        const { root } = entry;
         return {
-          id: `path:${entry.path}`,
+          id: `path:${root ?? ""}:${entry.path}`,
           type: "path" as const,
-          path: entry.path,
+          path: root ? `${root.replace(/[\\/]$/, "")}/${entry.path}` : entry.path,
           kind: entry.kind,
           label: parts[parts.length - 1] ?? entry.path,
-          description: parts.length > 1 ? parts.slice(0, -1).join("/") : "",
+          description: root
+            ? [labelForRoot(rootLabels, root) ?? basename(root), parent].filter(Boolean).join("/")
+            : parent,
         };
       });
     }
@@ -464,6 +477,7 @@ export function useComposerCommandMenu({
   }, [
     hasThread,
     hasCompactableConversation,
+    mentionRoots,
     onUpdateInteractionMode,
     pathSearch.entries,
     pullRequestSearch.entries,

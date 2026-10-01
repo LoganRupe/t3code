@@ -12,6 +12,7 @@ import {
   mediaMimeTypeFromExtension,
 } from "@t3tools/shared/filePreview";
 import { mediaFileReference } from "@t3tools/client-runtime/media-reference";
+import { projectFileRootsKey } from "@t3tools/client-runtime/project-file-roots";
 
 import { MaterialScreenContent } from "../../components/MaterialScreenContent";
 import { AudioFilePreview } from "../../components/AudioFilePreview";
@@ -41,6 +42,7 @@ import { FilePreviewLoading, FilePreviewNotice } from "./FilePreviewFeedback";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { FileTreeBrowser } from "./FileTreeBrowser";
 import { useFileTreeEntries } from "./useFileTreeEntries";
+import { useSelectedThreadFileRoots } from "./useProjectFileRoots";
 import { preloadWorkspaceFileContents } from "./preload-workspace-file";
 import { SourceFileSurface } from "./SourceFileSurface";
 import { ThreadFileNavigatorPane } from "./thread-file-navigator-pane";
@@ -52,6 +54,7 @@ import { WorkspaceFileWebPreview } from "./WorkspaceFileWebPreview";
 import {
   basename,
   fileHeaderSubtitle,
+  fileRoutePathSegments,
   isAudioPreviewFile,
   isMarkdownPreviewFile,
   isSvgImagePreviewFile,
@@ -420,12 +423,15 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
   const { cwd, environmentId, projectName, selectedThread, threadId } = useThreadFilesWorkspace(
     props.route.params,
   );
+  const fileRoots = useSelectedThreadFileRoots();
   const revealedInspectorRef = useRef(false);
   const entriesQuery = useFileTreeEntries({
     environmentId,
     cwd: fileInspector.supported ? null : cwd,
     searchQuery,
+    fileRoots,
   });
+  const { filePath } = entriesQuery;
   const handleReturnToThread = useCallback(() => {
     if (navigation.canGoBack()) {
       navigation.goBack();
@@ -449,7 +455,7 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
       const params = {
         environmentId: String(environmentId),
         threadId: String(threadId),
-        path: path.split("/").filter((segment) => segment.length > 0),
+        path: fileRoutePathSegments(path),
       };
       const navigationAction = resolveFileSelectionNavigationAction({
         hasPersistentFileInspector: fileInspector.supported,
@@ -468,27 +474,32 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
         <ThreadFileNavigatorPane
           cwd={cwd}
           environmentId={environmentId}
+          fileRoots={fileRoots}
           headerInset={headerInset}
           projectName={projectName}
           selectedPath={null}
           onSelectFile={handleSelectFile}
         />
       ) : null,
-    [cwd, environmentId, handleSelectFile, projectName],
+    [cwd, environmentId, fileRoots, handleSelectFile, projectName],
   );
   const handlePreviewFile = useCallback(
-    (relativePath: string) => {
+    (path: string) => {
       if (environmentId === null || cwd === null) {
         return;
       }
       preloadWorkspaceFileContents({
         cwd,
         environmentId,
-        relativePath,
+        relativePath: filePath(path),
         theme: highlightTheme,
       });
     },
-    [cwd, environmentId, highlightTheme],
+    [cwd, environmentId, filePath, highlightTheme],
+  );
+  const handleSelectTreeFile = useCallback(
+    (path: string) => handleSelectFile(filePath(path)),
+    [filePath, handleSelectFile],
   );
   useEffect(() => {
     if (fileInspector.supported && cwd !== null && !revealedInspectorRef.current) {
@@ -535,7 +546,7 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
       />
       <MaterialScreenContent insetHorizontal={layout.usesSplitView}>
         <FileTreeBrowser
-          key={JSON.stringify([environmentId, cwd])}
+          key={JSON.stringify([environmentId, cwd, projectFileRootsKey(fileRoots.roots)])}
           entries={entriesQuery.entries}
           loadedDirectories={entriesQuery.loadedDirectories}
           onLoadDirectory={entriesQuery.loadDirectory}
@@ -546,7 +557,7 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps) {
           selectedPath={null}
           onPreviewFile={handlePreviewFile}
           onRefresh={entriesQuery.refresh}
-          onSelectFile={handleSelectFile}
+          onSelectFile={handleSelectTreeFile}
         />
         <FilesToolbarBottomFade />
       </MaterialScreenContent>
@@ -667,9 +678,10 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
   );
   const fileData = fileQuery.data as ProjectReadFileResult | null;
 
+  const fileRoots = useSelectedThreadFileRoots();
   const handleSelectFile = useCallback(
     (path: string) => {
-      const segments = path.split("/").filter(Boolean);
+      const segments = fileRoutePathSegments(path);
       // A draft has no thread. `ThreadFile` would stringify null and then wait forever for a
       // thread to resolve, so a draft stays on its own route and carries its workspace along.
       if (threadId === null) {
@@ -697,13 +709,22 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps) {
         <ThreadFileNavigatorPane
           cwd={cwd}
           environmentId={environmentId}
+          fileRoots={fileRoots}
           headerInset={headerInset}
           projectName={projectName}
           selectedPath={relativePath}
           onSelectFile={handleSelectFile}
         />
       ) : undefined,
-    [cwd, environmentId, fileInspector.supported, handleSelectFile, projectName, relativePath],
+    [
+      cwd,
+      environmentId,
+      fileInspector.supported,
+      fileRoots,
+      handleSelectFile,
+      projectName,
+      relativePath,
+    ],
   );
   // The workspace inspector column spans the full window height. On iOS the
   // pane brings its own nested native header; elsewhere it pads itself below

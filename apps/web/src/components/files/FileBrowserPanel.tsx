@@ -22,8 +22,12 @@ import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
-import { isRootPath, labelForRoot } from "./filePath";
-import { type ProjectFileRoot, projectFileRootsKey } from "~/lib/projectFileRoots";
+import { isRootPath } from "./filePath";
+import {
+  labelForRoot,
+  type ProjectFileRoot,
+  projectFileRootsKey,
+} from "@t3tools/client-runtime/project-file-roots";
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "./fileTreeExpansion";
 import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";

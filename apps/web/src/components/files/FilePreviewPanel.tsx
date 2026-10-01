@@ -58,7 +58,10 @@ import FileBrowserPanel from "./FileBrowserPanel";
 import { FileBreadcrumbs } from "./FileBreadcrumbs";
 import { FileMarkdownPreview } from "./FileMarkdownPreview";
 import { isRootPath } from "./filePath";
-import { type ProjectFileRoot, projectFileRootsKey } from "~/lib/projectFileRoots";
+import {
+  type ProjectFileRoot,
+  projectFileRootsKey,
+} from "@t3tools/client-runtime/project-file-roots";
 import {
   type FileCommentAnnotationEntry,
   type FileCommentAnnotationGroup,
