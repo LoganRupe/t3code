@@ -4,6 +4,7 @@ import {
   buildWorkspaceManifest,
   manifestDirectories,
   manifestExtraRoots,
+  manifestPlainFolderGrants,
 } from "./WorkspaceManifest.ts";
 
 describe("buildWorkspaceManifest", () => {
@@ -131,5 +132,118 @@ describe("manifestExtraRoots", () => {
     });
 
     expect(extraRoots).toEqual([]);
+  });
+});
+
+describe("plain workspace folders", () => {
+  const project = {
+    workspaceRoot: "/work",
+    repoRoots: ["/work/backend", "/oss/frontend"],
+  };
+  const workspaceFolders = [
+    { absolutePath: "/work/backend", exists: true, isGit: true },
+    { absolutePath: "/oss/frontend", exists: true, isGit: true },
+    { absolutePath: "/work/docs", exists: true, isGit: false },
+    { absolutePath: "/notes", exists: true, isGit: false },
+    { absolutePath: "/work/gone", exists: false, isGit: false },
+  ];
+
+  it("has none without a workspace folder list, and leaves the manifest as before", () => {
+    const manifest = buildWorkspaceManifest({ worktreePath: null, ...project });
+
+    expect(manifest.plainFolders).toEqual([]);
+    expect(manifestPlainFolderGrants(manifest)).toEqual([]);
+    expect(manifest.anchor).toBe("/work");
+    expect(manifestExtraRoots(manifest)).toEqual(["/work/backend", "/oss/frontend"]);
+  });
+
+  it("keeps existing non-repo folders apart from the repo roots, skipping missing ones", () => {
+    const manifest = buildWorkspaceManifest({ worktreePath: null, ...project, workspaceFolders });
+
+    expect(manifest.isolated).toBe(false);
+    expect(manifest.plainFolders).toEqual([
+      { path: "/work/docs", name: "docs" },
+      { path: "/notes", name: "notes" },
+    ]);
+    expect(manifest.roots.map((root) => root.path)).toEqual(["/work/backend", "/oss/frontend"]);
+  });
+
+  it("grants only the plain folders outside the anchor", () => {
+    const manifest = buildWorkspaceManifest({ worktreePath: null, ...project, workspaceFolders });
+
+    // /work/docs is inside the session cwd, so it is reachable without a grant.
+    expect(manifestPlainFolderGrants(manifest)).toEqual(["/notes"]);
+  });
+
+  it("keeps the original plain folders beside the worktrees in an isolated run", () => {
+    const manifest = buildWorkspaceManifest({
+      worktreePath: "/worktrees/t/backend",
+      worktrees: [
+        { repoRoot: "/work/backend", worktreePath: "/worktrees/t/backend" },
+        { repoRoot: "/oss/frontend", worktreePath: "/worktrees/t/frontend" },
+      ],
+      ...project,
+      workspaceFolders,
+    });
+
+    expect(manifest.isolated).toBe(true);
+    expect(manifest.roots.map((root) => root.path)).toEqual([
+      "/worktrees/t/backend",
+      "/worktrees/t/frontend",
+    ]);
+    expect(manifest.plainFolders.map((folder) => folder.path)).toEqual(["/work/docs", "/notes"]);
+    // The anchor is a worktree, so the folder under the workspace folder needs a grant too.
+    expect(manifestPlainFolderGrants(manifest)).toEqual(["/work/docs", "/notes"]);
+  });
+
+  it("leaves a listed folder inside a repo root to that repository", () => {
+    const manifest = buildWorkspaceManifest({
+      worktreePath: null,
+      ...project,
+      workspaceFolders: [
+        { absolutePath: "/work/backend/docs", exists: true, isGit: false },
+        { absolutePath: "/work/backend-notes", exists: true, isGit: false },
+      ],
+    });
+
+    expect(manifest.plainFolders.map((folder) => folder.path)).toEqual(["/work/backend-notes"]);
+  });
+
+  it("never treats a repository as plain, even one missing from the recorded repo roots", () => {
+    const manifest = buildWorkspaceManifest({
+      worktreePath: null,
+      worktrees: [{ repoRoot: "/work/backend", worktreePath: "/worktrees/t/backend" }],
+      workspaceRoot: "/work",
+      repoRoots: ["/work/backend"],
+      workspaceFolders: [
+        { absolutePath: "/work/backend", exists: true, isGit: true },
+        { absolutePath: "/work/added-later", exists: true, isGit: true },
+        { absolutePath: "/notes", exists: true, isGit: false },
+      ],
+    });
+
+    // The new checkout stays out of the isolated run instead of being granted as an original.
+    expect(manifest.plainFolders.map((folder) => folder.path)).toEqual(["/notes"]);
+    expect(manifestPlainFolderGrants(manifest)).toEqual(["/notes"]);
+  });
+
+  it("leaves out a folder inside a newly listed repository, and one that holds a repository", () => {
+    const manifest = buildWorkspaceManifest({
+      worktreePath: null,
+      worktrees: [{ repoRoot: "/work/backend", worktreePath: "/worktrees/t/backend" }],
+      workspaceRoot: "/work",
+      repoRoots: ["/work/backend"],
+      workspaceFolders: [
+        { absolutePath: "/work", exists: true, isGit: false },
+        { absolutePath: "/work/backend", exists: true, isGit: true },
+        { absolutePath: "/oss/added-later", exists: true, isGit: true },
+        { absolutePath: "/oss/added-later/docs", exists: true, isGit: false },
+        { absolutePath: "/oss", exists: true, isGit: false },
+        { absolutePath: "/notes", exists: true, isGit: false },
+      ],
+    });
+
+    // Granting any of the others would reach an original checkout from the isolated run.
+    expect(manifest.plainFolders.map((folder) => folder.path)).toEqual(["/notes"]);
   });
 });

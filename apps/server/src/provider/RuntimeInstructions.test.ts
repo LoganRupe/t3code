@@ -76,4 +76,79 @@ describe("multiRepoWorkspace", () => {
       }),
     ).toEqual({ cwd: "/home/me", repoRoots: ["/home/me/api"] });
   });
+
+  it("carries plain folders without counting them as repo roots", () => {
+    expect(
+      multiRepoWorkspace({
+        cwd: "/home/me",
+        additionalRoots: ["/home/me/api", "/elsewhere/notes"],
+        repoRoots: ["/home/me/api"],
+        plainFolders: ["/home/me/docs", "/elsewhere/notes"],
+        isolatedRun: true,
+      }),
+    ).toEqual({
+      cwd: "/home/me",
+      repoRoots: ["/home/me/api"],
+      plainFolders: ["/home/me/docs", "/elsewhere/notes"],
+      isolatedRun: true,
+    });
+  });
+});
+
+describe("plain project folders", () => {
+  const multiRepo = { cwd: "/home/me", repoRoots: ["/home/me/api", "/elsewhere/web"] };
+  const plainFolders = ["/home/me/docs", "/elsewhere/notes"];
+
+  it("lists them apart from the repositories", () => {
+    const instructions = buildRuntimeInstructions({
+      harness: "Cursor",
+      multiRepo: { ...multiRepo, plainFolders },
+    });
+    expect(instructions).toContain(
+      "This project's repositories are:\n- /home/me/api\n- /elsewhere/web\n",
+    );
+    expect(instructions).toContain(
+      "\n</project_repositories>\n\n<project_folders>\nThese folders are also part of this project. They are not git repositories:\n- /home/me/docs\n- /elsewhere/notes\n</project_folders>",
+    );
+  });
+
+  it("says the folders are shared originals only in an isolated run", () => {
+    expect(
+      buildRuntimeInstructions({
+        harness: "Cursor",
+        multiRepo: { ...multiRepo, plainFolders, isolatedRun: true },
+      }),
+    ).toContain(
+      "- /elsewhere/notes\nThese are the original folders, shared with other runs of this project, and T3 Code checkpoints do not cover changes made in them.\n</project_folders>",
+    );
+    expect(
+      buildRuntimeInstructions({ harness: "Cursor", multiRepo: { ...multiRepo, plainFolders } }),
+    ).not.toContain("original folders");
+  });
+
+  it("leaves the text unchanged when there are none", () => {
+    const instructions = buildRuntimeInstructions({ harness: "Cursor", multiRepo });
+    expect(
+      buildRuntimeInstructions({
+        harness: "Cursor",
+        multiRepo: { ...multiRepo, plainFolders: [] },
+      }),
+    ).toBe(instructions);
+    expect(instructions).not.toContain("<project_folders>");
+    expect(instructions.endsWith("</project_repositories>")).toBe(true);
+  });
+
+  it("names them without the multi-repo rules when the session has one repo", () => {
+    const instructions = buildRuntimeInstructions({
+      harness: "Cursor",
+      multiRepo: multiRepoWorkspace({
+        cwd: "/home/me/api",
+        additionalRoots: ["/elsewhere/notes"],
+        plainFolders: ["/home/me/api-docs", "/elsewhere/notes"],
+      }),
+    });
+    expect(instructions).not.toContain("<multi_repo_workspace>");
+    expect(instructions).not.toContain("<project_repositories>");
+    expect(instructions).toContain("- /home/me/api-docs\n- /elsewhere/notes\n</project_folders>");
+  });
 });

@@ -186,6 +186,9 @@ export interface CodexSessionRuntimeOptions {
   readonly additionalRoots?: ReadonlyArray<string>;
   /** Every repo root the session works in, including `cwd` when it is one. */
   readonly repoRoots?: ReadonlyArray<string>;
+  /** Project folders that are not git repositories, named in the instructions. */
+  readonly plainFolders?: ReadonlyArray<string>;
+  readonly isolatedRun?: boolean;
   readonly runtimeMode: RuntimeMode;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
