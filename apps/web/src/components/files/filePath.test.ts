@@ -4,6 +4,7 @@ import {
   fileBreadcrumbChildren,
   fileBreadcrumbParent,
   fileBreadcrumbs,
+  fileTreeEntryLocation,
   isRootPath,
 } from "./filePath";
 
@@ -108,5 +109,39 @@ describe("isRootPath", () => {
     expect(isRootPath(roots, "/work/app/")).toBe(true);
     expect(isRootPath(roots, "/work/app/src")).toBe(false);
     expect(isRootPath(undefined, "/work/app")).toBe(false);
+  });
+});
+
+describe("fileTreeEntryLocation", () => {
+  const cwd = "/dev/scope-test-four";
+
+  it("resolves a single-root row against the workspace", () => {
+    expect(fileTreeEntryLocation({ relativePath: "src/app.ts" }, cwd)).toEqual({
+      mentionPath: "src/app.ts",
+      filePath: "src/app.ts",
+      workspaceRoot: cwd,
+    });
+  });
+
+  it("resolves a multi-root row against its folder, not its label", () => {
+    // `../notes` shows as `notes`, but does not live at `<cwd>/notes`.
+    expect(fileTreeEntryLocation({ relativePath: "ideas.md", root: "/dev/notes/" }, cwd)).toEqual({
+      mentionPath: "/dev/notes/ideas.md",
+      filePath: "ideas.md",
+      workspaceRoot: "/dev/notes",
+    });
+  });
+
+  it("targets a folder's own row from its parent", () => {
+    expect(fileTreeEntryLocation({ relativePath: "", root: `${cwd}/notes/2026` }, cwd)).toEqual({
+      mentionPath: `${cwd}/notes/2026`,
+      filePath: "2026",
+      workspaceRoot: `${cwd}/notes/`,
+    });
+    expect(fileTreeEntryLocation({ relativePath: "", root: "C:\\dev\\notes" }, cwd)).toEqual({
+      mentionPath: "C:\\dev\\notes",
+      filePath: "notes",
+      workspaceRoot: "C:\\dev\\",
+    });
   });
 });

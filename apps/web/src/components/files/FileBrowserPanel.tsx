@@ -22,7 +22,7 @@ import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
-import { isRootPath } from "./filePath";
+import { fileTreeEntryLocation, type FileTreeEntryInfo, isRootPath } from "./filePath";
 import {
   labelForRoot,
   type ProjectFileRoot,
@@ -53,11 +53,6 @@ interface FileBrowserPanelProps {
   /** Re-resolves `roots`, so a refresh also picks up a changed root list. */
   onRefreshRoots?: () => void;
   workspaceMutationId: string | null;
-}
-
-interface TreeEntryInfo {
-  readonly relativePath: string;
-  readonly root?: string;
 }
 
 function treePath(entry: ProjectEntry): string {
@@ -207,13 +202,17 @@ export default function FileBrowserPanel({
     const treePaths: string[] = [];
     const directoryPaths: string[] = [];
     const entryKinds = new Map<string, ProjectEntry["kind"]>();
-    const entryInfo = new Map<string, TreeEntryInfo>();
+    const entryInfo = new Map<string, FileTreeEntryInfo>();
     for (const entry of entries) {
       const label = rootLabels && entry.root ? labelForRoot(rootLabels, entry.root) : undefined;
       const relativePath =
-        label !== undefined && entry.path.startsWith(`${label}/`)
-          ? entry.path.slice(label.length + 1)
-          : entry.path;
+        label === undefined
+          ? entry.path
+          : entry.path === label
+            ? ""
+            : entry.path.startsWith(`${label}/`)
+              ? entry.path.slice(label.length + 1)
+              : entry.path;
       entryKinds.set(entry.path, entry.kind);
       entryInfo.set(entry.path, {
         relativePath,
@@ -225,11 +224,20 @@ export default function FileBrowserPanel({
     return { treePaths, directoryPaths, entryKinds, entryInfo };
   }, [entries, rootLabels]);
   const entryKindsRef = useRef<ReadonlyMap<string, ProjectEntry["kind"]>>(entryKinds);
-  const entryInfoRef = useRef<ReadonlyMap<string, TreeEntryInfo>>(entryInfo);
+  const entryInfoRef = useRef<ReadonlyMap<string, FileTreeEntryInfo>>(entryInfo);
   const previousTreePathsRef = useRef<readonly string[] | null>(null);
   const syncingSelectionRef = useRef(false);
   const treeSelectionPathRef = useRef<string | null>(null);
   const handledRevealRef = useRef<{ path: string; revealId: number } | null>(null);
+  // A row the tree synthesized above a nested multi-root label has no folder
+  // of its own, so it resolves to nothing rather than to a path under cwd.
+  const locateEntry = (path: string) => {
+    const treePath = path.replace(/\/$/, "");
+    const info =
+      entryInfoRef.current.get(treePath) ?? (rootLabels ? undefined : { relativePath: treePath });
+    return info ? fileTreeEntryLocation(info, cwd) : null;
+  };
+  const locateEntryRef = useRef(locateEntry);
 
   // The tree renders rows in shadow DOM and its anchor rect is unreliable, so
   // capture the right-click position ourselves; contextmenu is a composed
@@ -249,19 +257,23 @@ export default function FileBrowserPanel({
     context: TreeContextMenuOpenContext,
   ) => {
     const api = readLocalApi();
-    if (!api) {
+    const location = locateEntry(item.path);
+    if (!api || !location) {
       context.close();
       return;
     }
-    const relativePath = item.path.replace(/\/$/, "");
-    const mention = serializeComposerFileLink(relativePath);
+    const mention = serializeComposerFileLink(location.mentionPath);
     const pointer = contextMenuPointerRef.current;
     const pointerIsFresh = pointer !== null && performance.now() - pointer.at < 1000;
     const anchorRect = context.anchorElement.getBoundingClientRect();
     const position = pointerIsFresh
       ? { x: pointer.x, y: pointer.y }
       : { x: anchorRect.left, y: anchorRect.bottom };
-    const fileTarget = { environmentId, filePath: relativePath, workspaceRoot: cwd };
+    const fileTarget = {
+      environmentId,
+      filePath: location.filePath,
+      workspaceRoot: location.workspaceRoot,
+    };
     const fileMenuItems = fileContextMenu.buildItems(fileTarget);
     try {
       const clicked = await api.contextMenu.show(
@@ -284,7 +296,11 @@ export default function FileBrowserPanel({
       if (clicked === "copy-mention") {
         try {
           await writeTextToClipboard(mention);
-          toastManager.add({ type: "success", title: "Mention copied", description: relativePath });
+          toastManager.add({
+            type: "success",
+            title: "Mention copied",
+            description: location.mentionPath,
+          });
         } catch (error) {
           toastManager.add({
             type: "error",
@@ -320,6 +336,7 @@ export default function FileBrowserPanel({
   const showEntryContextMenuRef = useRef(showEntryContextMenu);
   useEffect(() => {
     showEntryContextMenuRef.current = showEntryContextMenu;
+    locateEntryRef.current = locateEntry;
   });
 
   const treeModelRef = useRef<ReturnType<typeof useFileTree>["model"] | null>(null);
@@ -327,6 +344,7 @@ export default function FileBrowserPanel({
     () =>
       createFileTreeDragMentionController({
         deselect: (path) => treeModelRef.current?.getItem(path)?.deselect(),
+        mentionPath: (path) => locateEntryRef.current(path)?.mentionPath ?? null,
       }),
     [],
   );

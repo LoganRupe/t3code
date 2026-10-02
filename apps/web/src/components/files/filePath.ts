@@ -66,3 +66,48 @@ export function isRootPath(roots: readonly string[] | undefined, path: string): 
   const trimmed = path.replace(/[\\/]+$/, "");
   return roots?.some((root) => root.replace(/[\\/]+$/, "") === trimmed) ?? false;
 }
+
+/** A files-panel row's path inside its folder; `root` is set for rows of a multi-root tree. */
+export interface FileTreeEntryInfo {
+  readonly relativePath: string;
+  readonly root?: string;
+}
+
+export interface FileTreeEntryLocation {
+  /** What a chat mention links to: relative to the workspace, or absolute for a multi-root row. */
+  readonly mentionPath: string;
+  /** File-action target, as `useFileContextMenu` takes it. */
+  readonly filePath: string;
+  readonly workspaceRoot: string;
+}
+
+/**
+ * Where a files-panel row lives on disk. A multi-root row resolves against its
+ * own folder, never the tree label, since a label is only a display name and
+ * the folder may sit anywhere. Its mention is absolute, like `@` search's.
+ */
+export function fileTreeEntryLocation(
+  info: FileTreeEntryInfo,
+  cwd: string,
+): FileTreeEntryLocation | null {
+  if (info.root === undefined) {
+    if (!info.relativePath) return null;
+    return { mentionPath: info.relativePath, filePath: info.relativePath, workspaceRoot: cwd };
+  }
+  const root = info.root.replace(/[\\/]+$/, "");
+  if (info.relativePath) {
+    return {
+      mentionPath: `${root}/${info.relativePath}`,
+      filePath: info.relativePath,
+      workspaceRoot: root,
+    };
+  }
+  // The folder's own row: file actions target it from its parent directory.
+  const separatorIndex = Math.max(root.lastIndexOf("/"), root.lastIndexOf("\\"));
+  if (separatorIndex === -1) return null;
+  return {
+    mentionPath: root,
+    filePath: root.slice(separatorIndex + 1),
+    workspaceRoot: root.slice(0, separatorIndex + 1),
+  };
+}

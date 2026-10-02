@@ -101,6 +101,20 @@ describe("createFileTreeDragMentionController", () => {
     expect(transfer.getData(COMPOSER_MENTION_DRAG_TYPE)).toBe("[app.ts](src/app.ts)");
   });
 
+  it("links each dragged row to the path the host resolves it to", () => {
+    const controller = createFileTreeDragMentionController({
+      deselect: () => {},
+      mentionPath: (path) => (path === "notes/" ? null : `/dev/${path}`),
+    });
+    controller.handleSelectionChange(["notes/ideas.md", "notes/"]);
+    const transfer = makeTransfer();
+    controller.handleDragStart({
+      dataTransfer: transfer,
+      composedPath: () => [rowNode("notes/ideas.md")],
+    });
+    expect(transfer.getData(COMPOSER_MENTION_DRAG_TYPE)).toBe("[ideas.md](/dev/notes/ideas.md)");
+  });
+
   it("does not deselect anything when no drag was started", () => {
     const deselected: Array<string> = [];
     const controller = createFileTreeDragMentionController({
