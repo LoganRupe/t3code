@@ -4,6 +4,7 @@ import {
   fileBreadcrumbChildren,
   fileBreadcrumbParent,
   fileBreadcrumbs,
+  fileTreeEntryTarget,
   isRootPath,
 } from "./filePath";
 
@@ -108,5 +109,65 @@ describe("isRootPath", () => {
     expect(isRootPath(roots, "/work/app/")).toBe(true);
     expect(isRootPath(roots, "/work/app/src")).toBe(false);
     expect(isRootPath(undefined, "/work/app")).toBe(false);
+  });
+});
+
+describe("fileTreeEntryTarget", () => {
+  const cwd = "/home/user/dev/project";
+
+  it("keeps the tree path under cwd for a single-root tree", () => {
+    expect(
+      fileTreeEntryTarget({
+        treePath: "src/index.ts",
+        cwd,
+        root: undefined,
+        relativePath: undefined,
+      }),
+    ).toEqual({ workspaceRoot: cwd, filePath: "src/index.ts", mentionPath: "src/index.ts" });
+  });
+
+  it("resolves a file in a root outside cwd through that root", () => {
+    expect(
+      fileTreeEntryTarget({
+        treePath: "notes/ideas.md",
+        cwd,
+        root: "/home/user/dev/notes",
+        relativePath: "ideas.md",
+      }),
+    ).toEqual({
+      workspaceRoot: "/home/user/dev/notes",
+      filePath: "ideas.md",
+      mentionPath: "/home/user/dev/notes/ideas.md",
+    });
+  });
+
+  it("resolves a file in a nested root through that root, not its label", () => {
+    expect(
+      fileTreeEntryTarget({
+        treePath: "2026/plan.md",
+        cwd,
+        root: `${cwd}/notes/2026`,
+        relativePath: "plan.md",
+      }),
+    ).toEqual({
+      workspaceRoot: `${cwd}/notes/2026`,
+      filePath: "plan.md",
+      mentionPath: `${cwd}/notes/2026/plan.md`,
+    });
+  });
+
+  it("names a root's own node from its parent folder", () => {
+    expect(
+      fileTreeEntryTarget({
+        treePath: "notes",
+        cwd,
+        root: "/home/user/dev/notes/",
+        relativePath: "",
+      }),
+    ).toEqual({
+      workspaceRoot: "/home/user/dev",
+      filePath: "notes",
+      mentionPath: "/home/user/dev/notes",
+    });
   });
 });

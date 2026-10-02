@@ -66,3 +66,35 @@ export function isRootPath(roots: readonly string[] | undefined, path: string): 
   const trimmed = path.replace(/[\\/]+$/, "");
   return roots?.some((root) => root.replace(/[\\/]+$/, "") === trimmed) ?? false;
 }
+
+/**
+ * What a files tree entry's right-click actions act on. In a multi-root tree an
+ * entry's tree path starts with its root's label, which only names a real path
+ * when the root sits directly in `cwd` under that name, so a rooted entry
+ * resolves through its root instead. A root's own node (`relativePath` "") is
+ * named from its parent folder, since the file actions take a relative path.
+ */
+export function fileTreeEntryTarget(input: {
+  readonly treePath: string;
+  readonly cwd: string;
+  readonly root: string | undefined;
+  readonly relativePath: string | undefined;
+}) {
+  if (input.root === undefined || input.relativePath === undefined) {
+    return { workspaceRoot: input.cwd, filePath: input.treePath, mentionPath: input.treePath };
+  }
+  const root = input.root.replace(/[\\/]+$/, "");
+  if (input.relativePath === "") {
+    const separatorIndex = Math.max(root.lastIndexOf("/"), root.lastIndexOf("\\"));
+    return {
+      workspaceRoot: root.slice(0, separatorIndex) || root.slice(0, separatorIndex + 1),
+      filePath: root.slice(separatorIndex + 1),
+      mentionPath: root,
+    };
+  }
+  return {
+    workspaceRoot: root,
+    filePath: input.relativePath,
+    mentionPath: `${root}/${input.relativePath}`,
+  };
+}

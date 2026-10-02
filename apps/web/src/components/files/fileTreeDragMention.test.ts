@@ -28,6 +28,21 @@ describe("createFileTreeDragMentionController", () => {
     expect(controller.isDragInProgress()).toBe(true);
   });
 
+  it("mentions a row by the path the host resolves it to", () => {
+    const controller = createFileTreeDragMentionController({
+      deselect: () => {},
+      mentionPath: (treePath) => `/home/user/dev/${treePath}`,
+    });
+    const transfer = makeTransfer();
+    controller.handleDragStart({
+      dataTransfer: transfer,
+      composedPath: () => [rowNode("notes/ideas.md")],
+    });
+    expect(transfer.getData(COMPOSER_MENTION_DRAG_TYPE)).toBe(
+      "[ideas.md](/home/user/dev/notes/ideas.md)",
+    );
+  });
+
   it("strips the trailing slash from directory rows", () => {
     const controller = createFileTreeDragMentionController({ deselect: () => {} });
     const transfer = makeTransfer();
