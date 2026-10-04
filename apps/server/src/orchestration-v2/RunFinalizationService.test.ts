@@ -181,3 +181,54 @@ it.effect("refreshes every repository of a multi-repo workspace after a run", ()
     ]);
   }).pipe(Effect.provide(layer));
 });
+
+it.effect("refreshes pull requests of a multi-repo project folder's checked-out branches", () => {
+  const refreshed: string[] = [];
+  const layer = RunFinalization.observerLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
+        Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({
+          list: () => Effect.succeed([{ relativePath: "api", name: "api" }]),
+        }),
+        Layer.mock(PullRequestService.PullRequestService)({
+          refreshAfterTurn: () => Effect.void,
+        }),
+        Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
+          refreshLocalStatus: () =>
+            Effect.succeed({
+              isRepo: true,
+              hasPrimaryRemote: true,
+              isDefaultRef: false,
+              refName: "api-feature",
+              hasWorkingTreeChanges: false,
+              workingTree: { files: [], insertions: 0, deletions: 0 },
+            }),
+          refreshPullRequestStatus: (cwd) =>
+            Effect.sync(() => {
+              refreshed.push(cwd);
+              return null;
+            }),
+        }),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({
+          getThreadShell: () =>
+            Effect.succeed({
+              id: ThreadId.make("thread-multi-repo-root"),
+              branch: null,
+              worktreePath: null,
+              activeRunId: null,
+            } as OrchestrationV2ThreadShell),
+        }),
+      ),
+    ),
+  );
+  return Effect.gen(function* () {
+    const observer = yield* RunFinalization.RunFinalizationObserver;
+    yield* observer.refresh({
+      cwd: "/projects/shop",
+      threadId: ThreadId.make("thread-multi-repo-root"),
+      runId: RunId.make("run-multi-repo-root"),
+    });
+    assert.deepEqual(refreshed, ["/projects/shop/api"]);
+  }).pipe(Effect.provide(layer));
+});

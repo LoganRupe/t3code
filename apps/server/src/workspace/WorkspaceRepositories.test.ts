@@ -73,6 +73,7 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
           app: "repo",
           server: "repo",
           tools: "repo",
+          "..api": "repo",
           shared: "dir",
           "services/billing": "repo",
           "team.code-workspace": `{
@@ -83,6 +84,7 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
               { "path": "shared" },
               { "path": "services/billing" },
               { "path": "../outside" },
+              { "path": "..api" },
               { "path": "missing" },
               { "path": "app" },
             ],
@@ -93,6 +95,7 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
           { relativePath: "app", name: "App" },
           { relativePath: "server", name: "server" },
           { relativePath: "services/billing", name: "billing" },
+          { relativePath: "..api", name: "..api" },
         ]);
         const service = yield* WorkspaceRepositories.WorkspaceRepositories;
         expect((yield* service.describe(root)).listedFolders).toEqual([
@@ -100,6 +103,7 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
           "server",
           "shared",
           "services/billing",
+          "..api",
           "missing",
         ]);
       }),
