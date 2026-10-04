@@ -6749,6 +6749,7 @@ export function makeAcpAdapterV2(
             text: buildRuntimeInstructions({
               harness: flavor.runtimeHarness ?? driver,
               model: turnInput.modelSelection.model,
+              repositories: turnInput.runtimePolicy.repositories,
             }),
           });
           return { prompt, instructionState: text === messageText ? undefined : instructionState };
