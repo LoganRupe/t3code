@@ -95,13 +95,13 @@ function buildLargeText(lineCount = 5_000): string {
 }
 
 it.layer(TestLayer)("CheckpointStore.layer", (it) => {
-  describe("isGitRepository", () => {
+  describe("isCheckpointable", () => {
     it.effect("returns false when no Git repository is detected", () =>
       Effect.gen(function* () {
         const tmp = yield* makeTmpDir();
         const checkpointStore = yield* CheckpointStore.CheckpointStore;
 
-        expect(yield* checkpointStore.isGitRepository(tmp)).toBe(false);
+        expect(yield* checkpointStore.isCheckpointable(tmp)).toBe(false);
       }),
     );
 
@@ -111,7 +111,7 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
         yield* initRepoWithCommit(tmp);
         const checkpointStore = yield* CheckpointStore.CheckpointStore;
 
-        expect(yield* checkpointStore.isGitRepository(tmp)).toBe(true);
+        expect(yield* checkpointStore.isCheckpointable(tmp)).toBe(true);
       }),
     );
   });
@@ -124,9 +124,104 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
       const nested = NodePath.join(tmp, "packages", "nested");
       yield* fileSystem.makeDirectory(nested, { recursive: true });
       const checkpointStore = yield* CheckpointStore.CheckpointStore;
-      expect(yield* checkpointStore.isGitRepository(nested)).toBe(true);
+      expect(yield* checkpointStore.isCheckpointable(nested)).toBe(true);
     }),
   );
+  describe("multi-repo workspaces", () => {
+    const makeWorkspace = Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const workspace = yield* makeTmpDir("checkpoint-store-workspace-");
+      for (const name of ["api", "web"]) {
+        const repo = NodePath.join(workspace, name);
+        yield* fileSystem.makeDirectory(repo);
+        yield* initRepoWithCommit(repo);
+      }
+      yield* writeTextFile(NodePath.join(workspace, "NOTES.md"), "not in any repository\n");
+      return workspace;
+    });
+
+    it.effect("captures, diffs and restores every repository as one workspace", () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeWorkspace;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const threadId = ThreadId.make("thread-multi-repo");
+        const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+        const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+
+        expect(yield* checkpointStore.isCheckpointable(workspace)).toBe(true);
+        yield* checkpointStore.captureCheckpoint({
+          cwd: workspace,
+          checkpointRef: fromCheckpointRef,
+        });
+        yield* writeTextFile(NodePath.join(workspace, "api", "README.md"), "# api\n");
+        yield* writeTextFile(NodePath.join(workspace, "web", "app.ts"), "export {};\n");
+        yield* checkpointStore.captureCheckpoint({
+          cwd: workspace,
+          checkpointRef: toCheckpointRef,
+        });
+
+        const numstat = yield* checkpointStore.diffCheckpoints({
+          cwd: workspace,
+          fromCheckpointRef,
+          toCheckpointRef,
+          ignoreWhitespace: false,
+          format: "numstat",
+        });
+        expect(parseTurnDiffFilesFromNumstat(numstat)).toEqual([
+          { path: "api/README.md", additions: 1, deletions: 1 },
+          { path: "web/app.ts", additions: 1, deletions: 0 },
+        ]);
+        const patch = yield* checkpointStore.diffCheckpoints({
+          cwd: workspace,
+          fromCheckpointRef,
+          toCheckpointRef,
+          ignoreWhitespace: false,
+        });
+        expect(patch).toContain("diff --git a/api/README.md b/api/README.md");
+        expect(patch).toContain("+++ b/web/app.ts");
+
+        expect(
+          yield* checkpointStore.restoreCheckpoint({
+            cwd: workspace,
+            checkpointRef: fromCheckpointRef,
+          }),
+        ).toBe(true);
+        expect(yield* fileSystem.readFileString(NodePath.join(workspace, "api", "README.md"))).toBe(
+          "# test\n",
+        );
+        expect(yield* fileSystem.exists(NodePath.join(workspace, "web", "app.ts"))).toBe(false);
+        expect(yield* fileSystem.exists(NodePath.join(workspace, "NOTES.md"))).toBe(true);
+      }),
+    );
+
+    it.effect("restores nothing when a repository is missing the checkpoint", () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeWorkspace;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const threadId = ThreadId.make("thread-multi-repo-late-repo");
+        const checkpointRef = checkpointRefForThreadTurn(threadId, 0);
+
+        yield* checkpointStore.captureCheckpoint({ cwd: workspace, checkpointRef });
+        const late = NodePath.join(workspace, "late");
+        yield* fileSystem.makeDirectory(late);
+        yield* initRepoWithCommit(late);
+        yield* writeTextFile(NodePath.join(workspace, "api", "README.md"), "# edited\n");
+
+        expect(yield* checkpointStore.hasCheckpointRef({ cwd: workspace, checkpointRef })).toBe(
+          false,
+        );
+        expect(yield* checkpointStore.restoreCheckpoint({ cwd: workspace, checkpointRef })).toBe(
+          false,
+        );
+        expect(yield* fileSystem.readFileString(NodePath.join(workspace, "api", "README.md"))).toBe(
+          "# edited\n",
+        );
+      }),
+    );
+  });
+
   describe("diffCheckpoints", () => {
     it.effect("returns full oversized checkpoint diffs without truncation", () =>
       Effect.gen(function* () {
