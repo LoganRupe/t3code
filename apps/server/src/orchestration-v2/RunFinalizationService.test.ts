@@ -11,6 +11,7 @@ import * as Layer from "effect/Layer";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
+import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as RunFinalization from "./RunFinalizationService.ts";
@@ -91,6 +92,9 @@ it.effect.each(
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
+        Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({
+          list: () => Effect.succeed([]),
+        }),
         Layer.mock(PullRequestService.PullRequestService)({
           refreshAfterTurn: () => Effect.void,
         }),
@@ -127,5 +131,53 @@ it.effect.each(
     const observer = yield* RunFinalization.RunFinalizationObserver;
     yield* observer.refresh({ cwd: "/repo", threadId, runId });
     assert.deepEqual(refreshed, [...scenario.expected]);
+  }).pipe(Effect.provide(layer));
+});
+
+it.effect("refreshes every repository of a multi-repo workspace after a run", () => {
+  const refreshed: string[] = [];
+  const layer = RunFinalization.observerLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
+        Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({
+          list: () =>
+            Effect.succeed([
+              { relativePath: "api", name: "api" },
+              { relativePath: "web", name: "web" },
+            ]),
+        }),
+        Layer.mock(PullRequestService.PullRequestService)({
+          refreshAfterTurn: () => Effect.void,
+        }),
+        Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
+          refreshLocalStatus: (cwd) =>
+            Effect.sync(() => {
+              refreshed.push(cwd);
+              return {
+                isRepo: true,
+                hasPrimaryRemote: false,
+                isDefaultRef: true,
+                refName: "main",
+                hasWorkingTreeChanges: true,
+                workingTree: { files: [], insertions: 1, deletions: 0 },
+              };
+            }),
+        }),
+        Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+      ),
+    ),
+  );
+  return Effect.gen(function* () {
+    const observer = yield* RunFinalization.RunFinalizationObserver;
+    yield* observer.refresh({
+      cwd: "/worktrees/shop/feature",
+      threadId: ThreadId.make("thread-multi-repo"),
+      runId: RunId.make("run-multi-repo"),
+    });
+    assert.deepEqual(refreshed.toSorted(), [
+      "/worktrees/shop/feature/api",
+      "/worktrees/shop/feature/web",
+    ]);
   }).pipe(Effect.provide(layer));
 });
