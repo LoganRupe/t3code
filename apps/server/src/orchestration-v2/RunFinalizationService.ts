@@ -101,12 +101,17 @@ export const observerLive = Layer.effect(
       readonly cwd: string;
       readonly threadId: ThreadId;
       readonly runId: RunId;
+      readonly isWorkspaceRepository: boolean;
     }) =>
       Effect.gen(function* () {
         const local = yield* vcsStatus.refreshLocalStatus(input.cwd);
         if (local.refName === null || local.isDefaultRef) return;
         const thread = yield* projections.getThreadShell(input.threadId);
-        if (!thread || thread.branch !== local.refName) return;
+        if (!thread) return;
+        // Repositories in a multi-repo project folder keep their own branches, so only a
+        // single repository or an isolated run has a thread branch to match.
+        const inProjectFolder = input.isWorkspaceRepository && thread.worktreePath === null;
+        if (!inProjectFolder && thread.branch !== local.refName) return;
         if (thread.activeRunId !== null && thread.activeRunId !== input.runId) return;
         yield* vcsStatus.refreshPullRequestStatus(input.cwd).pipe(
           Effect.catch((error) =>
@@ -135,7 +140,13 @@ export const observerLive = Layer.effect(
               workspaceEntries.refresh(cwd),
               Effect.forEach(
                 statusCwds,
-                (statusCwd) => refreshStatus({ cwd: statusCwd, threadId, runId }),
+                (statusCwd) =>
+                  refreshStatus({
+                    cwd: statusCwd,
+                    threadId,
+                    runId,
+                    isWorkspaceRepository: repositories.length > 0,
+                  }),
                 { concurrency: "unbounded", discard: true },
               ),
             ],

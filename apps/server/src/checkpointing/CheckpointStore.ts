@@ -203,10 +203,19 @@ export const make = Effect.gen(function* () {
       );
       if (!found.every(Boolean)) return false;
     }
-    const restored = yield* Effect.forEach(targets, (target) =>
+    // One at a time, so a failure can name the repositories that were already restored.
+    const restored = yield* Effect.forEach(targets, (target, index) =>
       resolveCheckpoints("CheckpointStore.restoreCheckpoint", target.cwd).pipe(
         Effect.flatMap((checkpoints) =>
           checkpoints.restoreCheckpoint({ ...input, cwd: target.cwd }),
+        ),
+        Effect.tapError(() =>
+          index === 0
+            ? Effect.void
+            : Effect.logWarning("Checkpoint restore failed after restoring other repositories", {
+                failed: target.cwd,
+                restored: targets.slice(0, index).map((done) => done.cwd),
+              }),
         ),
       ),
     );
