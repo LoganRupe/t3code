@@ -3261,6 +3261,7 @@ export function makeOpenCodeAdapterV2(
                 buildRuntimeInstructions({
                   harness: "OpenCode",
                   model: turnInput.modelSelection.model,
+                  repositories: turnInput.runtimePolicy.repositories,
                 }),
               ]
                 .filter(Boolean)

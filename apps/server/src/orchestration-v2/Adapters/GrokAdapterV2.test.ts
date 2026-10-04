@@ -31,6 +31,7 @@ import * as IdAllocator from "../IdAllocator.ts";
 import { ProviderAdapterV2RuntimePolicy } from "../ProviderAdapter.ts";
 import * as RuntimePolicy from "../RuntimePolicy.ts";
 import { acpPermissionDisposition } from "../../provider/acp/AcpClientPolicy.ts";
+import * as WorkspaceRepositories from "../../workspace/WorkspaceRepositories.ts";
 import {
   AcpProviderCapabilitiesV2,
   acpCompletedTurnShouldTerminalizeTool,
@@ -427,6 +428,11 @@ describe("Grok launch permission mode", () => {
             Layer.provide(
               Layer.mock(ProjectStore.ProjectStoreV2)({
                 get: () => Effect.die("the thread has a worktree"),
+              }),
+            ),
+            Layer.provide(
+              Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({
+                list: () => Effect.succeed([]),
               }),
             ),
             Layer.provide(
