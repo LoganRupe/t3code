@@ -476,6 +476,7 @@ const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
   Layer.provide(ResourceCleanupService.layer),
   Layer.provide(
     RunFinalizationService.layerObserver.pipe(
+      Layer.provide(WorkspaceRepositories.layer),
       Layer.provide(ProjectionStoreV2.layer),
       Layer.provide(layerPullRequestService),
       Layer.provide(RuntimeLayer.layerProjectService),
