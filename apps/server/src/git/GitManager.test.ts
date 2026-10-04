@@ -53,6 +53,7 @@ import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
 import * as BackgroundPolicy from "../background/BackgroundPolicy.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
+import * as WorkspaceWorktrees from "./WorkspaceWorktrees.ts";
 import * as GitLabSourceControlProvider from "../sourceControl/GitLabSourceControlProvider.ts";
 import {
   ForgejoPullRequestSchema,
@@ -830,6 +831,11 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               Layer.provide(VcsProjectConfig.layer),
               Layer.provide(VcsProcess.layer),
             ),
+          ),
+          Layer.provide(
+            Layer.mock(WorkspaceWorktrees.WorkspaceWorktrees)({
+              isContainer: () => Effect.succeed(false),
+            }),
           ),
         ),
       );
