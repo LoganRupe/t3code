@@ -64,6 +64,7 @@ const makeCaptureStore = Effect.fn("test.makeCaptureStore")(function* (
     }),
     Effect.provideService(WorkspaceRepositories.WorkspaceRepositories, {
       list: () => Effect.succeed([]),
+      describe: () => Effect.succeed({ repositories: [], listedFolders: null }),
     }),
   );
 });

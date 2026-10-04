@@ -51,6 +51,7 @@ import { layer as threadLifecycleServiceLayer } from "./ThreadLifecycleService.t
 import { layer as threadForkServiceLayer } from "./ThreadForkService.ts";
 import { layer as turnItemPositionStoreLayer } from "./TurnItemPositionStore.ts";
 import { layer as scheduledTaskServiceLayer } from "../scheduledTasks/ScheduledTaskService.ts";
+import * as WorkspaceWorktrees from "../git/WorkspaceWorktrees.ts";
 import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 
 /** The shared application event log and its command receipts. */
@@ -252,6 +253,8 @@ const threadLaunchProvided = threadLaunchServiceLayer.pipe(
       threadManagementProvided,
       commandReceiptStoreProvided,
       idAllocatorLayer,
+      WorkspaceWorktrees.layer,
+      WorkspaceRepositories.layer,
     ),
   ),
 );

@@ -103,6 +103,7 @@ import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as GitWorkflowService from "./git/GitWorkflowService.ts";
+import * as WorkspaceWorktrees from "./git/WorkspaceWorktrees.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as SourceControlProviderRegistry from "./sourceControl/SourceControlProviderRegistry.ts";
 import * as PullRequestReadCache from "./pullRequest/PullRequestReadCache.ts";
@@ -346,6 +347,7 @@ const GitLayerLive = Layer.empty.pipe(
 );
 
 const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
+  Layer.provideMerge(WorkspaceWorktrees.layer),
   Layer.provideMerge(VcsDriverRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),
 );

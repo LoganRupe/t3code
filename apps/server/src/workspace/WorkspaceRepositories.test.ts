@@ -94,6 +94,14 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
           { relativePath: "server", name: "server" },
           { relativePath: "services/billing", name: "billing" },
         ]);
+        const service = yield* WorkspaceRepositories.WorkspaceRepositories;
+        expect((yield* service.describe(root)).listedFolders).toEqual([
+          "app",
+          "server",
+          "shared",
+          "services/billing",
+          "missing",
+        ]);
       }),
     );
 
