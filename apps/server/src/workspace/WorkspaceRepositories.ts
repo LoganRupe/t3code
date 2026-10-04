@@ -34,11 +34,21 @@ const CodeWorkspaceDocument = Schema.Struct({
 });
 const decodeCodeWorkspace = Schema.decodeUnknownEffect(fromLenientJson(CodeWorkspaceDocument));
 
+export interface WorkspaceLayout {
+  readonly repositories: ReadonlyArray<VcsRepository>;
+  /** Paths, relative to the workspace, of every folder the workspace file names. */
+  readonly listedFolders: ReadonlyArray<string> | null;
+}
+
+const NOT_A_WORKSPACE: WorkspaceLayout = { repositories: [], listedFolders: null };
+
 export class WorkspaceRepositories extends Context.Service<
   WorkspaceRepositories,
   {
     /** Repositories under `cwd`; empty when `cwd` is inside a repository or holds none. */
     readonly list: (cwd: string) => Effect.Effect<ReadonlyArray<VcsRepository>>;
+    /** `list`, plus the folders a `.code-workspace` file names, or null without one. */
+    readonly describe: (cwd: string) => Effect.Effect<WorkspaceLayout>;
   }
 >()("t3/workspace/WorkspaceRepositories") {}
 
@@ -90,11 +100,12 @@ export const make = Effect.gen(function* () {
       .readFileString(path.join(cwd, workspaceFile))
       .pipe(Effect.flatMap(decodeCodeWorkspace));
     const repositories: Array<VcsRepository> = [];
+    const listedFolders: Array<string> = [];
     for (const folder of document.folders ?? []) {
       const absolutePath = path.resolve(cwd, folder.path);
       const relativePath = toRelativePath(cwd, absolutePath);
-      if (relativePath === null) continue;
-      if (repositories.some((repository) => repository.relativePath === relativePath)) continue;
+      if (relativePath === null || listedFolders.includes(relativePath)) continue;
+      listedFolders.push(relativePath);
       if (!(yield* hasGitEntry(absolutePath)) || !(yield* resolvesInside(realRoot, absolutePath))) {
         continue;
       }
@@ -103,7 +114,7 @@ export const make = Effect.gen(function* () {
         name: folder.name?.trim() || path.basename(absolutePath),
       });
     }
-    return repositories;
+    return { repositories, listedFolders } satisfies WorkspaceLayout;
   });
 
   const fromChildDirectories = Effect.fn("WorkspaceRepositories.fromChildDirectories")(function* (
@@ -126,8 +137,8 @@ export const make = Effect.gen(function* () {
     return repositories;
   });
 
-  const list = Effect.fn("WorkspaceRepositories.list")(function* (cwd: string) {
-    if (yield* isInsideRepository(cwd)) return [];
+  const describe = Effect.fn("WorkspaceRepositories.describe")(function* (cwd: string) {
+    if (yield* isInsideRepository(cwd)) return NOT_A_WORKSPACE;
     const names = (yield* fileSystem
       .readDirectory(cwd)
       .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))).toSorted();
@@ -144,10 +155,13 @@ export const make = Effect.gen(function* () {
         workspaceFile: workspaceFiles[0],
       });
     }
-    return yield* fromChildDirectories(cwd, realRoot, names);
+    const repositories = yield* fromChildDirectories(cwd, realRoot, names);
+    return { repositories, listedFolders: null } satisfies WorkspaceLayout;
   });
 
-  return WorkspaceRepositories.of({ list });
+  const list = (cwd: string) => describe(cwd).pipe(Effect.map((layout) => layout.repositories));
+
+  return WorkspaceRepositories.of({ list, describe });
 });
 
 export const layer = Layer.effect(WorkspaceRepositories, make);
