@@ -1,0 +1,45 @@
+- generic [active] [ref=f2e1]:
+  - generic [ref=f2e3]:
+    - generic [ref=f2e6]:
+      - link "Go to threads" [ref=f2e8] [cursor=pointer]:
+        - /url: /
+        - img "T3" [ref=f2e9]
+        - generic [ref=f2e11]: Code
+      - list [ref=f2e14]:
+        - listitem [ref=f2e15]:
+          - button "Search ⌘K" [ref=f2e16] [cursor=pointer]:
+            - generic [ref=f2e20]: Search
+            - generic: ⌘K
+      - generic [ref=f2e23]:
+        - generic [ref=f2e24]:
+          - generic [ref=f2e25]: Projects
+          - generic [ref=f2e26]:
+            - button [ref=f2e27] [cursor=pointer]
+            - button "Add project" [ref=f2e31] [cursor=pointer]
+        - list
+        - generic [ref=f2e34]: No projects yet
+      - separator [ref=f2e35]
+      - list [ref=f2e37]:
+        - listitem [ref=f2e38]:
+          - button "Settings" [ref=f2e39] [cursor=pointer]
+      - button "Resize Sidebar" [ref=f2e44]
+    - main [ref=f2e45]:
+      - generic [ref=f2e49]:
+        - generic [ref=f2e50]: What should we work on?
+        - generic [ref=f2e51]: Add a project to start your first thread.
+        - button "Add project" [ref=f2e53] [cursor=pointer]
+    - button "Toggle main sidebar" [pressed] [ref=f2e54] [cursor=pointer]:
+      - generic [ref=f2e55]: Toggle Sidebar
+  - generic:
+    - region "Notifications"
+  - generic:
+    - region "Notifications":
+      - dialog [ref=f2e56]:
+        - button "Dismiss notification" [ref=f2e58] [cursor=pointer]
+        - generic [ref=f2e62]:
+          - generic [ref=f2e65]:
+            - 'heading "Updates Available: 3 providers" [level=2] [ref=f2e66]'
+            - paragraph [ref=f2e67]: Install the update now or review provider settings.
+          - generic [ref=f2e68]:
+            - button "Settings" [ref=f2e69] [cursor=pointer]
+            - button "Update" [ref=f2e70] [cursor=pointer]
