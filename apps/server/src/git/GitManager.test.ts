@@ -60,6 +60,7 @@ import * as VcsProjectConfig from "../vcs/VcsProjectConfig.ts";
 import * as GitWorkflowService from "./GitWorkflowService.ts";
 import * as ForgejoSourceControlProvider from "@t3tools/source-control-forgejo/server/ForgejoSourceControlProvider";
 import * as GitLabSourceControlProvider from "@t3tools/source-control-gitlab/server/GitLabSourceControlProvider";
+import * as WorkspaceWorktrees from "./WorkspaceWorktrees.ts";
 import {
   ForgejoPullRequestSchema,
   toForgejoChangeRequest,
