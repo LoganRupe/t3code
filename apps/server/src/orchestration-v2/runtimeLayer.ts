@@ -51,6 +51,7 @@ import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as WorkspaceWorktrees from "../git/WorkspaceWorktrees.ts";
 import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 
 /** The shared application event log and its command receipts. */
@@ -259,6 +260,8 @@ const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
       layerThreadManagementProvided,
       layerCommandReceiptStoreProvided,
       IdAllocator.layer,
+      WorkspaceWorktrees.layer,
+      WorkspaceRepositories.layer,
     ),
   ),
 );
