@@ -128,6 +128,8 @@ import {
   VcsInitInput,
   VcsListRefsInput,
   VcsListRefsResult,
+  VcsListRepositoriesInput,
+  VcsListRepositoriesResult,
   GitManagerServiceError,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
@@ -427,6 +429,7 @@ export const WS_METHODS = {
   vcsPull: "vcs.pull",
   vcsRefreshStatus: "vcs.refreshStatus",
   vcsListRefs: "vcs.listRefs",
+  vcsListRepositories: "vcs.listRepositories",
   vcsCreateWorktree: "vcs.createWorktree",
   vcsRemoveWorktree: "vcs.removeWorktree",
   vcsCreateRef: "vcs.createRef",
@@ -1401,6 +1404,12 @@ const WsVcsListRefsRpc = Rpc.make(WS_METHODS.vcsListRefs, {
   error: Schema.Union([GitCommandError, EnvironmentAuthorizationError]),
 });
 
+const WsVcsListRepositoriesRpc = Rpc.make(WS_METHODS.vcsListRepositories, {
+  payload: VcsListRepositoriesInput,
+  success: VcsListRepositoriesResult,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsVcsCreateWorktreeRpc = Rpc.make(WS_METHODS.vcsCreateWorktree, {
   // Clients cannot choose the folder: new worktrees go in the server's managed
   // worktrees folder. `path` stays a required null because older servers
@@ -2018,6 +2027,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
   WsVcsListRefsRpc,
+  WsVcsListRepositoriesRpc,
   WsVcsCreateWorktreeRpc,
   WsVcsRemoveWorktreeRpc,
   WsVcsCreateRefRpc,
