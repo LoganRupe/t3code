@@ -131,7 +131,10 @@ export function useRightPanelActions(input: RightPanelActionsInput) {
     onDiffPanelOpen?.();
   };
   const addDiffSurfaceStable = useStableCallback(addDiffSurface);
-  const openChangesFromThreadPanel = () => {
+  const openChangesFromThreadPanel = (repositoryPath?: string) => {
+    if (activeThreadRef && repositoryPath !== undefined) {
+      useDiffPanelStore.getState().selectRepository(activeThreadRef, repositoryPath);
+    }
     addDiffSurface();
   };
   const openChangesFromThreadPanelStable = useStableCallback(openChangesFromThreadPanel);

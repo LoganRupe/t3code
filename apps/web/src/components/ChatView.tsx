@@ -224,6 +224,7 @@ import {
 import { threadEnvironment } from "../state/threads";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
+import { useWorkspaceRepositories } from "../hooks/useWorkspaceRepositories";
 import {
   type EnvironmentPresentation,
   useEnvironmentProviders,
@@ -1670,6 +1671,14 @@ export default function ChatView(props: ChatViewProps) {
     }
   }, [environmentId, gitStatusCwd, liveIsGitRepo]);
   const isGitRepo = liveIsGitRepo ?? recallCheckoutIsRepo(environmentId, gitStatusCwd) ?? true;
+  const workspaceRepositories = useWorkspaceRepositories({
+    environmentId,
+    cwd: gitStatusCwd,
+    isRepo: liveIsGitRepo,
+  });
+  // A multi-repo workspace folder is not a repository, but its repositories get the Git
+  // surfaces: worktree runs, diffs and per-repository source control.
+  const hasGitSurfaces = isGitRepo || workspaceRepositories.length > 0;
   // A provider-native subagent cannot take messages: a status bar replaces the
   // composer and its strips. Its approvals and questions are asked on the
   // top-level parent thread.
@@ -1702,7 +1711,7 @@ export default function ChatView(props: ChatViewProps) {
     isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
     hasActiveProject: activeProject !== null && !showProviderSubagentBar,
-    isGitRepo,
+    isGitRepo: hasGitSurfaces,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
     hostsRestingComposerControls: routeKind === "server",
   });
@@ -1710,7 +1719,7 @@ export default function ChatView(props: ChatViewProps) {
     isDraftHeroState,
     persistInActiveThreads: settings.persistComposerContextStrip,
     hasActiveProject: activeProject !== null && !showProviderSubagentBar,
-    isGitRepo,
+    isGitRepo: hasGitSurfaces,
     showEnvironmentIndicator: showComposerEnvironmentIndicator,
     hostsRestingComposerControls: routeKind === "server" && restingComposerControlsVisible,
   });
@@ -2203,7 +2212,7 @@ export default function ChatView(props: ChatViewProps) {
       : false;
   const sendEnvMode = resolveSendEnvMode({
     requestedEnvMode: envMode,
-    isGitRepo,
+    isGitRepo: hasGitSurfaces,
   });
   const localCheckoutBranchMismatch = isServerThread
     ? resolveLocalCheckoutBranchMismatch({
@@ -2414,7 +2423,7 @@ export default function ChatView(props: ChatViewProps) {
     pullRequestPanelTarget,
     threadPanelPresentation,
     isServerThread,
-    isGitRepo,
+    isGitRepo: hasGitSurfaces,
     browserAvailable,
     canOperatePreview,
     diffOpen,
@@ -2875,6 +2884,7 @@ export default function ChatView(props: ChatViewProps) {
     isServerThread,
     isLocalDraftThread,
     isGitRepo,
+    hasWorkspaceRepositories: workspaceRepositories.length > 0,
     phase,
     runtimeMode,
     sendEnvMode,
@@ -3587,7 +3597,7 @@ export default function ChatView(props: ChatViewProps) {
                               restingControlsHost={restingComposerControlsHost}
                               restingControlsHaveLeadingContext={
                                 mountComposerContextStrip &&
-                                (isGitRepo || showComposerEnvironmentIndicator)
+                                (hasGitSurfaces || showComposerEnvironmentIndicator)
                               }
                               onRestingControlsVisibilityChange={setRestingComposerControlsVisible}
                               getTimelineScrollableNode={getTimelineScrollableNodeStable}
@@ -3672,7 +3682,8 @@ export default function ChatView(props: ChatViewProps) {
                                 projectId={activeThread.projectId}
                                 worktreePath={activeThread.worktreePath}
                                 isServerThread={isServerThread}
-                                showGitControls={isGitRepo}
+                                showGitControls={hasGitSurfaces}
+                                showBranchSelector={isGitRepo}
                                 {...(routeKind === "draft" && draftId ? { draftId } : {})}
                                 onEnvModeChange={onEnvModeChangeStable}
                                 startFromOrigin={startFromOrigin}
@@ -3769,6 +3780,7 @@ export default function ChatView(props: ChatViewProps) {
               }
               gitCwd={gitCwd}
               isGitRepo={isGitRepo}
+              workspaceRepositories={workspaceRepositories}
               envLocked={envLocked}
               availableEnvironments={logicalProjectEnvironments}
               autoEnvironmentLabel={autoEnvironmentLabel}
@@ -3795,7 +3807,7 @@ export default function ChatView(props: ChatViewProps) {
                 ? { onCheckoutPullRequestRequest: openPullRequestDialogStable }
                 : {})}
               onComposerFocusRequest={scheduleComposerFocusStable}
-              {...(isServerThread && isGitRepo
+              {...(isServerThread && hasGitSurfaces
                 ? { onOpenChanges: openChangesFromThreadPanelStable }
                 : {})}
               onRunProjectScript={runProjectScriptStable}
@@ -3874,7 +3886,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddDevice={addDeviceSurfaceStable}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
-          diffAvailable={isServerThread && isGitRepo}
+          diffAvailable={isServerThread && hasGitSurfaces}
           filesAvailable={activeProject !== null}
           pullRequestAvailable={pullRequestSurfaceAvailable}
           pullRequestsAvailable={pullRequestsSurfaceAvailable}
