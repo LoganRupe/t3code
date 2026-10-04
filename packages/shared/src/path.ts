@@ -74,3 +74,14 @@ export function newProjectFolderName(name: string): string {
   if (slug.length === 0) return "project";
   return WINDOWS_RESERVED_NAME.test(slug) ? `${slug}-project` : slug;
 }
+
+/**
+ * Path of a repository inside a multi-repo workspace folder. `relativePath` uses `/`; the
+ * result keeps the folder's own separator style so Windows paths stay Windows paths.
+ */
+export function joinWorkspaceRepositoryPath(workspacePath: string, relativePath: string): string {
+  const separator = isWindowsAbsolutePath(workspacePath) ? "\\" : "/";
+  const base = trimTrailingPathSeparators(workspacePath);
+  const joint = base.endsWith(separator) ? "" : separator;
+  return `${base}${joint}${relativePath.split("/").join(separator)}`;
+}

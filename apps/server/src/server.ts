@@ -454,6 +454,7 @@ const OrchestrationV2RuntimeLayerLive = OrchestrationV2ProductionLayerLive.pipe(
   Layer.provide(ResourceCleanupService.live),
   Layer.provide(
     RunFinalizationService.observerLive.pipe(
+      Layer.provide(WorkspaceRepositories.layer),
       Layer.provide(ProjectionStoreV2.layer),
       Layer.provide(PullRequestServiceLive),
       Layer.provide(ProjectServiceLayerLive),
