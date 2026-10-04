@@ -11,6 +11,7 @@
 import * as Migrator from "effect/unstable/sql/Migrator";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { reconcileMultiRepoForkMigrations } from "./reconcileMultiRepoForkMigrations.ts";
 import { reconcileV2PreviewMigration } from "./reconcileV2PreviewMigration.ts";
 
 // Import all migrations statically
@@ -176,11 +177,11 @@ export interface RunMigrationsOptions {
 export const runMigrations = Effect.fn("runMigrations")(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {}) {
-  const previewMigrations =
-    toMigrationInclusive === undefined || toMigrationInclusive >= 55
-      ? yield* reconcileV2PreviewMigration()
-      : [];
+  const reconcileLedger = toMigrationInclusive === undefined || toMigrationInclusive >= 55;
+  const forkMigrations = reconcileLedger ? yield* reconcileMultiRepoForkMigrations() : [];
+  const previewMigrations = reconcileLedger ? yield* reconcileV2PreviewMigration() : [];
   const executedMigrations = [
+    ...forkMigrations,
     ...previewMigrations,
     ...(yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })),
   ];
