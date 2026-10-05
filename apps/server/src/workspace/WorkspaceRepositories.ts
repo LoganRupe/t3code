@@ -1,10 +1,12 @@
 /**
  * WorkspaceRepositories - finds the Git repositories a multi-repo workspace folder holds.
  *
- * A project or isolated-run folder that is not itself inside a repository can still hold
- * several: a wrapper folder with one checkout per repository. A `.code-workspace` file in the
- * folder decides which of its folders count; without one, every immediate child directory with
- * a `.git` entry counts. Folders outside the workspace are never included.
+ * A project or isolated-run folder can hold several repositories: a wrapper folder with one
+ * checkout per repository. A `.code-workspace` file in the folder decides which folders count,
+ * and those may be the folder itself (`.`) or sit outside it (`../../team/api`), the way VS
+ * Code multi-root workspaces work. Without a workspace file, only a folder that is not itself
+ * inside a repository is scanned, and only its immediate child directories with a `.git` entry
+ * count. Nothing outside the folder is ever scanned.
  *
  * Discovery reads only the filesystem and treats anything unreadable as absent, so callers on
  * hot paths (checkpoints, session start) can rely on it without handling failures.
@@ -78,23 +80,16 @@ export const make = Effect.gen(function* () {
     }
   });
 
+  // `.` for the folder itself, `../x` for a folder outside it; a folder on another Windows
+  // drive has no relative path and keeps its absolute one.
   const toRelativePath = (cwd: string, target: string) => {
     const relative = path.relative(cwd, target);
-    const leavesCwd = relative === ".." || relative.startsWith(`..${path.sep}`);
-    if (relative === "" || leavesCwd || path.isAbsolute(relative)) return null;
+    if (relative === "") return ".";
     return relative.split(path.sep).join("/");
   };
 
-  // Lexical checks miss symlinks, so a candidate must also resolve to a path under the root.
-  const resolvesInside = (realRoot: string, target: string) =>
-    fileSystem.realPath(target).pipe(
-      Effect.map((realTarget) => toRelativePath(realRoot, realTarget) !== null),
-      Effect.orElseSucceed(() => false),
-    );
-
   const fromCodeWorkspace = Effect.fn("WorkspaceRepositories.fromCodeWorkspace")(function* (
     cwd: string,
-    realRoot: string,
     workspaceFile: string,
   ) {
     const document = yield* fileSystem
@@ -105,24 +100,35 @@ export const make = Effect.gen(function* () {
     for (const folder of document.folders ?? []) {
       const absolutePath = path.resolve(cwd, folder.path);
       const relativePath = toRelativePath(cwd, absolutePath);
-      if (relativePath === null || listedFolders.includes(relativePath)) continue;
+      if (listedFolders.includes(relativePath)) continue;
       listedFolders.push(relativePath);
-      if (!(yield* hasGitEntry(absolutePath)) || !(yield* resolvesInside(realRoot, absolutePath))) {
-        continue;
-      }
+      if (!(yield* hasGitEntry(absolutePath))) continue;
       repositories.push({
         relativePath,
         name: folder.name?.trim() || path.basename(absolutePath),
+        path: absolutePath,
       });
     }
-    return { repositories, listedFolders } satisfies WorkspaceLayout;
+    // A workspace file that only names the folder itself describes an ordinary checkout.
+    const onlyRoot = repositories.length === 1 && repositories[0]!.relativePath === ".";
+    return {
+      repositories: onlyRoot ? [] : repositories,
+      listedFolders,
+    } satisfies WorkspaceLayout;
   });
 
+  // A scan never follows a link out of the folder: a child that resolves elsewhere is skipped,
+  // since only a workspace file can name a repository outside the folder.
   const fromChildDirectories = Effect.fn("WorkspaceRepositories.fromChildDirectories")(function* (
     cwd: string,
-    realRoot: string,
     names: ReadonlyArray<string>,
   ) {
+    const realRoot = yield* fileSystem.realPath(cwd).pipe(Effect.orElseSucceed(() => cwd));
+    const staysInside = (target: string) =>
+      fileSystem.realPath(target).pipe(
+        Effect.map((realTarget) => toRelativePath(realRoot, realTarget) === path.basename(target)),
+        Effect.orElseSucceed(() => false),
+      );
     const repositories: Array<VcsRepository> = [];
     for (const name of names) {
       if (name.startsWith(".")) continue;
@@ -130,33 +136,30 @@ export const make = Effect.gen(function* () {
       if (
         (yield* isDirectory(absolutePath)) &&
         (yield* hasGitEntry(absolutePath)) &&
-        (yield* resolvesInside(realRoot, absolutePath))
+        (yield* staysInside(absolutePath))
       ) {
-        repositories.push({ relativePath: name, name });
+        repositories.push({ relativePath: name, name, path: absolutePath });
       }
     }
     return repositories;
   });
 
   const describe = Effect.fn("WorkspaceRepositories.describe")(function* (cwd: string) {
-    if (yield* isInsideRepository(cwd)) return NOT_A_WORKSPACE;
     const names = (yield* fileSystem
       .readDirectory(cwd)
       .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))).toSorted();
-    const realRoot = yield* fileSystem.realPath(cwd).pipe(Effect.orElseSucceed(() => cwd));
     const workspaceFiles = names.filter((name) => name.endsWith(CODE_WORKSPACE_EXTENSION));
     // With several workspace files there is no single answer, so fall back to the folder layout.
     if (workspaceFiles.length === 1) {
-      const fromFile = yield* fromCodeWorkspace(cwd, realRoot, workspaceFiles[0]!).pipe(
-        Effect.option,
-      );
+      const fromFile = yield* fromCodeWorkspace(cwd, workspaceFiles[0]!).pipe(Effect.option);
       if (fromFile._tag === "Some") return fromFile.value;
       yield* Effect.logWarning("Ignoring unreadable workspace file", {
         cwd,
         workspaceFile: workspaceFiles[0],
       });
     }
-    const repositories = yield* fromChildDirectories(cwd, realRoot, names);
+    if (yield* isInsideRepository(cwd)) return NOT_A_WORKSPACE;
+    const repositories = yield* fromChildDirectories(cwd, names);
     return { repositories, listedFolders: null } satisfies WorkspaceLayout;
   });
 
