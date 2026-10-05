@@ -8,10 +8,12 @@ import * as Path from "effect/Path";
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 import * as WorkspaceWorktrees from "./WorkspaceWorktrees.ts";
 
 const makeLayer = (baseDir: string) =>
   WorkspaceWorktrees.layer.pipe(
+    Layer.provideMerge(WorkspaceRepositories.layer),
     Layer.provideMerge(GitVcsDriver.layer),
     Layer.provideMerge(VcsProcess.layer),
     Layer.provideMerge(ServerConfig.layerTest(baseDir, baseDir)),
@@ -98,7 +100,7 @@ it.effect("creates, renames and removes an isolated run across repositories", ()
         "feature",
       );
 
-      yield* worktrees.remove({ workspaceRoot, path: created.path, force: false });
+      yield* worktrees.remove({ path: created.path, force: false });
       assert.isFalse(yield* fileSystem.exists(created.path));
       assert.isTrue(yield* fileSystem.exists(path.join(workspaceRoot, "README.md")));
       assert.isTrue(yield* fileSystem.exists(path.join(workspaceRoot, "shared")));
@@ -140,7 +142,7 @@ it.effect("removes nested worktrees after the workspace file is gone", () =>
       });
       yield* fileSystem.remove(workspaceFile);
 
-      yield* worktrees.remove({ workspaceRoot, path: created.path, force: false });
+      yield* worktrees.remove({ path: created.path, force: false });
 
       assert.isFalse(yield* fileSystem.exists(created.path));
       assert.notInclude(
@@ -170,7 +172,7 @@ it.effect("keeps a container that holds anything besides its worktrees and links
       });
       yield* fileSystem.writeFileString(path.join(created.path, "notes.md"), "mine\n");
 
-      yield* worktrees.remove({ workspaceRoot, path: created.path, force: false });
+      yield* worktrees.remove({ path: created.path, force: false });
 
       assert.isFalse(yield* fileSystem.exists(path.join(created.path, "api")));
       assert.equal(yield* fileSystem.readFileString(path.join(created.path, "notes.md")), "mine\n");
@@ -215,4 +217,72 @@ it.effect("with a workspace file, links files, dot-folders and listed folders on
       ]);
     }).pipe(Effect.provide(makeLayer(baseDir)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "a root repository's worktree is the container, with outside repositories inside it",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-workspace-worktrees-",
+      });
+      yield* Effect.gen(function* () {
+        const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+        const repositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+        // The project folder is a context repository; the application repository lives elsewhere.
+        const workspaceRoot = path.join(baseDir, "context");
+        const outside = path.join(baseDir, "elsewhere", "api");
+        yield* initRepository(workspaceRoot);
+        yield* initRepository(outside);
+        yield* fileSystem.writeFileString(path.join(workspaceRoot, ".env"), "secret\n");
+
+        const created = yield* worktrees.create({
+          workspaceRoot,
+          repositories: [
+            { relativePath: ".", name: "context", path: workspaceRoot },
+            { relativePath: "../elsewhere/api", name: "API", path: outside },
+          ],
+          branch: "t3code/root",
+          startFromOrigin: false,
+        });
+
+        assert.equal(yield* git(created.path, ["branch", "--show-current"]), "t3code/root");
+        assert.equal(
+          yield* git(path.join(created.path, "API"), ["branch", "--show-current"]),
+          "t3code/root",
+        );
+        // The container is a real checkout: tracked files are files, and nothing is linked back.
+        assert.equal(
+          yield* fileSystem.readFileString(path.join(created.path, "README.md")),
+          "# test\n",
+        );
+        assert.isFalse(yield* fileSystem.exists(path.join(created.path, ".env")));
+        assert.isTrue(yield* worktrees.isContainer(created.path));
+        assert.deepEqual(yield* repositories.list(created.path), [
+          { relativePath: ".", name: "context", path: created.path },
+          { relativePath: "API", name: "API", path: path.join(created.path, "API") },
+        ]);
+
+        const renamed = yield* worktrees.renameBranch({
+          path: created.path,
+          oldBranch: "t3code/root",
+          newBranch: "feature",
+        });
+        assert.equal(renamed.branch, "feature");
+        assert.equal(yield* git(created.path, ["branch", "--show-current"]), "feature");
+        assert.equal(
+          yield* git(path.join(created.path, "API"), ["branch", "--show-current"]),
+          "feature",
+        );
+
+        yield* worktrees.remove({ path: created.path, force: false });
+        assert.isFalse(yield* fileSystem.exists(created.path));
+        assert.isFalse(yield* worktrees.isContainer(created.path));
+        assert.notInclude(yield* git(workspaceRoot, ["worktree", "list"]), created.path);
+        assert.notInclude(yield* git(outside, ["worktree", "list"]), created.path);
+        assert.equal(yield* git(outside, ["branch", "--show-current"]), "main");
+      }).pipe(Effect.provide(makeLayer(baseDir)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
