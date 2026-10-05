@@ -50,6 +50,22 @@ describe("buildRuntimeInstructions", () => {
     );
   });
 
+  it("lists repositories outside the working directory by their absolute path", () => {
+    const instructions = buildRuntimeInstructions({
+      harness: "Claude Code",
+      repositories: [
+        { relativePath: ".", name: "context", path: "/work/context" },
+        { relativePath: "../../team/api", name: "API", path: "/team/api" },
+        { relativePath: "tools", name: "tools", path: "/work/context/tools" },
+      ],
+    });
+    expect(instructions).toContain(
+      "Your working directory is a Git repository, and the project includes these other Git repositories as well",
+    );
+    expect(instructions).toContain("- /team/api (API)\n- tools\n");
+    expect(instructions).not.toContain("- . (");
+  });
+
   it("keeps workspace-supplied repository names inside the block", () => {
     const instructions = buildRuntimeInstructions({
       harness: "Codex",
