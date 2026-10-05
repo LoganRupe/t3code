@@ -781,6 +781,36 @@ it.layer(TestLayer, { excludeTestServices: true })("WorkspaceEntries", (it) => {
       }),
     );
 
+    it.effect("lists workspace files only on request and follows symlinked directories", () =>
+      Effect.gen(function* () {
+        const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const cwd = yield* makeTempDir({ prefix: "t3code-workspace-browse-files-" });
+        yield* writeTextFile(cwd, "real/README.md", "");
+        yield* writeTextFile(cwd, "team.code-workspace", "{}");
+        yield* writeTextFile(cwd, "notes.md", "");
+        yield* fileSystem.symlink(path.join(cwd, "real"), path.join(cwd, "linked"));
+        const partialPath = yield* appendSeparator(cwd);
+
+        expect((yield* workspaceEntries.browse({ partialPath })).entries).toEqual([
+          { name: "linked", fullPath: path.join(cwd, "linked") },
+          { name: "real", fullPath: path.join(cwd, "real") },
+        ]);
+        expect(
+          (yield* workspaceEntries.browse({ partialPath, includeWorkspaceFiles: true })).entries,
+        ).toEqual([
+          { name: "linked", fullPath: path.join(cwd, "linked") },
+          { name: "real", fullPath: path.join(cwd, "real") },
+          {
+            name: "team.code-workspace",
+            fullPath: path.join(cwd, "team.code-workspace"),
+            kind: "workspaceFile",
+          },
+        ]);
+      }),
+    );
+
     it.effect("supports relative paths when cwd is provided", () =>
       Effect.gen(function* () {
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;

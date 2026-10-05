@@ -51,6 +51,7 @@ import {
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,
+  FileCodeIcon,
   FolderIcon,
   FolderPlusIcon,
   MessageSquareDashedIcon,
@@ -122,6 +123,7 @@ import {
   inferProjectTitleFromPath,
   isExplicitRelativeProjectPath,
   isUnsupportedWindowsProjectPath,
+  projectFolderForPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
@@ -1074,6 +1076,8 @@ function OpenCommandPaletteDialog(props: {
     browseEnvironment?.serverConfig?.environment.platform.os,
   );
   const isRemoteProjectCloneFlow = addProjectCloneFlow !== null;
+  // Workspace files add the folder holding them, which means nothing as a clone destination.
+  const includeWorkspaceFiles = !isRemoteProjectCloneFlow;
   const isRemoteProjectRepositoryStep = addProjectCloneFlow?.step === "repository";
   // The destination step pins the repository folder onto the browsed path, so
   // the proposed clone target is "<chosen folder>/<repo>" instead of the bare
@@ -1165,6 +1169,7 @@ function OpenCommandPaletteDialog(props: {
           input: {
             partialPath: browsePath.directoryPath,
             ...(currentProjectCwdForBrowse ? { cwd: currentProjectCwdForBrowse } : {}),
+            ...(includeWorkspaceFiles ? { includeWorkspaceFiles } : {}),
           },
         })
       : null,
@@ -1206,10 +1211,17 @@ function OpenCommandPaletteDialog(props: {
         input: {
           partialPath,
           ...(cwd ? { cwd } : {}),
+          ...(includeWorkspaceFiles ? { includeWorkspaceFiles } : {}),
         },
       });
     },
-    [browseEnvironmentId, currentProjectCwdForBrowse, environments, loadBrowsePath],
+    [
+      browseEnvironmentId,
+      currentProjectCwdForBrowse,
+      environments,
+      includeWorkspaceFiles,
+      loadBrowsePath,
+    ],
   );
 
   useEffect(
@@ -2395,7 +2407,9 @@ function OpenCommandPaletteDialog(props: {
         return;
       }
 
-      const cwd = resolveProjectPathForDispatch(rawCwd, input.currentProjectCwd);
+      const cwd = projectFolderForPath(
+        resolveProjectPathForDispatch(rawCwd, input.currentProjectCwd),
+      );
       if (cwd.length === 0) return;
 
       const existing = findProjectByPath(
@@ -2796,8 +2810,10 @@ function OpenCommandPaletteDialog(props: {
     canBrowseUp,
     upIcon: <CornerLeftUpIcon className={ITEM_ICON_CLASS} />,
     directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
+    workspaceFileIcon: <FileCodeIcon className={ITEM_ICON_CLASS} />,
     browseUp,
     browseTo,
+    addWorkspaceFile: handleAddProject,
   });
   const cloneDestinationBrowseGroups = useMemo(
     () =>

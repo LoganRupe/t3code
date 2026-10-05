@@ -839,14 +839,23 @@ function FolderBrowser(props: {
     readonly selectedDirectoryName?: string;
   }) => Promise<boolean>;
   readonly pinnedDirectoryName?: string;
+  /** Lists `.code-workspace` files too; picking one adds the folder holding it. */
+  readonly onAddWorkspaceFile?: (fullPath: string) => void;
 }) {
+  const includeWorkspaceFiles = props.onAddWorkspaceFile !== undefined;
   const browsePath = useMemo(
     () => getFilesystemBrowsePath(props.pathInput, props.environment.platform),
     [props.environment.platform, props.pathInput],
   );
   const browseInput = useMemo(
-    () => (browsePath.directoryPath.length > 0 ? { partialPath: browsePath.directoryPath } : null),
-    [browsePath.directoryPath],
+    () =>
+      browsePath.directoryPath.length > 0
+        ? {
+            partialPath: browsePath.directoryPath,
+            ...(includeWorkspaceFiles ? { includeWorkspaceFiles } : {}),
+          }
+        : null,
+    [browsePath.directoryPath, includeWorkspaceFiles],
   );
   const browseState = useEnvironmentQuery(
     browseInput === null
@@ -906,7 +915,7 @@ function FolderBrowser(props: {
             title={entry.name}
             icon={
               <SymbolView
-                name="folder"
+                name={entry.kind === "workspaceFile" ? "doc.text" : "folder"}
                 size={Platform.OS === "android" ? 24 : 17}
                 tintColorClassName="accent-icon-muted"
                 type="monochrome"
@@ -915,6 +924,10 @@ function FolderBrowser(props: {
             isFirst={index === 0 && !browsePath.canBrowseUp}
             right={null}
             onPress={() => {
+              if (entry.kind === "workspaceFile") {
+                props.onAddWorkspaceFile?.(entry.fullPath);
+                return;
+              }
               void props.navigateToBrowsePath({
                 browseDirectoryPath: browsePath.directoryPath,
                 selectedDirectoryName: entry.name,
@@ -1165,26 +1178,29 @@ export function AddProjectLocalFolderScreen(props: { readonly environmentId?: st
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const submitPath = useCallback(async () => {
-    if (!environment || isBrowseNavigating || isSubmitting) return;
-    setError(null);
-    const resolved = resolveAddProjectPath({
-      rawPath: pathInput,
-      currentProjectCwd: null,
-      platform: environment.platform,
-    });
-    if (!resolved.ok) {
-      setError(resolved.error);
-      return;
-    }
+  const submitPath = useCallback(
+    async (rawPath: string = pathInput) => {
+      if (!environment || isBrowseNavigating || isSubmitting) return;
+      setError(null);
+      const resolved = resolveAddProjectPath({
+        rawPath,
+        currentProjectCwd: null,
+        platform: environment.platform,
+      });
+      if (!resolved.ok) {
+        setError(resolved.error);
+        return;
+      }
 
-    setIsSubmitting(true);
-    const result = await createProject(resolved.path);
-    if (result && AsyncResult.isFailure(result)) {
-      setError(errorMessage(Cause.squash(result.cause)));
-    }
-    setIsSubmitting(false);
-  }, [createProject, environment, isBrowseNavigating, isSubmitting, pathInput]);
+      setIsSubmitting(true);
+      const result = await createProject(resolved.path);
+      if (result && AsyncResult.isFailure(result)) {
+        setError(errorMessage(Cause.squash(result.cause)));
+      }
+      setIsSubmitting(false);
+    },
+    [createProject, environment, isBrowseNavigating, isSubmitting, pathInput],
+  );
 
   return (
     <AddProjectShell title="Local folder">
@@ -1207,6 +1223,7 @@ export function AddProjectLocalFolderScreen(props: { readonly environmentId?: st
             navigateToBrowsePath={navigateToBrowsePath}
             pathInput={pathInput}
             setPathInput={setPathInput}
+            onAddWorkspaceFile={(fullPath) => void submitPath(fullPath)}
           />
         </>
       ) : (
