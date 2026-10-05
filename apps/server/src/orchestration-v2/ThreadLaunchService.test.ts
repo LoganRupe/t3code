@@ -1042,8 +1042,8 @@ it.effect("runs a Scratch scheduled task saved with a worktree in its own folder
 it.effect("gives a multi-repo project one container with a worktree per repository", () =>
   Effect.gen(function* () {
     const repositories = [
-      { relativePath: "api", name: "api" },
-      { relativePath: "web", name: "web" },
+      { relativePath: "api", name: "api", path: "/repo/api" },
+      { relativePath: "web", name: "web", path: "/repo/web" },
     ];
     const harness = makeHarness({ repositories });
     yield* Effect.gen(function* () {
