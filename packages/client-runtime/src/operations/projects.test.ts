@@ -69,6 +69,15 @@ describe("add project shared logic", () => {
     expect(getCloneDirectoryName("git@github.com:acme/123.git")).toBe("123");
   });
 
+  it("adds the folder that holds a VS Code workspace file", () => {
+    expect(
+      resolveAddProjectPath({ rawPath: "~/repos/team/team.code-workspace", platform: "MacIntel" }),
+    ).toEqual({ ok: true, path: "~/repos/team" });
+    expect(
+      resolveAddProjectPath({ rawPath: "C:\\repos\\team.code-workspace", platform: "Win32" }),
+    ).toEqual({ ok: true, path: "C:\\repos" });
+  });
+
   it("finds existing projects by normalized path in the target environment", () => {
     const env = EnvironmentId.make("env");
     const other = EnvironmentId.make("other");

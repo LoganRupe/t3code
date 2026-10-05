@@ -8,5 +8,6 @@ export {
   isExplicitRelativeProjectPath,
   isUnsupportedWindowsProjectPath,
   normalizeProjectPathForComparison,
+  projectFolderForPath,
   resolveProjectPathForDispatch,
 } from "@t3tools/client-runtime/state/projects";
