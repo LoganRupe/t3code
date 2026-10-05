@@ -68,6 +68,7 @@ import {
   type ProviderThreadId,
   type ThreadId,
   type VcsRepository,
+  outsideWorkspaceRepositoryPaths,
 } from "@t3tools/contracts";
 
 import * as Cause from "effect/Cause";
@@ -919,6 +920,7 @@ export function makeClaudeQueryOptions(input: {
   const additionalDirectories = [
     ...(input.cwd === null ? [] : [input.cwd]),
     ...(input.attachmentsDir === undefined ? [] : [input.attachmentsDir]),
+    ...outsideWorkspaceRepositoryPaths(input.repositories),
   ];
   const withDirectories =
     additionalDirectories.length === 0 ? options : { ...options, additionalDirectories };

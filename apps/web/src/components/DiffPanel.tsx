@@ -84,7 +84,6 @@ import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
 import { serverEnvironment } from "../state/server";
 import { reviewEnvironment } from "../state/review";
-import { joinWorkspaceRepositoryPath } from "@t3tools/shared/path";
 import { vcsEnvironment } from "../state/vcs";
 import { useWorkspaceRepositories } from "../hooks/useWorkspaceRepositories";
 import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
@@ -209,10 +208,7 @@ export default function DiffPanel({
     null;
   // Uncommitted and Changes compare one repository at a time in a multi-repo workspace; turn
   // diffs already cover every repository, with paths relative to the workspace folder.
-  const gitDiffCwd =
-    activeCwd && selectedRepository
-      ? joinWorkspaceRepositoryPath(activeCwd, selectedRepository.relativePath)
-      : activeCwd;
+  const gitDiffCwd = activeCwd && selectedRepository ? selectedRepository.path : activeCwd;
   const { turnDiffSummaries, inferredCheckpointTurnCountByRunId } =
     useTurnDiffSummaries(activeThreadProjection);
   const orderedTurnDiffSummaries = useMemo(

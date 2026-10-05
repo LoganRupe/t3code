@@ -172,6 +172,15 @@ export function isOutsideWorkspaceRepository(repository: Pick<VcsRepository, "re
   );
 }
 
+/** Absolute paths of the repositories outside the workspace folder, for agents' directory grants. */
+export function outsideWorkspaceRepositoryPaths(
+  repositories: ReadonlyArray<VcsRepository> | undefined,
+): ReadonlyArray<string> {
+  return (repositories ?? [])
+    .filter((repository) => isOutsideWorkspaceRepository(repository))
+    .map((repository) => repository.path);
+}
+
 /**
  * Prefix for a repository's paths in a workspace-wide diff. The root repository's paths need
  * none, an outside repository is known by its name, and a nested one by where it sits.

@@ -439,6 +439,40 @@ describe("CodexAdapterV2 runtime policy", () => {
     }),
   );
 
+  it.effect(
+    "adds repositories outside the cwd as writable roots of a workspace-write sandbox",
+    () =>
+      Effect.gen(function* () {
+        const repositories = [
+          { relativePath: ".", name: "workspace", path: "/workspace" },
+          { relativePath: "../team/lib", name: "lib", path: "/team/lib" },
+        ];
+        const build = (runtimeMode: "auto" | "approval-required") =>
+          CodexAdapterV2.buildCodexTurnStartParams({
+            nativeThreadId: "native-outside",
+            codexInput: [{ type: "text", text: "test" }],
+            runtimePolicy: {
+              runtimeMode,
+              interactionMode: "default",
+              cwd: "/workspace",
+              repositories,
+            },
+            modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+          });
+
+        const workspaceWrite = yield* build("auto");
+        assert.equal(workspaceWrite.sandboxPolicy?.type, "workspaceWrite");
+        assert.deepEqual(
+          workspaceWrite.sandboxPolicy?.type === "workspaceWrite"
+            ? workspaceWrite.sandboxPolicy.writableRoots
+            : undefined,
+          ["/team/lib"],
+        );
+        const readOnly = yield* build("approval-required");
+        assert.deepEqual(readOnly.sandboxPolicy, { type: "readOnly" });
+      }),
+  );
+
   it.effect("preserves explicit Codex turn policy overrides", () =>
     Effect.gen(function* () {
       const params = yield* CodexAdapterV2.buildCodexTurnStartParams({
