@@ -74,13 +74,22 @@ export const useDiffPanelStore = create<DiffPanelStoreState>()(
             },
           };
         }),
+      // A base branch picked in one repository may not exist in another, so switching
+      // repositories goes back to the automatic base.
       selectRepository: (ref, relativePath) =>
-        set((state) => ({
-          repositoryByThreadKey: {
-            ...state.repositoryByThreadKey,
-            [scopedThreadKey(ref)]: relativePath,
-          },
-        })),
+        set((state) => {
+          const threadKey = scopedThreadKey(ref);
+          if (state.repositoryByThreadKey[threadKey] === relativePath) return state;
+          const previous = state.byThreadKey[threadKey];
+          return {
+            repositoryByThreadKey: { ...state.repositoryByThreadKey, [threadKey]: relativePath },
+            byThreadKey:
+              previous?.kind === "branch"
+                ? { ...state.byThreadKey, [threadKey]: { kind: "branch", baseRef: null } }
+                : state.byThreadKey,
+            branchBaseRefByThreadKey: { ...state.branchBaseRefByThreadKey, [threadKey]: null },
+          };
+        }),
       selectTurn: (ref, turnId, filePath) =>
         set((state) => {
           const threadKey = scopedThreadKey(ref);

@@ -33,6 +33,8 @@ import { prefixNumstatPaths, prefixPatchPaths } from "./Diffs.ts";
 export interface CaptureCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
+  /** Capture only in repositories without the ref, keeping checkpoints already taken. */
+  readonly missingOnly?: boolean;
 }
 
 export interface RestoreCheckpointInput {
@@ -196,11 +198,17 @@ export const make = Effect.gen(function* () {
     "captureCheckpoint",
   )(function* (input) {
     yield* forEachTarget(yield* resolveTargets(input.cwd), (target) =>
-      resolveCheckpoints("CheckpointStore.captureCheckpoint", target.cwd).pipe(
-        Effect.flatMap((checkpoints) =>
-          checkpoints.captureCheckpoint({ ...input, cwd: target.cwd }),
-        ),
-      ),
+      Effect.gen(function* () {
+        if (input.missingOnly && (yield* hasRefIn(target, input.checkpointRef))) return;
+        const checkpoints = yield* resolveCheckpoints(
+          "CheckpointStore.captureCheckpoint",
+          target.cwd,
+        );
+        yield* checkpoints.captureCheckpoint({
+          cwd: target.cwd,
+          checkpointRef: input.checkpointRef,
+        });
+      }),
     );
   });
 
