@@ -19,9 +19,11 @@
  * @module CheckpointStore
  */
 import {
+  isOutsideWorkspaceRepository,
   VcsUnsupportedOperationError,
   workspaceRepositoryPathPrefix,
   type CheckpointRef,
+  type VcsRepository,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -38,6 +40,17 @@ export interface CaptureCheckpointInput {
   readonly checkpointRef: CheckpointRef;
   /** Capture only in repositories without the ref, keeping checkpoints already taken. */
   readonly missingOnly?: boolean;
+}
+
+/** Folders under a repository that belong to other repositories of the same workspace. */
+function nestedRepositoryFolders(
+  repository: VcsRepository,
+  repositories: ReadonlyArray<VcsRepository>,
+): ReadonlyArray<string> {
+  if (repository.relativePath !== ".") return [];
+  return repositories
+    .filter((other) => other.relativePath !== "." && !isOutsideWorkspaceRepository(other))
+    .map((other) => other.relativePath);
 }
 
 export interface RestoreCheckpointInput {
@@ -115,6 +128,8 @@ export class CheckpointStore extends Context.Service<
 interface CheckpointTarget {
   readonly cwd: string;
   readonly pathPrefix: string | null;
+  /** Folders of other repositories nested under this one, left out of its capture. */
+  readonly excludePaths: ReadonlyArray<string>;
 }
 
 const MULTI_REPO_CONCURRENCY = 4;
@@ -148,10 +163,11 @@ export const make = Effect.gen(function* () {
   // so its operations fail the way they always have.
   const resolveTargets = Effect.fn("CheckpointStore.resolveTargets")(function* (cwd: string) {
     const repositories = yield* workspaceRepositories.list(cwd);
-    if (repositories.length === 0) return [{ cwd, pathPrefix: null }];
+    if (repositories.length === 0) return [{ cwd, pathPrefix: null, excludePaths: [] }];
     return repositories.map((repository): CheckpointTarget => ({
       cwd: repository.path,
       pathPrefix: workspaceRepositoryPathPrefix(repository),
+      excludePaths: nestedRepositoryFolders(repository, repositories),
     }));
   });
 
@@ -187,6 +203,7 @@ export const make = Effect.gen(function* () {
         yield* checkpoints.captureCheckpoint({
           cwd: target.cwd,
           checkpointRef: input.checkpointRef,
+          ...(target.excludePaths.length === 0 ? {} : { excludePaths: target.excludePaths }),
         });
       }),
     );
