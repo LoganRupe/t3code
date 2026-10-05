@@ -64,6 +64,7 @@ import {
   CornerLeftUpIcon,
   FileSearchIcon,
   FolderGit2Icon,
+  FileCodeIcon,
   FolderIcon,
   FolderPlusIcon,
   MessageSquareDashedIcon,
@@ -146,6 +147,7 @@ import {
   inferProjectTitleFromPath,
   isExplicitRelativeProjectPath,
   isUnsupportedWindowsProjectPath,
+  projectFolderForPath,
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
@@ -988,6 +990,8 @@ function OpenCommandPaletteDialog(props: {
     browseEnvironment?.serverConfig?.environment.platform.os,
   );
   const isRemoteProjectCloneFlow = addProjectCloneFlow !== null;
+  // Workspace files add the folder holding them, which means nothing as a clone destination.
+  const includeWorkspaceFiles = !isRemoteProjectCloneFlow;
   const isRemoteProjectRepositoryStep = addProjectCloneFlow?.step === "repository";
   const pinnedCloneDirectoryName =
     addProjectCloneFlow?.step === "confirm"
@@ -1049,6 +1053,7 @@ function OpenCommandPaletteDialog(props: {
           input: {
             partialPath: browsePath.directoryPath,
             ...(currentProjectCwdForBrowse ? { cwd: currentProjectCwdForBrowse } : {}),
+            ...(includeWorkspaceFiles ? { includeWorkspaceFiles } : {}),
           },
         })
       : null,
@@ -1091,6 +1096,7 @@ function OpenCommandPaletteDialog(props: {
       input: {
         partialPath,
         ...(cwd ? { cwd } : {}),
+        ...(includeWorkspaceFiles ? { includeWorkspaceFiles } : {}),
       },
     });
   };
@@ -2194,7 +2200,7 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
 
-    const cwd = resolveProjectPathForDispatch(rawCwd, input.currentProjectCwd);
+    const cwd = projectFolderForPath(resolveProjectPathForDispatch(rawCwd, input.currentProjectCwd));
     if (cwd.length === 0) return;
 
     const existing = findProjectByPath(
@@ -2579,8 +2585,10 @@ function OpenCommandPaletteDialog(props: {
     canBrowseUp,
     upIcon: <CornerLeftUpIcon className={ITEM_ICON_CLASS} />,
     directoryIcon: <FolderIcon className={ITEM_ICON_CLASS} />,
+    workspaceFileIcon: <FileCodeIcon className={ITEM_ICON_CLASS} />,
     browseUp,
     browseTo,
+    addWorkspaceFile: handleAddProject,
   });
   const cloneDestinationBrowseGroups = browseGroups.map((group) =>
     group.value === "directories" ? { ...group, label: "Select where to clone" } : group,

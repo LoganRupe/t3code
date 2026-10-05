@@ -121,6 +121,13 @@ export function resolveProjectPathForDispatch(value: string, cwd?: string | null
   );
 }
 
+/** A VS Code `.code-workspace` file adds the folder that holds it; other paths are the folder. */
+export function projectFolderForPath(path: string): string {
+  if (!path.endsWith(".code-workspace")) return path;
+  const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  return separator < 0 ? path : normalizeProjectPathForDispatch(path.slice(0, separator + 1));
+}
+
 export function findProjectByPath<T extends { workspaceRoot?: string; cwd?: string }>(
   projects: ReadonlyArray<T>,
   candidatePath: string,

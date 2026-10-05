@@ -13,5 +13,6 @@ export {
   isUnsupportedWindowsProjectPath,
   normalizeProjectPathForComparison,
   normalizeProjectPathForDispatch,
+  projectFolderForPath,
   resolveProjectPathForDispatch,
 } from "@t3tools/client-runtime/state/projects";
