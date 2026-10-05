@@ -104,7 +104,9 @@ make your first commit before pushing.
 To work across several repositories in one thread, add the folder that holds them as the project.
 T3 Code treats every folder directly inside it that is a Git repository as part of the project. If
 the folder contains one VS Code `.code-workspace` file, the repositories it lists count instead,
-named the way the file names them. Repositories outside the project folder are not included.
+named the way the file names them. The file can list the folder itself (`.`) and repositories
+elsewhere on disk (`../api`). When adding a project you can pick the `.code-workspace` file
+instead of its folder.
 
 Each repository gets its own Git actions in the thread panel, and turn diffs and rewinds cover all
 of them. In the diff panel, **Uncommitted** and **Changes** show one repository at a time; pick it

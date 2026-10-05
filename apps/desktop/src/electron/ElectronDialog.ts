@@ -110,15 +110,16 @@ export const make = ElectronDialog.of({
       onSome: (owner) => owner.id,
     });
     const defaultPath = Option.getOrNull(input.defaultPath);
-    const openDialogOptions: Electron.OpenDialogOptions = Option.match(input.defaultPath, {
-      onNone: () => ({
-        properties: ["openDirectory", "createDirectory"],
-      }),
-      onSome: (defaultPath) => ({
-        properties: ["openDirectory", "createDirectory"],
-        defaultPath,
-      }),
-    });
+    // Only macOS lets one dialog pick a folder or a file, so only there can a VS Code workspace
+    // file stand in for the folder holding it.
+    const openDialogOptions: Electron.OpenDialogOptions =
+      process.platform === "darwin"
+        ? {
+            properties: ["openDirectory", "openFile", "createDirectory"],
+            filters: [{ name: "VS Code workspace", extensions: ["code-workspace"] }],
+          }
+        : { properties: ["openDirectory", "createDirectory"] };
+    if (defaultPath !== null) openDialogOptions.defaultPath = defaultPath;
     const result = yield* Effect.tryPromise({
       try: () =>
         Option.match(input.owner, {

@@ -9,6 +9,7 @@ import * as RcMap from "effect/RcMap";
 import * as Schema from "effect/Schema";
 
 import type {
+  FilesystemBrowseEntry,
   FilesystemBrowseInput,
   FilesystemBrowseResult,
   ProjectEntry,
@@ -26,6 +27,7 @@ import { normalizeSearchQuery } from "@t3tools/shared/searchRanking";
 import { expandHomePathWith } from "../pathExpansion.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
 import * as WorkspacePaths from "./WorkspacePaths.ts";
+import { CODE_WORKSPACE_EXTENSION } from "./WorkspaceRepositories.ts";
 import * as WorkspaceSearchIndex from "./WorkspaceSearchIndex.ts";
 
 export class WorkspaceEntriesWindowsPathUnsupportedError extends Schema.TaggedError<WorkspaceEntriesWindowsPathUnsupportedError>()(
@@ -211,17 +213,32 @@ export const make = Effect.gen(function* () {
 
       const showHidden = endsWithSeparator || prefix.startsWith(".");
       const lowerPrefix = prefix.toLowerCase();
-      const entries: Array<{ readonly name: string; readonly fullPath: string }> = [];
+      const entries: Array<FilesystemBrowseEntry> = [];
       for (const dirent of dirents) {
         if (
-          dirent.isDirectory() &&
-          dirent.name.toLowerCase().startsWith(lowerPrefix) &&
-          (showHidden || !dirent.name.startsWith("."))
+          !dirent.name.toLowerCase().startsWith(lowerPrefix) ||
+          (!showHidden && dirent.name.startsWith("."))
         ) {
-          entries.push({
-            name: dirent.name,
-            fullPath: path.join(parentPath, dirent.name),
-          });
+          continue;
+        }
+        const fullPath = path.join(parentPath, dirent.name);
+        // A symlink counts as what it points to, so a linked project folder can be picked.
+        const isDirectory =
+          dirent.isDirectory() ||
+          (dirent.isSymbolicLink() &&
+            (yield* Effect.promise(() =>
+              NodeFSP.stat(fullPath).then(
+                (stats) => stats.isDirectory(),
+                () => false,
+              ),
+            )));
+        if (isDirectory) {
+          entries.push({ name: dirent.name, fullPath });
+        } else if (
+          input.includeWorkspaceFiles === true &&
+          dirent.name.endsWith(CODE_WORKSPACE_EXTENSION)
+        ) {
+          entries.push({ name: dirent.name, fullPath, kind: "workspaceFile" });
         }
       }
 
