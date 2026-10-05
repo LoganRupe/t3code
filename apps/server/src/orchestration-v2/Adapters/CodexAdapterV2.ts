@@ -30,6 +30,7 @@ import {
   defaultInstanceIdForDriver,
   isOrchestrationV2WorkActive,
   OrchestrationV2ProviderGoal,
+  outsideWorkspaceRepositoryPaths,
   ProviderDriverKind,
   type ProviderSetupError,
 } from "@t3tools/contracts";
@@ -718,6 +719,26 @@ function codexRuntimeModeTurnDefaults(runtimeMode: RuntimeMode): {
   }
 }
 
+// A workspace-write sandbox covers the cwd; repositories the workspace lists elsewhere need
+// their own writable roots. Read-only and full-access sandboxes already decide for every path.
+function withOutsideRepositoryRoots(
+  sandboxPolicy: CodexSchema.V2TurnStartParams__SandboxPolicy | null,
+  outsideRoots: ReadonlyArray<string>,
+): CodexSchema.V2TurnStartParams__SandboxPolicy | null {
+  if (
+    sandboxPolicy === null ||
+    sandboxPolicy.type !== "workspaceWrite" ||
+    outsideRoots.length === 0
+  ) {
+    return sandboxPolicy;
+  }
+  const writableRoots = [...(sandboxPolicy.writableRoots ?? [])];
+  for (const root of outsideRoots) {
+    if (!writableRoots.includes(root)) writableRoots.push(root);
+  }
+  return { ...sandboxPolicy, writableRoots };
+}
+
 export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTurnStartParams")(
   function* (input: {
     readonly nativeThreadId: string;
@@ -736,10 +757,12 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
       input.runtimePolicy.approvalPolicy === undefined
         ? runtimeModeDefaults.approvalPolicy
         : yield* decodeTurnApprovalPolicy(input.runtimePolicy.approvalPolicy);
-    const sandboxPolicy =
+    const sandboxPolicy = withOutsideRepositoryRoots(
       input.runtimePolicy.sandboxPolicy === undefined
         ? runtimeModeDefaults.sandboxPolicy
-        : yield* decodeTurnSandboxPolicy(input.runtimePolicy.sandboxPolicy);
+        : yield* decodeTurnSandboxPolicy(input.runtimePolicy.sandboxPolicy),
+      outsideWorkspaceRepositoryPaths(input.runtimePolicy.repositories),
+    );
     const selectedEffort =
       getModelSelectionStringOptionValue(input.modelSelection, "reasoningEffort") ??
       codexDefaultReasoningEffortOverride(input.modelSelection.model);
