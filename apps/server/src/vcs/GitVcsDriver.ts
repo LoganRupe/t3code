@@ -966,6 +966,9 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           }
         }
 
+        const excludedFolders = (input.excludePaths ?? []).map(
+          (folder) => `:(exclude,literal)${folder.replace(/\/$/, "")}/`,
+        );
         const stageFiles = (exclusions: ReadonlyArray<string>) =>
           execute({
             operation,
@@ -979,6 +982,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
               "-A",
               "--",
               ".",
+              ...excludedFolders,
               ...exclusions,
             ],
             env: commitEnv,
