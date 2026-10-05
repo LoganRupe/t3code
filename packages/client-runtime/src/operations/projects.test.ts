@@ -182,6 +182,15 @@ describe("add project shared logic", () => {
     ).toEqual({ ok: true, path: "/work/next" });
   });
 
+  it("adds the folder that holds a VS Code workspace file", () => {
+    expect(
+      resolveAddProjectPath({ rawPath: "~/repos/team/team.code-workspace", platform: "MacIntel" }),
+    ).toEqual({ ok: true, path: "~/repos/team" });
+    expect(
+      resolveAddProjectPath({ rawPath: "C:\\repos\\team.code-workspace", platform: "Win32" }),
+    ).toEqual({ ok: true, path: "C:\\repos" });
+  });
+
   it("marks authenticated source control providers as ready", () => {
     const discovery: SourceControlDiscoveryResult = {
       versionControlSystems: [],
