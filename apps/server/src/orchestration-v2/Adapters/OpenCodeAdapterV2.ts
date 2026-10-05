@@ -31,6 +31,7 @@ import {
   type OrchestrationV2TurnItem,
   OpenCodeSettings as OpenCodeSettingsSchema,
   type PlanId,
+  outsideWorkspaceRepositoryPaths,
   ProviderDriverKind,
   type ProviderInstanceId,
   type ProviderRequestKind,
@@ -677,6 +678,14 @@ export function openCodePermissionRules(
     (!requiresApproval && sandboxType === "workspaceWrite")
   ) {
     rules.push({ permission: "edit", pattern: "*", action: "allow" });
+    // Repositories the workspace lists outside the cwd are part of the project, not external.
+    for (const root of outsideWorkspaceRepositoryPaths(runtimePolicy.repositories)) {
+      rules.push({
+        permission: "external_directory",
+        pattern: `${root.replace(/\/$/, "")}/*`,
+        action: "allow",
+      });
+    }
   }
 
   if (!requiresApproval && recordValue(sandboxPolicy, "networkAccess") === true) {

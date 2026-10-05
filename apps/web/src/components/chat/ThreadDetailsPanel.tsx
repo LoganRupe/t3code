@@ -6,7 +6,6 @@ import type {
   ThreadId,
   VcsRepository,
 } from "@t3tools/contracts";
-import { joinWorkspaceRepositoryPath } from "@t3tools/shared/path";
 import { AlertTriangleIcon, XIcon } from "lucide-react";
 
 import type { DraftId } from "../../composerDraftStore";
@@ -210,12 +209,12 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   <GitActionsControl
                     displayMode="panel"
                     compact={density !== "full"}
-                    gitCwd={joinWorkspaceRepositoryPath(props.gitCwd!, repository.relativePath)}
+                    gitCwd={repository.path}
                     activeThreadRef={{
                       environmentId: props.environmentId,
                       threadId: props.threadId,
                     }}
-                    syncThreadBranch={false}
+                    syncThreadBranch={repository.relativePath === "."}
                     {...(props.draftId ? { draftId: props.draftId } : {})}
                     {...(props.onOpenChanges
                       ? { onOpenChanges: () => props.onOpenChanges!(repository.relativePath) }

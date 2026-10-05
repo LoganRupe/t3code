@@ -169,6 +169,22 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.include(options.settings, { showThinkingSummaries: true });
   });
 
+  it("grants repositories the workspace lists outside the cwd", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "outside-thread",
+      resume: false,
+      cwd: "/workspace",
+      attachmentsDir: "/attachments",
+      repositories: [
+        { relativePath: ".", name: "workspace", path: "/workspace" },
+        { relativePath: "api", name: "api", path: "/workspace/api" },
+        { relativePath: "../team/lib", name: "lib", path: "/team/lib" },
+      ],
+    });
+    assert.deepEqual(options.additionalDirectories, ["/workspace", "/attachments", "/team/lib"]);
+  });
+
   it("preserves an explicit omitted thinking display", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
