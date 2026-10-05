@@ -36,6 +36,32 @@ const CodeWorkspaceDocument = Schema.Struct({
 });
 const decodeCodeWorkspace = Schema.decodeUnknownEffect(fromLenientJson(CodeWorkspaceDocument));
 
+/**
+ * Layout of an isolated run's container, written beside the container when it is created.
+ * It lives outside the container so a root repository's worktree stays clean, and it records
+ * each worktree's source checkout so removal does not depend on the project's current files.
+ */
+export const IsolatedRunLayout = Schema.Struct({
+  repositories: Schema.Array(
+    Schema.Struct({
+      /** Where the worktree sits in the container: `.` for the root, or a folder name. */
+      relativePath: Schema.String,
+      name: Schema.String,
+      /** The checkout the worktree was created from. */
+      source: Schema.String,
+    }),
+  ),
+});
+export type IsolatedRunLayout = typeof IsolatedRunLayout.Type;
+const decodeIsolatedRunLayout = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(IsolatedRunLayout),
+);
+
+/** The marker file for a container: a sibling, so it is never part of any worktree. */
+export function isolatedRunLayoutPath(container: string): string {
+  return `${container}.t3-isolated-run.json`;
+}
+
 export interface WorkspaceLayout {
   readonly repositories: ReadonlyArray<VcsRepository>;
   /** Paths, relative to the workspace, of every folder the workspace file names. */
@@ -51,6 +77,8 @@ export class WorkspaceRepositories extends Context.Service<
     readonly list: (cwd: string) => Effect.Effect<ReadonlyArray<VcsRepository>>;
     /** `list`, plus the folders a `.code-workspace` file names, or null without one. */
     readonly describe: (cwd: string) => Effect.Effect<WorkspaceLayout>;
+    /** The layout of an isolated run's container, or null when `cwd` is not one. */
+    readonly readIsolatedRun: (cwd: string) => Effect.Effect<IsolatedRunLayout | null>;
   }
 >()("t3/workspace/WorkspaceRepositories") {}
 
@@ -144,7 +172,27 @@ export const make = Effect.gen(function* () {
     return repositories;
   });
 
+  const readIsolatedRun = Effect.fn("WorkspaceRepositories.readIsolatedRun")(function* (
+    cwd: string,
+  ) {
+    return yield* fileSystem.readFileString(isolatedRunLayoutPath(cwd)).pipe(
+      Effect.flatMap(decodeIsolatedRunLayout),
+      Effect.orElseSucceed((): IsolatedRunLayout | null => null),
+    );
+  });
+
   const describe = Effect.fn("WorkspaceRepositories.describe")(function* (cwd: string) {
+    const isolatedRun = yield* readIsolatedRun(cwd);
+    if (isolatedRun !== null) {
+      return {
+        repositories: isolatedRun.repositories.map((repository) => ({
+          relativePath: repository.relativePath,
+          name: repository.name,
+          path: path.resolve(cwd, repository.relativePath),
+        })),
+        listedFolders: null,
+      } satisfies WorkspaceLayout;
+    }
     const names = (yield* fileSystem
       .readDirectory(cwd)
       .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))).toSorted();
@@ -165,7 +213,7 @@ export const make = Effect.gen(function* () {
 
   const list = (cwd: string) => describe(cwd).pipe(Effect.map((layout) => layout.repositories));
 
-  return WorkspaceRepositories.of({ list, describe });
+  return WorkspaceRepositories.of({ list, describe, readIsolatedRun });
 });
 
 export const layer = Layer.effect(WorkspaceRepositories, make);
