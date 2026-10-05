@@ -7,6 +7,7 @@ describe("diffPanelStore", () => {
     useDiffPanelStore.setState({
       byThreadKey: {},
       branchBaseRefByThreadKey: {},
+      repositoryByThreadKey: {},
     });
     useDiffPanelSessionStore.setState({ collapsedFileKeysByScopeKey: {} });
   });
@@ -41,4 +42,18 @@ describe("diffPanelStore", () => {
     );
     expect(defaults).toEqual(new Set(["src/app.ts", "src/index.ts"]));
   });
+  it("goes back to the automatic base when switching repositories", () => {
+    useDiffPanelStore.getState().selectRepository(THREAD_REF, "api");
+    useDiffPanelStore.getState().selectBranchBaseRef(THREAD_REF, "origin/develop");
+    useDiffPanelStore.getState().selectRepository(THREAD_REF, "api");
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({ kind: "branch", baseRef: "origin/develop" });
+
+    useDiffPanelStore.getState().selectRepository(THREAD_REF, "web");
+    expect(
+      selectThreadDiffPanelSelection(useDiffPanelStore.getState().byThreadKey, THREAD_REF),
+    ).toEqual({ kind: "branch", baseRef: null });
+  });
+
 });
