@@ -276,17 +276,10 @@ export const layer: Layer.Layer<
             scopeId: input.scope.id,
             ordinalWithinScope: input.ordinalWithinScope,
           });
-          const exists = yield* checkpointStore.hasCheckpointRef({
-            cwd: input.scope.cwd,
-            checkpointRef,
-          });
-          if (exists) {
-            return;
-          }
-
           yield* checkpointStore.captureCheckpoint({
             cwd: input.scope.cwd,
             checkpointRef,
+            missingOnly: true,
           });
         }),
       ).pipe(
