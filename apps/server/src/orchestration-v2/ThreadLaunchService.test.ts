@@ -1186,8 +1186,8 @@ it.effect("renames a temporary t3code/<hash> branch off the provisioning critica
 it.effect("gives a multi-repo project one container with a worktree per repository", () =>
   Effect.gen(function* () {
     const repositories = [
-      { relativePath: "api", name: "api" },
-      { relativePath: "web", name: "web" },
+      { relativePath: "api", name: "api", path: "/repo/api" },
+      { relativePath: "web", name: "web", path: "/repo/web" },
     ];
     const harness = makeHarness({ repositories });
     yield* Effect.gen(function* () {

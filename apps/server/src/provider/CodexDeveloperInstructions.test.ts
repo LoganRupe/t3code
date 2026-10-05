@@ -107,7 +107,9 @@ describe("T3 browser developer instructions", () => {
 
 describe("buildCodexRepositoriesContext", () => {
   it("sends only the repository list, and nothing outside a multi-repo workspace", () => {
-    const context = buildCodexRepositoriesContext([{ relativePath: "api", name: "api" }]);
+    const context = buildCodexRepositoriesContext([
+      { relativePath: "api", name: "api", path: "/work/api" },
+    ]);
     NodeAssert.deepStrictEqual(Object.keys(context ?? {}), ["t3_code_repositories"]);
     NodeAssert.match(context!.t3_code_repositories!.value, /^<workspace_repositories>/);
     NodeAssert.strictEqual(buildCodexRepositoriesContext([]), undefined);

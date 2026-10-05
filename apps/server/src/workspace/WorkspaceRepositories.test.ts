@@ -38,6 +38,13 @@ const makeWorkspace = Effect.fn("makeWorkspace")(function* (
 const list = (cwd: string) =>
   Effect.flatMap(WorkspaceRepositories.WorkspaceRepositories, (service) => service.list(cwd));
 
+const repository = (root: string, relativePath: string, name = relativePath) =>
+  Effect.map(Path.Path, (path) => ({
+    relativePath,
+    name,
+    path: path.resolve(root, ...relativePath.split("/")),
+  }));
+
 it.layer(TestLayer)("WorkspaceRepositories", (it) => {
   describe("list", () => {
     it.effect("finds child clones and worktrees in name order", () =>
@@ -51,8 +58,8 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
         });
 
         expect(yield* list(root)).toEqual([
-          { relativePath: "api", name: "api" },
-          { relativePath: "web", name: "web" },
+          yield* repository(root, "api"),
+          yield* repository(root, "web"),
         ]);
       }),
     );
@@ -83,7 +90,6 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
               { "path": "./server" },
               { "path": "shared" },
               { "path": "services/billing" },
-              { "path": "../outside" },
               { "path": "..api" },
               { "path": "missing" },
               { "path": "app" },
@@ -92,10 +98,10 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
         });
 
         expect(yield* list(root)).toEqual([
-          { relativePath: "app", name: "App" },
-          { relativePath: "server", name: "server" },
-          { relativePath: "services/billing", name: "billing" },
-          { relativePath: "..api", name: "..api" },
+          yield* repository(root, "app", "App"),
+          yield* repository(root, "server"),
+          yield* repository(root, "services/billing", "billing"),
+          yield* repository(root, "..api"),
         ]);
         const service = yield* WorkspaceRepositories.WorkspaceRepositories;
         expect((yield* service.describe(root)).listedFolders).toEqual([
@@ -120,12 +126,12 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
           });
           const broken = yield* makeWorkspace({ web: "repo", "a.code-workspace": "{ not json" });
 
-          expect(yield* list(ambiguous)).toEqual([{ relativePath: "web", name: "web" }]);
-          expect(yield* list(broken)).toEqual([{ relativePath: "web", name: "web" }]);
+          expect(yield* list(ambiguous)).toEqual([yield* repository(ambiguous, "web")]);
+          expect(yield* list(broken)).toEqual([yield* repository(broken, "web")]);
         }),
     );
 
-    it.effect("skips repositories that symlink out of the folder", () =>
+    it.effect("a scan skips repositories that symlink out of the folder", () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const path = yield* Path.Path;
@@ -133,7 +139,57 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
         const root = yield* makeWorkspace({ web: "repo" });
         yield* fileSystem.symlink(path.join(outside, "api"), path.join(root, "api"));
 
-        expect(yield* list(root)).toEqual([{ relativePath: "web", name: "web" }]);
+        expect(yield* list(root)).toEqual([yield* repository(root, "web")]);
+      }),
+    );
+
+    it.effect("a workspace file can name the folder itself and folders outside it", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const elsewhere = yield* makeWorkspace({
+          "team-a/api": "repo",
+          "team-b/lib": "repo",
+          "team-b/docs": "dir",
+        });
+        const outsideApi = path.join(elsewhere, "team-a", "api");
+        const outsideLib = path.join(elsewhere, "team-b", "lib");
+        const root = yield* makeWorkspace({ ".git/HEAD": "ref" });
+        const fileSystem = yield* FileSystem.FileSystem;
+        // One absolute entry and one `../` entry, as VS Code writes them.
+        yield* fileSystem.writeFileString(
+          path.join(root, "context.code-workspace"),
+          `{ "folders": [
+            { "path": "." },
+            { "path": "${outsideApi}", "name": "API" },
+            { "path": "${path.relative(root, outsideLib)}" },
+            { "path": "${path.join(elsewhere, "team-b", "docs")}" },
+          ] }`,
+        );
+
+        expect(yield* list(root)).toEqual([
+          { relativePath: ".", name: path.basename(root), path: root },
+          {
+            relativePath: path.relative(root, outsideApi).split(path.sep).join("/"),
+            name: "API",
+            path: outsideApi,
+          },
+          {
+            relativePath: path.relative(root, outsideLib).split(path.sep).join("/"),
+            name: "lib",
+            path: outsideLib,
+          },
+        ]);
+      }),
+    );
+
+    it.effect("a workspace file that only names the folder itself is an ordinary checkout", () =>
+      Effect.gen(function* () {
+        const root = yield* makeWorkspace({
+          ".git/HEAD": "ref",
+          "self.code-workspace": `{ "folders": [{ "path": "." }] }`,
+        });
+
+        expect(yield* list(root)).toEqual([]);
       }),
     );
 

@@ -18,11 +18,14 @@
  *
  * @module CheckpointStore
  */
-import { VcsUnsupportedOperationError, type CheckpointRef } from "@t3tools/contracts";
+import {
+  VcsUnsupportedOperationError,
+  workspaceRepositoryPathPrefix,
+  type CheckpointRef,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
 
 import type { CheckpointStoreError } from "./Errors.ts";
 import type { VcsCheckpointOps } from "../vcs/VcsDriver.ts";
@@ -118,7 +121,6 @@ const MULTI_REPO_CONCURRENCY = 4;
 export const make = Effect.gen(function* () {
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
-  const path = yield* Path.Path;
 
   const resolveCheckpoints = Effect.fn("CheckpointStore.resolveCheckpoints")(function* (
     operation: string,
@@ -140,15 +142,14 @@ export const make = Effect.gen(function* () {
       .detect({ cwd, requestedKind: "git" })
       .pipe(Effect.map((repository) => repository !== null));
 
-  // A cwd that is no repository and holds none stays a single target, so its operations
-  // fail the way they always have.
+  // A cwd that holds no workspace stays a single target, whether it is a repository or not,
+  // so its operations fail the way they always have.
   const resolveTargets = Effect.fn("CheckpointStore.resolveTargets")(function* (cwd: string) {
-    if (yield* isGitRepository(cwd)) return [{ cwd, pathPrefix: null }];
     const repositories = yield* workspaceRepositories.list(cwd);
     if (repositories.length === 0) return [{ cwd, pathPrefix: null }];
     return repositories.map((repository): CheckpointTarget => ({
-      cwd: path.join(cwd, ...repository.relativePath.split("/")),
-      pathPrefix: repository.relativePath,
+      cwd: repository.path,
+      pathPrefix: workspaceRepositoryPathPrefix(repository),
     }));
   });
 
@@ -232,7 +233,7 @@ export const make = Effect.gen(function* () {
           "CheckpointStore.diffCheckpoints",
           target.cwd,
         );
-        if (target.pathPrefix !== null) {
+        if (targets.length > 1) {
           // A repository added to the workspace after either checkpoint has nothing to compare.
           const comparable =
             (yield* checkpoints.hasCheckpointRef({
