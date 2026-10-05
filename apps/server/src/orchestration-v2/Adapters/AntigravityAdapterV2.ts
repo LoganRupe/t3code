@@ -1,5 +1,6 @@
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
+  outsideWorkspaceRepositoryPaths,
   ProviderDriverKind,
   ProviderInstanceId,
   type OrchestrationV2ProviderCapabilities,
@@ -129,7 +130,10 @@ export function makeAntigravityAcpAdapterFlavor(
           options.makeRuntime({
             ...input,
             clientFileSystem: true,
-            additionalDirectories: [options.host.paths.attachmentsDir],
+            additionalDirectories: [
+              options.host.paths.attachmentsDir,
+              ...outsideWorkspaceRepositoryPaths(input.runtimePolicy.repositories),
+            ],
           }),
         )
         .pipe(Effect.provideService(Scope.Scope, scope));

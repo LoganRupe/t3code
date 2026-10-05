@@ -2191,6 +2191,25 @@ describe("OpenCodeAdapterV2", () => {
     ),
   );
 
+  it("allows repositories the workspace lists outside the cwd once edits are unattended", () => {
+    const repositories = [
+      { relativePath: ".", name: "workspace", path: "/workspace" },
+      { relativePath: "../team/lib", name: "lib", path: "/team/lib/" },
+    ];
+    const outsideRule = (rules: ReturnType<typeof openCodePermissionRules>) =>
+      rules.find(
+        (rule) => rule.permission === "external_directory" && rule.pattern === "/team/lib/*",
+      );
+    assert.equal(
+      outsideRule(openCodePermissionRules(runtimePolicy("auto-accept-edits", { repositories })))
+        ?.action,
+      "allow",
+    );
+    assert.isUndefined(
+      outsideRule(openCodePermissionRules(runtimePolicy("approval-required", { repositories }))),
+    );
+  });
+
   it("maps runtime modes to safe OpenCode permission rules", () => {
     const approvalRequired = openCodePermissionRules(runtimePolicy("approval-required"));
     assert.equal(permissionAction(approvalRequired, "read"), "allow");

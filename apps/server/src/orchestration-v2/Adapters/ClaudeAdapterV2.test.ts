@@ -231,6 +231,22 @@ function makeClaudeTestTurnInput(input: {
 }
 
 describe("ClaudeAdapterV2 runtime query policy", () => {
+  it("grants repositories the workspace lists outside the cwd", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "outside-thread",
+      resume: false,
+      cwd: "/workspace",
+      attachmentsDir: "/attachments",
+      repositories: [
+        { relativePath: ".", name: "workspace", path: "/workspace" },
+        { relativePath: "api", name: "api", path: "/workspace/api" },
+        { relativePath: "../team/lib", name: "lib", path: "/team/lib" },
+      ],
+    });
+    assert.deepEqual(options.additionalDirectories, ["/workspace", "/attachments", "/team/lib"]);
+  });
+
   it.each([
     ["--permission-mode acceptEdits", "acceptEdits"],
     ["--dangerously-skip-permissions", "bypassPermissions"],
