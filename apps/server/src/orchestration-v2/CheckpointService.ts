@@ -298,9 +298,12 @@ export const layer: Layer.Layer<
             return;
           }
 
+          // In a multi-repo workspace the ref may be missing from one repository only; the
+          // others keep the checkpoint they captured at the time.
           yield* checkpointStore.captureCheckpoint({
             cwd: input.scope.cwd,
             checkpointRef,
+            onlyMissing: true,
           });
         }),
       ).pipe(

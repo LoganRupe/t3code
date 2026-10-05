@@ -311,6 +311,49 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
         }),
     );
 
+    it.effect("a baseline fills a new repository's gap without rewriting the others", () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeWorkspace;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const threadId = ThreadId.make("thread-late-baseline");
+        const checkpointRef = checkpointRefForThreadTurn(threadId, 0);
+        const laterRef = checkpointRefForThreadTurn(threadId, 1);
+
+        yield* checkpointStore.captureCheckpoint({ cwd: workspace, checkpointRef });
+        // Between turns the user edits `api` and clones a third repository into the workspace.
+        yield* writeTextFile(NodePath.join(workspace, "api", "README.md"), "# edited\n");
+        const late = NodePath.join(workspace, "docs");
+        yield* fileSystem.makeDirectory(late);
+        yield* initRepoWithCommit(late);
+        expect(yield* checkpointStore.hasCheckpointRef({ cwd: workspace, checkpointRef })).toBe(
+          false,
+        );
+
+        yield* checkpointStore.captureCheckpoint({
+          cwd: workspace,
+          checkpointRef,
+          onlyMissing: true,
+        });
+        yield* checkpointStore.captureCheckpoint({ cwd: workspace, checkpointRef: laterRef });
+
+        expect(yield* checkpointStore.hasCheckpointRef({ cwd: workspace, checkpointRef })).toBe(
+          true,
+        );
+        // `api`'s checkpoint still predates the edit, so the edit shows up in the turn's diff.
+        const numstat = yield* checkpointStore.diffCheckpoints({
+          cwd: workspace,
+          fromCheckpointRef: checkpointRef,
+          toCheckpointRef: laterRef,
+          ignoreWhitespace: false,
+          format: "numstat",
+        });
+        expect(parseTurnDiffFilesFromNumstat(numstat)).toEqual([
+          { path: "api/README.md", additions: 1, deletions: 1 },
+        ]);
+      }),
+    );
+
     it.effect("restores nothing when a repository is missing the checkpoint", () =>
       Effect.gen(function* () {
         const workspace = yield* makeWorkspace;

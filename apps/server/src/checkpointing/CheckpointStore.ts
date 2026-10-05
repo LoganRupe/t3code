@@ -38,6 +38,12 @@ import { prefixNumstatPaths, prefixPatchPaths } from "./Diffs.ts";
 export interface CaptureCheckpointInput {
   readonly cwd: string;
   readonly checkpointRef: CheckpointRef;
+  /**
+   * Capture only in the repositories that do not have the ref yet. A baseline fills the gap a
+   * repository added to the workspace leaves, without rewriting the checkpoints the others
+   * already hold.
+   */
+  readonly onlyMissing?: boolean;
 }
 
 /** Folders under a repository that belong to other repositories of the same workspace. */
@@ -190,17 +196,20 @@ export const make = Effect.gen(function* () {
 
   const captureCheckpoint: CheckpointStore["Service"]["captureCheckpoint"] = Effect.fn(
     "captureCheckpoint",
-  )(function* (input) {
+  )(function* ({ onlyMissing, ...input }) {
     yield* forEachTarget(yield* resolveTargets(input.cwd), (target) =>
-      resolveCheckpoints("CheckpointStore.captureCheckpoint", target.cwd).pipe(
-        Effect.flatMap((checkpoints) =>
-          checkpoints.captureCheckpoint({
-            ...input,
-            cwd: target.cwd,
-            ...(target.excludePaths.length === 0 ? {} : { excludePaths: target.excludePaths }),
-          }),
-        ),
-      ),
+      Effect.gen(function* () {
+        if (onlyMissing === true && (yield* hasRefIn(target, input.checkpointRef))) return;
+        const checkpoints = yield* resolveCheckpoints(
+          "CheckpointStore.captureCheckpoint",
+          target.cwd,
+        );
+        yield* checkpoints.captureCheckpoint({
+          ...input,
+          cwd: target.cwd,
+          ...(target.excludePaths.length === 0 ? {} : { excludePaths: target.excludePaths }),
+        });
+      }),
     );
   });
 
