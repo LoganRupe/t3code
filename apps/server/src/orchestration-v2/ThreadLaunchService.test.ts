@@ -1239,8 +1239,8 @@ it.effect("provisions under t3-<hash> when a plain t3 branch blocks t3/*", () =>
 it.effect("gives a multi-repo project one container with a worktree per repository", () =>
   Effect.gen(function* () {
     const repositories = [
-      { relativePath: "api", name: "api" },
-      { relativePath: "web", name: "web" },
+      { relativePath: "api", name: "api", path: "/repo/api" },
+      { relativePath: "web", name: "web", path: "/repo/web" },
     ];
     const harness = makeHarness({ repositories });
     yield* Effect.gen(function* () {
