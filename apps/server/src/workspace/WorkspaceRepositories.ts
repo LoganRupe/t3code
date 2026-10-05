@@ -22,7 +22,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
-const CODE_WORKSPACE_EXTENSION = ".code-workspace";
+export const CODE_WORKSPACE_EXTENSION = ".code-workspace";
 
 const CodeWorkspaceDocument = Schema.Struct({
   folders: Schema.optional(
@@ -123,10 +123,21 @@ export const make = Effect.gen(function* () {
     const document = yield* fileSystem
       .readFileString(path.join(cwd, workspaceFile))
       .pipe(Effect.flatMap(decodeCodeWorkspace));
+    // When `cwd` is a symlink, `../api` means a sibling of the real folder, the way the OS and
+    // a shell resolve it, so a path missing beside the link is retried beside its target.
+    const realCwd = yield* fileSystem.realPath(cwd).pipe(Effect.orElseSucceed(() => cwd));
+    const resolveFolder = Effect.fn("WorkspaceRepositories.resolveFolder")(function* (
+      folderPath: string,
+    ) {
+      const lexical = path.resolve(cwd, folderPath);
+      if (realCwd === cwd || (yield* exists(lexical))) return lexical;
+      const physical = path.resolve(realCwd, folderPath);
+      return (yield* exists(physical)) ? physical : lexical;
+    });
     const repositories: Array<VcsRepository> = [];
     const listedFolders: Array<string> = [];
     for (const folder of document.folders ?? []) {
-      const absolutePath = path.resolve(cwd, folder.path);
+      const absolutePath = yield* resolveFolder(folder.path);
       const relativePath = toRelativePath(cwd, absolutePath);
       if (listedFolders.includes(relativePath)) continue;
       listedFolders.push(relativePath);
