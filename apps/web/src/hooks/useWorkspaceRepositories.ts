@@ -6,8 +6,8 @@ import { vcsEnvironment } from "../state/vcs";
 const NO_REPOSITORIES: ReadonlyArray<VcsRepository> = [];
 
 /**
- * Repositories a multi-repo workspace folder holds. Asked only once Git status reports that
- * `cwd` is not itself a repository, so ordinary checkouts never make the request.
+ * Repositories a multi-repo workspace folder holds. The folder may itself be one of them, so
+ * the request waits only for Git status to settle; an ordinary checkout answers with none.
  */
 export function useWorkspaceRepositories(input: {
   readonly environmentId: EnvironmentId | null;
@@ -15,7 +15,7 @@ export function useWorkspaceRepositories(input: {
   readonly isRepo: boolean | undefined;
 }): ReadonlyArray<VcsRepository> {
   const query = useEnvironmentQuery(
-    input.environmentId !== null && input.cwd !== null && input.isRepo === false
+    input.environmentId !== null && input.cwd !== null && input.isRepo !== undefined
       ? vcsEnvironment.listRepositories({
           environmentId: input.environmentId,
           input: { cwd: input.cwd },
