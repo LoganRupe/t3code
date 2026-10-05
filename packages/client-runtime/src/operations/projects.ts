@@ -21,6 +21,7 @@ import {
   inferProjectTitleFromPath,
   isExplicitRelativeProjectPath,
   isUnsupportedWindowsProjectPath,
+  projectFolderForPath,
   resolveProjectPathForDispatch,
 } from "../state/projects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
@@ -333,7 +334,9 @@ export function resolveAddProjectPath(input: {
   if (isExplicitRelativeProjectPath(rawPath) && !input.currentProjectCwd) {
     return { ok: false, error: "Relative paths require an active project in this environment." };
   }
-  const path = resolveProjectPathForDispatch(rawPath, input.currentProjectCwd);
+  const path = projectFolderForPath(
+    resolveProjectPathForDispatch(rawPath, input.currentProjectCwd),
+  );
   return path.length === 0 ? { ok: false, error: "Enter a project path." } : { ok: true, path };
 }
 
