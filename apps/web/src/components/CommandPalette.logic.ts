@@ -526,8 +526,10 @@ export function buildBrowseGroups(input: {
   canBrowseUp: boolean;
   upIcon: ReactNode;
   directoryIcon: ReactNode;
+  workspaceFileIcon: ReactNode;
   browseUp: () => void | Promise<void>;
   browseTo: (name: string) => void | Promise<void>;
+  addWorkspaceFile: (fullPath: string) => void | Promise<void>;
 }): CommandPaletteGroup[] {
   const items: CommandPaletteActionItem[] = [];
 
@@ -546,15 +548,18 @@ export function buildBrowseGroups(input: {
   }
 
   for (const entry of input.browseEntries) {
+    const isWorkspaceFile = entry.kind === "workspaceFile";
     items.push({
       kind: "action",
       value: `browse:${entry.fullPath}`,
       searchTerms: [input.browseQuery, entry.fullPath, entry.name],
       title: entry.name,
-      icon: input.directoryIcon,
+      icon: isWorkspaceFile ? input.workspaceFileIcon : input.directoryIcon,
       keepOpen: true,
       run: async () => {
-        await input.browseTo(entry.name);
+        await (isWorkspaceFile
+          ? input.addWorkspaceFile(entry.fullPath)
+          : input.browseTo(entry.name));
       },
     });
   }

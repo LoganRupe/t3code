@@ -721,8 +721,10 @@ describe("buildBrowseGroups", () => {
       canBrowseUp: false,
       upIcon: null,
       directoryIcon: null,
+      workspaceFileIcon: null,
       browseUp: vi.fn(),
       browseTo,
+      addWorkspaceFile: vi.fn(),
     });
     const item = groups[0]?.items[0];
     if (!item || item.kind !== "action") {
