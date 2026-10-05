@@ -141,10 +141,10 @@ it.effect("refreshes every repository of a multi-repo workspace after a run", ()
       Layer.mergeAll(
         Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
         Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({
-          list: () =>
+          list: (cwd) =>
             Effect.succeed([
-              { relativePath: "api", name: "api" },
-              { relativePath: "web", name: "web" },
+              { relativePath: "api", name: "api", path: `${cwd}/api` },
+              { relativePath: "web", name: "web", path: `${cwd}/web` },
             ]),
         }),
         Layer.mock(PullRequestService.PullRequestService)({
@@ -189,7 +189,7 @@ it.effect("refreshes pull requests of a multi-repo project folder's checked-out 
       Layer.mergeAll(
         Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
         Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({
-          list: () => Effect.succeed([{ relativePath: "api", name: "api" }]),
+          list: (cwd) => Effect.succeed([{ relativePath: "api", name: "api", path: `${cwd}/api` }]),
         }),
         Layer.mock(PullRequestService.PullRequestService)({
           refreshAfterTurn: () => Effect.void,

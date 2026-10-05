@@ -84,8 +84,8 @@ const TestLayer = RuntimePolicy.layerFromProjectStore.pipe(
         Effect.succeed(
           cwd === "/multi-repo-root"
             ? [
-                { relativePath: "api", name: "api" },
-                { relativePath: "web", name: "Web" },
+                { relativePath: "api", name: "api", path: "/multi-repo-root/api" },
+                { relativePath: "web", name: "Web", path: "/multi-repo-root/web" },
               ]
             : [],
         ),
@@ -161,8 +161,8 @@ it.layer(TestLayer)("RuntimePolicyV2", (it) => {
         modelSelection,
       });
       assert.deepEqual(multiRepo.repositories, [
-        { relativePath: "api", name: "api" },
-        { relativePath: "web", name: "Web" },
+        { relativePath: "api", name: "api", path: "/multi-repo-root/api" },
+        { relativePath: "web", name: "Web", path: "/multi-repo-root/web" },
       ]);
       assert.isUndefined(singleRepo.repositories);
     }),

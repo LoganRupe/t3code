@@ -195,6 +195,64 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
       }),
     );
 
+    it.effect(
+      "covers the root repository and repositories the workspace file lists elsewhere",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const checkpointStore = yield* CheckpointStore.CheckpointStore;
+          const elsewhere = yield* makeTmpDir("checkpoint-store-elsewhere-");
+          const outsideApi = NodePath.join(elsewhere, "team-a", "api");
+          yield* fileSystem.makeDirectory(outsideApi, { recursive: true });
+          yield* initRepoWithCommit(outsideApi);
+          // The workspace folder is a repository of its own: a context repo with the docs.
+          const workspace = yield* makeTmpDir("checkpoint-store-context-");
+          yield* initRepoWithCommit(workspace);
+          yield* writeTextFile(
+            NodePath.join(workspace, "context.code-workspace"),
+            `{ "folders": [{ "path": "." }, { "path": "${outsideApi}", "name": "API" }] }`,
+          );
+          const threadId = ThreadId.make("thread-outside-repo");
+          const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+          const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+
+          yield* checkpointStore.captureCheckpoint({
+            cwd: workspace,
+            checkpointRef: fromCheckpointRef,
+          });
+          yield* writeTextFile(NodePath.join(workspace, "NOTES.md"), "context\n");
+          yield* writeTextFile(NodePath.join(outsideApi, "README.md"), "# api\n");
+          yield* checkpointStore.captureCheckpoint({
+            cwd: workspace,
+            checkpointRef: toCheckpointRef,
+          });
+
+          const numstat = yield* checkpointStore.diffCheckpoints({
+            cwd: workspace,
+            fromCheckpointRef,
+            toCheckpointRef,
+            ignoreWhitespace: false,
+            format: "numstat",
+          });
+          // Root paths stay bare; the outside repository is known by its workspace name.
+          expect(parseTurnDiffFilesFromNumstat(numstat)).toEqual([
+            { path: "API/README.md", additions: 1, deletions: 1 },
+            { path: "NOTES.md", additions: 1, deletions: 0 },
+          ]);
+
+          expect(
+            yield* checkpointStore.restoreCheckpoint({
+              cwd: workspace,
+              checkpointRef: fromCheckpointRef,
+            }),
+          ).toBe(true);
+          expect(yield* fileSystem.exists(NodePath.join(workspace, "NOTES.md"))).toBe(false);
+          expect(yield* fileSystem.readFileString(NodePath.join(outsideApi, "README.md"))).toBe(
+            "# test\n",
+          );
+        }),
+    );
+
     it.effect("restores nothing when a repository is missing the checkpoint", () =>
       Effect.gen(function* () {
         const workspace = yield* makeWorkspace;

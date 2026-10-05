@@ -3,7 +3,6 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import { joinWorkspaceRepositoryPath } from "@t3tools/shared/path";
 
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
@@ -130,11 +129,7 @@ export const observerLive = Layer.effect(
           // A multi-repo workspace folder is not a repository; its repositories hold the status.
           const repositories = yield* workspaceRepositories.list(cwd);
           const statusCwds =
-            repositories.length === 0
-              ? [cwd]
-              : repositories.map((repository) =>
-                  joinWorkspaceRepositoryPath(cwd, repository.relativePath),
-                );
+            repositories.length === 0 ? [cwd] : repositories.map((repository) => repository.path);
           yield* Effect.all(
             [
               workspaceEntries.refresh(cwd),

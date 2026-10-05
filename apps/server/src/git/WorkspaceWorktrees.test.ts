@@ -52,8 +52,8 @@ it.effect("creates, renames and removes an isolated run across repositories", ()
       const created = yield* worktrees.create({
         workspaceRoot,
         repositories: [
-          { relativePath: "api", name: "api" },
-          { relativePath: "web", name: "web" },
+          { relativePath: "api", name: "api", path: path.join(workspaceRoot, "api") },
+          { relativePath: "web", name: "web", path: path.join(workspaceRoot, "web") },
         ],
         branch: "t3code/abcd1234",
         startFromOrigin: false,
@@ -128,7 +128,13 @@ it.effect("removes nested worktrees after the workspace file is gone", () =>
       );
       const created = yield* worktrees.create({
         workspaceRoot,
-        repositories: [{ relativePath: "packages/api", name: "api" }],
+        repositories: [
+          {
+            relativePath: "packages/api",
+            name: "api",
+            path: path.join(workspaceRoot, "packages", "api"),
+          },
+        ],
         branch: "nested",
         startFromOrigin: false,
       });
@@ -158,7 +164,7 @@ it.effect("keeps a container that holds anything besides its worktrees and links
       yield* initRepository(path.join(workspaceRoot, "api"));
       const created = yield* worktrees.create({
         workspaceRoot,
-        repositories: [{ relativePath: "api", name: "api" }],
+        repositories: [{ relativePath: "api", name: "api", path: path.join(workspaceRoot, "api") }],
         branch: "keep-notes",
         startFromOrigin: false,
       });
@@ -195,7 +201,7 @@ it.effect("with a workspace file, links files, dot-folders and listed folders on
 
       const created = yield* worktrees.create({
         workspaceRoot,
-        repositories: [{ relativePath: "api", name: "api" }],
+        repositories: [{ relativePath: "api", name: "api", path: path.join(workspaceRoot, "api") }],
         branch: "listed-only",
         startFromOrigin: false,
       });

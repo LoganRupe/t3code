@@ -150,11 +150,38 @@ export const VcsListRepositoriesInput = Schema.Struct({
 export type VcsListRepositoriesInput = typeof VcsListRepositoriesInput.Type;
 
 export const VcsRepository = Schema.Struct({
-  /** Path from the queried cwd, using `/` separators. */
+  /**
+   * Path from the queried cwd, using `/` separators. `.` is the cwd itself; a path that
+   * starts with `..` is a repository the workspace file lists outside the folder.
+   */
   relativePath: TrimmedNonEmptyStringSchema,
   name: TrimmedNonEmptyStringSchema,
+  /** Absolute path of the repository on the environment. */
+  path: TrimmedNonEmptyStringSchema,
 });
 export type VcsRepository = typeof VcsRepository.Type;
+
+/** True for a repository the workspace file lists outside the workspace folder. */
+export function isOutsideWorkspaceRepository(repository: Pick<VcsRepository, "relativePath">) {
+  const { relativePath } = repository;
+  return (
+    relativePath === ".." ||
+    relativePath.startsWith("../") ||
+    relativePath.startsWith("/") ||
+    /^[A-Za-z]:\//.test(relativePath)
+  );
+}
+
+/**
+ * Prefix for a repository's paths in a workspace-wide diff. The root repository's paths need
+ * none, an outside repository is known by its name, and a nested one by where it sits.
+ */
+export function workspaceRepositoryPathPrefix(
+  repository: Pick<VcsRepository, "relativePath" | "name">,
+): string | null {
+  if (repository.relativePath === ".") return null;
+  return isOutsideWorkspaceRepository(repository) ? repository.name : repository.relativePath;
+}
 
 export const VcsListRepositoriesResult = Schema.Struct({
   /** Empty when the cwd is itself inside a repository or holds none. */
