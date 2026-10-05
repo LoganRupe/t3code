@@ -253,6 +253,64 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
         }),
     );
 
+    it.effect(
+      "a root repository leaves the repositories nested inside it to their own captures",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const checkpointStore = yield* CheckpointStore.CheckpointStore;
+          // The layout of an isolated run: the root checkout holds the other worktrees.
+          const workspace = yield* makeTmpDir("checkpoint-store-nested-root-");
+          yield* initRepoWithCommit(workspace);
+          yield* fileSystem.makeDirectory(NodePath.join(workspace, "api"));
+          yield* initRepoWithCommit(NodePath.join(workspace, "api"));
+          yield* writeTextFile(
+            NodePath.join(workspace, "nested.code-workspace"),
+            `{ "folders": [{ "path": "." }, { "path": "api" }] }`,
+          );
+          const threadId = ThreadId.make("thread-nested-root");
+          const fromCheckpointRef = checkpointRefForThreadTurn(threadId, 0);
+          const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1);
+
+          yield* checkpointStore.captureCheckpoint({
+            cwd: workspace,
+            checkpointRef: fromCheckpointRef,
+          });
+          yield* writeTextFile(NodePath.join(workspace, "README.md"), "# root\n");
+          yield* writeTextFile(NodePath.join(workspace, "api", "README.md"), "# api\n");
+          yield* checkpointStore.captureCheckpoint({
+            cwd: workspace,
+            checkpointRef: toCheckpointRef,
+          });
+
+          const numstat = yield* checkpointStore.diffCheckpoints({
+            cwd: workspace,
+            fromCheckpointRef,
+            toCheckpointRef,
+            ignoreWhitespace: false,
+            format: "numstat",
+          });
+          // Without the exclusion the root would record `api` as a subproject and list it here.
+          expect(parseTurnDiffFilesFromNumstat(numstat)).toEqual([
+            { path: "api/README.md", additions: 1, deletions: 1 },
+            { path: "README.md", additions: 1, deletions: 1 },
+          ]);
+
+          expect(
+            yield* checkpointStore.restoreCheckpoint({
+              cwd: workspace,
+              checkpointRef: fromCheckpointRef,
+            }),
+          ).toBe(true);
+          expect(yield* fileSystem.readFileString(NodePath.join(workspace, "README.md"))).toBe(
+            "# test\n",
+          );
+          expect(
+            yield* fileSystem.readFileString(NodePath.join(workspace, "api", "README.md")),
+          ).toBe("# test\n");
+        }),
+    );
+
     it.effect("restores nothing when a repository is missing the checkpoint", () =>
       Effect.gen(function* () {
         const workspace = yield* makeWorkspace;
