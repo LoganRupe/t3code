@@ -227,6 +227,37 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
         );
       }),
     );
+    it.effect("fills in a new repository without overwriting existing checkpoints", () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeWorkspace;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const threadId = ThreadId.make("thread-multi-repo-fill-in");
+        const checkpointRef = checkpointRefForThreadTurn(threadId, 0);
+
+        yield* checkpointStore.captureCheckpoint({ cwd: workspace, checkpointRef });
+        const late = NodePath.join(workspace, "late");
+        yield* fileSystem.makeDirectory(late);
+        yield* initRepoWithCommit(late);
+        yield* writeTextFile(NodePath.join(workspace, "api", "README.md"), "# edited\n");
+
+        yield* checkpointStore.captureCheckpoint({
+          cwd: workspace,
+          checkpointRef,
+          missingOnly: true,
+        });
+
+        expect(yield* checkpointStore.hasCheckpointRef({ cwd: workspace, checkpointRef })).toBe(
+          true,
+        );
+        expect(yield* checkpointStore.restoreCheckpoint({ cwd: workspace, checkpointRef })).toBe(
+          true,
+        );
+        expect(yield* fileSystem.readFileString(NodePath.join(workspace, "api", "README.md"))).toBe(
+          "# test\n",
+        );
+      }),
+    );
   });
 
   describe("diffCheckpoints", () => {
