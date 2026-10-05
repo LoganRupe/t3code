@@ -182,6 +182,31 @@ it.layer(TestLayer)("WorkspaceRepositories", (it) => {
       }),
     );
 
+    it.effect("a symlinked workspace finds `../` folders beside its real folder", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const projects = yield* makeWorkspace({
+          "team/context/.git/HEAD": "ref",
+          "team/context/context.code-workspace": `{ "folders": [{ "path": "." }, { "path": "../api" }] }`,
+          "team/api": "repo",
+          links: "dir",
+        });
+        const link = path.join(projects, "links", "context");
+        yield* fileSystem.symlink(path.join(projects, "team", "context"), link);
+        const realApi = path.join(yield* fileSystem.realPath(projects), "team", "api");
+
+        expect(yield* list(link)).toEqual([
+          { relativePath: ".", name: "context", path: link },
+          {
+            relativePath: path.relative(link, realApi).split(path.sep).join("/"),
+            name: "api",
+            path: realApi,
+          },
+        ]);
+      }),
+    );
+
     it.effect("a workspace file that only names the folder itself is an ordinary checkout", () =>
       Effect.gen(function* () {
         const root = yield* makeWorkspace({
