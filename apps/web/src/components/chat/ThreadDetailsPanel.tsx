@@ -206,20 +206,27 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   title={repository.name}
                   separated={density === "full"}
                 >
-                  <GitActionsControl
-                    displayMode="panel"
-                    compact={density !== "full"}
-                    gitCwd={repository.path}
-                    activeThreadRef={{
-                      environmentId: props.environmentId,
-                      threadId: props.threadId,
-                    }}
-                    syncThreadBranch={repository.relativePath === "."}
-                    {...(props.draftId ? { draftId: props.draftId } : {})}
-                    {...(props.onOpenChanges
-                      ? { onOpenChanges: () => props.onOpenChanges!(repository.relativePath) }
-                      : {})}
-                  />
+                  <div className="flex flex-col">
+                    {/* The root repository is the thread's own checkout, so it keeps the
+                        thread's branch picker. */}
+                    {repository.relativePath === "." ? (
+                      <BranchToolbar layout="panel" panelSection="branch" {...branchToolbarProps} />
+                    ) : null}
+                    <GitActionsControl
+                      displayMode="panel"
+                      compact={density !== "full"}
+                      gitCwd={repository.path}
+                      activeThreadRef={{
+                        environmentId: props.environmentId,
+                        threadId: props.threadId,
+                      }}
+                      syncThreadBranch={repository.relativePath === "."}
+                      {...(props.draftId ? { draftId: props.draftId } : {})}
+                      {...(props.onOpenChanges
+                        ? { onOpenChanges: () => props.onOpenChanges!(repository.relativePath) }
+                        : {})}
+                    />
+                  </div>
                 </ThreadDetailsSection>
               ))
             : null}
