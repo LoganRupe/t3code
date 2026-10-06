@@ -145,6 +145,40 @@ it.effect("removes nested worktrees after the workspace file is gone", () =>
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+it.effect("uses t3-<hash> in every repository when one has a plain t3 branch", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-workspace-worktrees-",
+    });
+    yield* Effect.gen(function* () {
+      const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+      const workspaceRoot = path.join(baseDir, "project");
+      yield* initRepository(path.join(workspaceRoot, "api"));
+      yield* initRepository(path.join(workspaceRoot, "web"));
+      yield* git(path.join(workspaceRoot, "web"), ["branch", "t3"]);
+
+      const created = yield* worktrees.create({
+        workspaceRoot,
+        repositories: [
+          { relativePath: "api", name: "api" },
+          { relativePath: "web", name: "web" },
+        ],
+        branch: "t3/abcd1234",
+        startFromOrigin: false,
+      });
+
+      assert.equal(created.branch, "t3-abcd1234");
+      assert.equal(created.path, path.join(baseDir, "worktrees", "project", "t3-abcd1234"));
+      assert.equal(
+        yield* git(path.join(created.path, "api"), ["branch", "--show-current"]),
+        "t3-abcd1234",
+      );
+    }).pipe(Effect.provide(layerTest(baseDir)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("keeps a container that holds anything besides its worktrees and links", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
