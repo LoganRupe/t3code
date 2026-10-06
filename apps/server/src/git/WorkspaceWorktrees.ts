@@ -11,6 +11,11 @@
  * @module WorkspaceWorktrees
  */
 import { GitCommandError, type VcsRepository } from "@t3tools/contracts";
+import {
+  flattenTemporaryWorktreeBranchName,
+  isTemporaryWorktreeBranch,
+  WORKTREE_BRANCH_PREFIX,
+} from "@t3tools/shared/git";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -165,10 +170,21 @@ export const make = Effect.gen(function* () {
   const create: WorkspaceWorktrees["Service"]["create"] = Effect.fn("WorkspaceWorktrees.create")(
     function* (input, options) {
       const operation = "WorkspaceWorktrees.create";
+      // A plain `t3` branch in any repository blocks `t3/*`, so all of them use `t3-<hash>`.
+      let branch = input.branch;
+      if (isTemporaryWorktreeBranch(branch)) {
+        for (const repository of input.repositories) {
+          const cwd = join(input.workspaceRoot, repository.relativePath);
+          if (yield* hasCommit(cwd, `refs/heads/${WORKTREE_BRANCH_PREFIX}`)) {
+            branch = flattenTemporaryWorktreeBranchName(branch);
+            break;
+          }
+        }
+      }
       const container = path.join(
         config.worktreesDir,
         path.basename(input.workspaceRoot),
-        input.branch.replace(/\//g, "-"),
+        branch.replace(/\//g, "-"),
       );
       if (yield* fileSystem.exists(container).pipe(Effect.orElseSucceed(() => true))) {
         return yield* fail(operation, input.workspaceRoot, `${container} already exists.`);
@@ -198,12 +214,12 @@ export const make = Effect.gen(function* () {
         yield* git.createWorktree({
           cwd: repositoryCwd,
           refName: start.startRef,
-          newRefName: input.branch,
+          newRefName: branch,
           baseRefName: start.baseRef,
           path: worktreePath,
         });
       }
-      return { path: container, branch: input.branch };
+      return { path: container, branch };
     },
   );
 
