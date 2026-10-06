@@ -22,7 +22,7 @@ import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
-import { fileTreeEntryTarget, isRootPath } from "./filePath";
+import { fileTreeEntryTarget, isRootPath, rootGroupFolder } from "./filePath";
 import {
   labelForRoot,
   type ProjectFileRoot,
@@ -233,8 +233,15 @@ export default function FileBrowserPanel({
   const entryInfoRef = useRef<ReadonlyMap<string, TreeEntryInfo>>(entryInfo);
   // What a row's right-click actions and drag mention act on: its real file,
   // resolved through its root rather than the label its tree path starts with.
+  // A row that only groups roots acts on the folder they sit in, or on nothing
+  // when they don't share one.
   const entryTarget = (treePath: string) => {
-    const info = entryInfoRef.current.get(treePath);
+    const groupFolder = directoryRoots && rootGroupFolder(directoryRoots, treePath);
+    if (groupFolder === null) return null;
+    const info =
+      groupFolder === undefined
+        ? entryInfoRef.current.get(treePath)
+        : { root: groupFolder, relativePath: "" };
     return fileTreeEntryTarget({
       treePath,
       cwd,
@@ -275,6 +282,10 @@ export default function FileBrowserPanel({
     }
     const relativePath = item.path.replace(/\/$/, "");
     const target = entryTarget(relativePath);
+    if (!target) {
+      context.close();
+      return;
+    }
     const mention = serializeComposerFileLink(target.mentionPath);
     const pointer = contextMenuPointerRef.current;
     const pointerIsFresh = pointer !== null && performance.now() - pointer.at < 1000;
@@ -352,7 +363,7 @@ export default function FileBrowserPanel({
     () =>
       createFileTreeDragMentionController({
         deselect: (path) => treeModelRef.current?.getItem(path)?.deselect(),
-        mentionPath: (path) => entryTargetRef.current(path).mentionPath,
+        mentionPath: (path) => entryTargetRef.current(path)?.mentionPath ?? null,
       }),
     [],
   );
