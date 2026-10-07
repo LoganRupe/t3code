@@ -6,6 +6,7 @@ import {
   fileBreadcrumbs,
   fileTreeEntryTarget,
   isRootPath,
+  rootGroupFolder,
 } from "./filePath";
 
 describe("fileBreadcrumbs", () => {
@@ -169,5 +170,68 @@ describe("fileTreeEntryTarget", () => {
       filePath: "notes",
       mentionPath: "/home/user/dev/notes",
     });
+  });
+});
+
+describe("rootGroupFolder", () => {
+  const roots = [
+    { root: "/home/user/dev/dupe-a/docs", label: "dupe-a/docs" },
+    { root: "/home/user/dev/dupe-b/docs/", label: "dupe-b/docs" },
+    { root: "/home/user/dev/api", label: "api" },
+  ];
+
+  it("resolves a row that only groups roots to the folder they sit in", () => {
+    expect(rootGroupFolder(roots, "dupe-a")).toBe("/home/user/dev/dupe-a");
+    expect(rootGroupFolder(roots, "dupe-b")).toBe("/home/user/dev/dupe-b");
+  });
+
+  it("leaves roots and the rows inside them alone", () => {
+    expect(rootGroupFolder(roots, "dupe-a/docs")).toBeUndefined();
+    expect(rootGroupFolder(roots, "dupe-a/docs/guide")).toBeUndefined();
+    expect(rootGroupFolder(roots, "api")).toBeUndefined();
+    expect(rootGroupFolder(roots, "dupe")).toBeUndefined();
+  });
+
+  it("keeps a Windows root's separators", () => {
+    expect(
+      rootGroupFolder([{ root: "C:\\dev\\dupe-a\\docs", label: "dupe-a/docs" }], "dupe-a"),
+    ).toBe("C:\\dev\\dupe-a");
+  });
+
+  it("names no folder for a row that is a drive or a network host", () => {
+    // `C:\\docs` and `D:\\docs` are labelled `C:/docs` and `D:/docs`, so the
+    // tree shows a `C:` row.
+    const drives = [
+      { root: "C:\\docs", label: "C:/docs" },
+      { root: "D:\\docs", label: "D:/docs" },
+    ];
+    expect(rootGroupFolder(drives, "C:")).toBeNull();
+    const shares = [
+      { root: "\\\\server\\share\\docs", label: "server/share/docs" },
+      { root: "\\\\other\\share\\docs", label: "other/share/docs" },
+    ];
+    expect(rootGroupFolder(shares, "server")).toBeNull();
+    expect(rootGroupFolder(shares, "server/share")).toBe("\\\\server\\share");
+  });
+
+  it("names no folder for a worktree, whose path doesn't end in its label", () => {
+    expect(
+      rootGroupFolder(
+        [{ root: "/home/user/.t3/worktrees/docs-feature", label: "dupe-a/docs" }],
+        "dupe-a",
+      ),
+    ).toBeNull();
+  });
+
+  it("names no folder when the grouped roots sit in different folders", () => {
+    expect(
+      rootGroupFolder(
+        [
+          { root: "/x/shared/dupe-a/docs", label: "dupe-a/docs" },
+          { root: "/y/dupe-a/notes", label: "dupe-a/notes" },
+        ],
+        "dupe-a",
+      ),
+    ).toBeNull();
   });
 });
