@@ -10,6 +10,8 @@ interface FileTreeDragTransfer {
 export interface FileTreeDragStartEvent {
   readonly dataTransfer: FileTreeDragTransfer | null;
   composedPath(): ReadonlyArray<unknown>;
+  preventDefault(): void;
+  stopPropagation(): void;
 }
 
 export interface FileTreeDragMentionHost {
@@ -86,6 +88,11 @@ export function createFileTreeDragMentionController(
         })
         .filter((mention): mention is string => mention !== null);
       if (mentions.length === 0) {
+        // Nothing here names a real path, so there is nothing to drag. Cancel
+        // before the tree sees the event: it would select the rows and add
+        // their tree path as text/plain, which the composer inserts as text.
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
       draggedPaths = dragged;

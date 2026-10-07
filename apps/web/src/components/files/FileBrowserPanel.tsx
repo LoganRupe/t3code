@@ -180,10 +180,14 @@ export default function FileBrowserPanel({
     if (query.trim() && !pathSearch.isPending) {
       for (const searchEntry of pathSearch.entries) {
         let entry = searchEntry;
+        // Segments above a root's own node only group roots (`dupe-a` over
+        // `dupe-a/docs`); they don't belong to this root, so they get none.
+        let rootDepth = 0;
         if (rootLabels) {
           const label = searchEntry.root ? labelForRoot(rootLabels, searchEntry.root) : undefined;
           if (label === undefined) continue;
           entry = { ...searchEntry, path: `${label}/${searchEntry.path}` };
+          rootDepth = label.split("/").length;
         }
         if (!result.has(entry.path)) result.set(entry.path, entry);
         const segments = entry.path.split("/");
@@ -193,7 +197,7 @@ export default function FileBrowserPanel({
             result.set(path, {
               path,
               kind: "directory",
-              ...(entry.root ? { root: entry.root } : {}),
+              ...(entry.root && index >= rootDepth ? { root: entry.root } : {}),
             });
         }
       }
@@ -282,17 +286,26 @@ export default function FileBrowserPanel({
     }
     const relativePath = item.path.replace(/\/$/, "");
     const target = entryTarget(relativePath);
-    if (!target) {
-      context.close();
-      return;
-    }
-    const mention = serializeComposerFileLink(target.mentionPath);
     const pointer = contextMenuPointerRef.current;
     const pointerIsFresh = pointer !== null && performance.now() - pointer.at < 1000;
     const anchorRect = context.anchorElement.getBoundingClientRect();
     const position = pointerIsFresh
       ? { x: pointer.x, y: pointer.y }
       : { x: anchorRect.left, y: anchorRect.bottom };
+    if (!target) {
+      // A group row whose folders don't share one parent has nothing to act on;
+      // say so rather than leave the right-click looking broken.
+      try {
+        await api.contextMenu.show(
+          [{ id: "no-folder", label: "No single folder for this group", disabled: true }],
+          position,
+        );
+      } finally {
+        context.close();
+      }
+      return;
+    }
+    const mention = serializeComposerFileLink(target.mentionPath);
     const fileTarget = {
       environmentId,
       filePath: target.filePath,
@@ -588,7 +601,8 @@ export default function FileBrowserPanel({
   // not depend on running after the tree's own dragstart handler; the drag
   // data store is writable for every dragstart listener in the dispatch.
   // The capture phase runs before the tree's own dragstart handler selects
-  // the dragged row, so the drag flag is up before that selection emits.
+  // the dragged row, so the drag flag is up before that selection emits, and
+  // a drag of rows with nothing to mention is cancelled before the tree starts it.
   const panelRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     treeModelRef.current = model;

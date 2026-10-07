@@ -104,7 +104,9 @@ export function fileTreeEntryTarget(input: {
  * share a name their labels grow parent segments (`dupe-a/docs`), and the tree
  * shows `dupe-a` as a row of its own. Undefined when `treePath` is no such row;
  * null when its roots don't name one folder, as with an isolated run's
- * worktree, whose path doesn't end in its repo's label.
+ * worktree, whose path doesn't end in its repo's label, or when that folder is
+ * a drive (`C:`) or network host (`\\server`), which the file actions can't
+ * name from a parent folder.
  */
 export function rootGroupFolder(
   roots: readonly { readonly root: string; readonly label: string }[],
@@ -117,6 +119,7 @@ export function rootGroupFolder(
     const normalized = trimmed.replaceAll("\\", "/");
     if (normalized !== label && !normalized.endsWith(`/${label}`)) return null;
     const candidate = trimmed.slice(0, trimmed.length - (label.length - treePath.length));
+    if (/^(?:[A-Za-z]:|[\\/]{2}[^\\/]+)$/.test(candidate)) return null;
     if (folder !== undefined && folder !== candidate) return null;
     folder = candidate;
   }

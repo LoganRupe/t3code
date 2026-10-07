@@ -198,6 +198,22 @@ describe("rootGroupFolder", () => {
     ).toBe("C:\\dev\\dupe-a");
   });
 
+  it("names no folder for a row that is a drive or a network host", () => {
+    // `C:\\docs` and `D:\\docs` are labelled `C:/docs` and `D:/docs`, so the
+    // tree shows a `C:` row.
+    const drives = [
+      { root: "C:\\docs", label: "C:/docs" },
+      { root: "D:\\docs", label: "D:/docs" },
+    ];
+    expect(rootGroupFolder(drives, "C:")).toBeNull();
+    const shares = [
+      { root: "\\\\server\\share\\docs", label: "server/share/docs" },
+      { root: "\\\\other\\share\\docs", label: "other/share/docs" },
+    ];
+    expect(rootGroupFolder(shares, "server")).toBeNull();
+    expect(rootGroupFolder(shares, "server/share")).toBe("\\\\server\\share");
+  });
+
   it("names no folder for a worktree, whose path doesn't end in its label", () => {
     expect(
       rootGroupFolder(
