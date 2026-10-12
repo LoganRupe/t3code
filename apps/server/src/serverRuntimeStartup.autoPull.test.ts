@@ -1,6 +1,8 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import { expect, it } from "@effect/vitest";
 import { DEFAULT_SERVER_SETTINGS, EnvironmentId, ProjectId } from "@t3tools/contracts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { DEFAULT_SIGNAL_EXPORT } from "@t3tools/shared/observability";
 import * as OtelEnvironment from "@t3tools/shared/otelEnvironment";
 import * as Deferred from "effect/Deferred";
@@ -175,6 +177,8 @@ it.effect("parks automatic pull until activation without delaying command readin
           address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", 3773),
         }),
         Path.layer,
+        NodeFileSystem.layer,
+        Layer.orDie(NodeSqliteClient.layer({ filename: ":memory:" })),
       );
 
       yield* Effect.gen(function* () {
