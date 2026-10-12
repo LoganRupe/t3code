@@ -32,6 +32,7 @@ import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as EffectWorker from "./orchestration-v2/EffectWorker.ts";
 import * as LegacyV1ThreadImporter from "./orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
+import { repairMultiRepoForkWorktrees } from "./orchestration-v2/legacy/repairMultiRepoForkWorktrees.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProviderRuntimeRecovery from "./orchestration-v2/ProviderRuntimeRecoveryService.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
@@ -570,6 +571,21 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
       ).pipe(Effect.map((targets): AutoBootstrapWelcomeTargets => targets)),
     });
     yield* Effect.logInfo("V2 orchestration recovery completed", recovery);
+    yield* runStartupPhase(
+      "orchestration-v2.legacy-v1.multi-repo-fork-worktrees",
+      repairMultiRepoForkWorktrees().pipe(
+        Effect.tap((repaired) =>
+          repaired === 0
+            ? Effect.void
+            : Effect.logInfo("Moved multi-repo fork threads to their isolated runs", {
+                repaired,
+              }),
+        ),
+        Effect.catch((cause) =>
+          Effect.logWarning("Failed to repair multi-repo fork thread worktrees", { cause }),
+        ),
+      ),
+    );
     // Runs after activation: the status check fetches every enabled project's
     // remote, and awaiting it here held command readiness for that long.
     yield* runStartupPhase(
