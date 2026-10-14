@@ -13,7 +13,7 @@
  *
  * @module WorkspaceRepositories
  */
-import type { VcsRepository } from "@t3tools/contracts";
+import type { VcsRepository, WorkspaceFolder } from "@t3tools/contracts";
 import { fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -51,6 +51,19 @@ export const IsolatedRunLayout = Schema.Struct({
       source: Schema.String,
     }),
   ),
+  /**
+   * The folders the project's workspace file listed, where the run reaches them: a worktree or
+   * a linked folder by its path in the container, a plain folder outside the project by its
+   * original absolute path. Absent for runs created before folders were recorded.
+   */
+  folders: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        relativePath: Schema.String,
+        name: Schema.String,
+      }),
+    ),
+  ),
 });
 export type IsolatedRunLayout = typeof IsolatedRunLayout.Type;
 const decodeIsolatedRunLayout = Schema.decodeUnknownEffect(
@@ -64,18 +77,22 @@ export function isolatedRunLayoutPath(container: string): string {
 
 export interface WorkspaceLayout {
   readonly repositories: ReadonlyArray<VcsRepository>;
-  /** Paths, relative to the workspace, of every folder the workspace file names. */
-  readonly listedFolders: ReadonlyArray<string> | null;
+  /**
+   * Every folder the workspace file names that exists on disk, git or not, in the file's order;
+   * the repositories are among them. Null without a workspace file, when the folder itself is
+   * the only root.
+   */
+  readonly folders: ReadonlyArray<WorkspaceFolder> | null;
 }
 
-const NOT_A_WORKSPACE: WorkspaceLayout = { repositories: [], listedFolders: null };
+const NOT_A_WORKSPACE: WorkspaceLayout = { repositories: [], folders: null };
 
 export class WorkspaceRepositories extends Context.Service<
   WorkspaceRepositories,
   {
     /** Repositories under `cwd`; empty when `cwd` is inside a repository or holds none. */
     readonly list: (cwd: string) => Effect.Effect<ReadonlyArray<VcsRepository>>;
-    /** `list`, plus the folders a `.code-workspace` file names, or null without one. */
+    /** `list`, plus every existing folder a `.code-workspace` file names, or null without one. */
     readonly describe: (cwd: string) => Effect.Effect<WorkspaceLayout>;
     /** The layout of an isolated run's container, or null when `cwd` is not one. */
     readonly readIsolatedRun: (cwd: string) => Effect.Effect<IsolatedRunLayout | null>;
@@ -135,24 +152,26 @@ export const make = Effect.gen(function* () {
       return (yield* exists(physical)) ? physical : lexical;
     });
     const repositories: Array<VcsRepository> = [];
-    const listedFolders: Array<string> = [];
+    const folders: Array<WorkspaceFolder> = [];
     for (const folder of document.folders ?? []) {
       const absolutePath = yield* resolveFolder(folder.path);
       const relativePath = toRelativePath(cwd, absolutePath);
-      if (listedFolders.includes(relativePath)) continue;
-      listedFolders.push(relativePath);
-      if (!(yield* hasGitEntry(absolutePath))) continue;
-      repositories.push({
+      if (folders.some((listed) => listed.relativePath === relativePath)) continue;
+      // A listed folder that is missing, or is a file, is nothing anyone can browse or edit.
+      if (!(yield* isDirectory(absolutePath))) continue;
+      const entry = {
         relativePath,
         name: folder.name?.trim() || path.basename(absolutePath),
         path: absolutePath,
-      });
+      };
+      folders.push(entry);
+      if (yield* hasGitEntry(absolutePath)) repositories.push(entry);
     }
     // A workspace file that only names the folder itself describes an ordinary checkout.
     const onlyRoot = repositories.length === 1 && repositories[0]!.relativePath === ".";
     return {
       repositories: onlyRoot ? [] : repositories,
-      listedFolders,
+      folders,
     } satisfies WorkspaceLayout;
   });
 
@@ -195,13 +214,14 @@ export const make = Effect.gen(function* () {
   const describe = Effect.fn("WorkspaceRepositories.describe")(function* (cwd: string) {
     const isolatedRun = yield* readIsolatedRun(cwd);
     if (isolatedRun !== null) {
+      const place = (entry: { readonly relativePath: string; readonly name: string }) => ({
+        relativePath: entry.relativePath,
+        name: entry.name,
+        path: path.resolve(cwd, entry.relativePath),
+      });
       return {
-        repositories: isolatedRun.repositories.map((repository) => ({
-          relativePath: repository.relativePath,
-          name: repository.name,
-          path: path.resolve(cwd, repository.relativePath),
-        })),
-        listedFolders: null,
+        repositories: isolatedRun.repositories.map(place),
+        folders: isolatedRun.folders === undefined ? null : isolatedRun.folders.map(place),
       } satisfies WorkspaceLayout;
     }
     const names = (yield* fileSystem
@@ -219,7 +239,7 @@ export const make = Effect.gen(function* () {
     }
     if (yield* isInsideRepository(cwd)) return NOT_A_WORKSPACE;
     const repositories = yield* fromChildDirectories(cwd, names);
-    return { repositories, listedFolders: null } satisfies WorkspaceLayout;
+    return { repositories, folders: null } satisfies WorkspaceLayout;
   });
 
   const list = (cwd: string) => describe(cwd).pipe(Effect.map((layout) => layout.repositories));

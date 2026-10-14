@@ -30,8 +30,15 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as T3ProjectFileLoader from "../project/T3ProjectFileLoader.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 import { assetFileResponse } from "../http.ts";
-import { ASSET_ROUTE_PREFIX, issueAssetUrl, readMcpAppHtml, resolveAsset } from "./AssetAccess.ts";
+import {
+  ASSET_ROUTE_PREFIX,
+  issueAssetUrl,
+  readMcpAppHtml,
+  resolveAsset,
+  workspaceRootForAssetPath,
+} from "./AssetAccess.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { openMediaFile } from "./MediaFile.ts";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
@@ -113,6 +120,7 @@ const layerTest = Layer.mergeAll(
   }),
   layerConfig,
   WorkspacePaths.layer,
+  WorkspaceRepositories.layer,
   ProjectFaviconResolver.layer.pipe(
     Layer.provide(WorkspacePaths.layer),
     Layer.provide(T3ProjectFileLoader.layer),
@@ -254,6 +262,52 @@ describe("AssetAccess", () => {
         resource: { ...resource, itemId: oversizedScreenshotItem.id },
       }).pipe(Effect.flip);
       expect(oversized._tag).toBe("AssetWorkspaceAssetNotFoundError");
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("serves a workspace file from the listed folder that holds it, and nothing else", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const base = yield* fs.makeTempDirectoryScoped({ prefix: "t3-workspace-folders-" });
+      const root = path.join(base, "context");
+      const docs = path.join(base, "team", "docs");
+      const nestedDocs = path.join(docs, "api");
+      const unlisted = path.join(base, "team", "private");
+      for (const folder of [root, nestedDocs, unlisted]) {
+        yield* fs.makeDirectory(folder, { recursive: true });
+      }
+      yield* fs.writeFileString(
+        path.join(root, "team.code-workspace"),
+        `{ "folders": [{ "path": "." }, { "path": "../team/docs" }, { "path": "../team/docs/api" }] }`,
+      );
+      const threadId = ThreadId.make("thread-1");
+      const rootFor = (filePath: string) =>
+        workspaceRootForAssetPath({
+          workspaceRoot: root,
+          resource: { _tag: "workspace-file", threadId, path: filePath },
+        });
+
+      expect(yield* rootFor(path.join(docs, "guide.md"))).toBe(docs);
+      // The innermost listed folder wins, so its own relative asset links resolve.
+      expect(yield* rootFor(path.join(nestedDocs, "index.html"))).toBe(nestedDocs);
+      expect(yield* rootFor(path.join(root, "README.md"))).toBe(root);
+      // Only listed folders count: anything else stays bound to the working directory.
+      expect(yield* rootFor(path.join(unlisted, "secret.html"))).toBe(root);
+      expect(yield* rootFor("docs/guide.md")).toBe(root);
+
+      // The served file then passes the usual boundary checks against that folder.
+      yield* fs.writeFileString(path.join(docs, "diagram.png"), "png");
+      const issued = yield* issueAssetUrl({
+        resource: { _tag: "workspace-file", threadId, path: path.join(docs, "diagram.png") },
+        workspaceRoot: yield* rootFor(path.join(docs, "diagram.png")),
+      });
+      expect(issued.relativeUrl.endsWith("/diagram.png")).toBe(true);
+      const rejected = yield* issueAssetUrl({
+        resource: { _tag: "workspace-file", threadId, path: path.join(unlisted, "secret.png") },
+        workspaceRoot: yield* rootFor(path.join(unlisted, "secret.png")),
+      }).pipe(Effect.flip);
+      expect(rejected._tag).toBe("AssetWorkspacePathValidationError");
     }).pipe(Effect.provide(layerTest)),
   );
 

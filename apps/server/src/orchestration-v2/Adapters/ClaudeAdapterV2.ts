@@ -81,7 +81,8 @@ import {
   type RunId,
   type ThreadId,
   type VcsRepository,
-  outsideWorkspaceRepositoryPaths,
+  type WorkspaceFolder,
+  outsideWorkspacePaths,
 } from "@t3tools/contracts";
 
 import * as Cause from "effect/Cause";
@@ -954,6 +955,7 @@ export function makeClaudeQueryOptions(input: {
   readonly resumeSessionAt?: string;
   readonly cwd: string | null;
   readonly repositories?: ReadonlyArray<VcsRepository> | undefined;
+  readonly folders?: ReadonlyArray<WorkspaceFolder> | undefined;
   /**
    * The attachments dir grant lets the agent Read/copy pasted images at the
    * paths appended to the turn text, without an approval prompt. It is a leaf
@@ -1056,7 +1058,11 @@ export function makeClaudeQueryOptions(input: {
       type: "preset" as const,
       preset: "claude_code" as const,
       append:
-        buildRuntimeInstructions({ harness: "Claude Code", repositories: input.repositories }) +
+        buildRuntimeInstructions({
+          harness: "Claude Code",
+          repositories: input.repositories,
+          folders: input.folders,
+        }) +
         (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
@@ -1064,7 +1070,7 @@ export function makeClaudeQueryOptions(input: {
   const additionalDirectories = [
     ...(input.cwd === null ? [] : [input.cwd]),
     ...(input.attachmentsDir === undefined ? [] : [input.attachmentsDir]),
-    ...outsideWorkspaceRepositoryPaths(input.repositories),
+    ...outsideWorkspacePaths(input),
   ];
   const withDirectories =
     additionalDirectories.length === 0 ? options : { ...options, additionalDirectories };
@@ -8360,6 +8366,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(resumeSessionAt === undefined ? {} : { resumeSessionAt }),
             cwd: turnInput.runtimePolicy.cwd,
             repositories: turnInput.runtimePolicy.repositories,
+            folders: turnInput.runtimePolicy.folders,
             attachmentsDir,
             settings: adapterOptions.settings,
             environment: adapterOptions.environment,

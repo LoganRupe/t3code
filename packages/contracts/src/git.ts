@@ -167,6 +167,18 @@ export const VcsRepository = Schema.Struct({
 });
 export type VcsRepository = typeof VcsRepository.Type;
 
+/**
+ * A folder a project's `.code-workspace` file lists and that exists on disk, whether or not it
+ * is a Git repository. Same shape as a repository, so helpers over `relativePath` and `path`
+ * serve both.
+ */
+export const WorkspaceFolder = Schema.Struct({
+  relativePath: TrimmedNonEmptyStringSchema,
+  name: TrimmedNonEmptyStringSchema,
+  path: TrimmedNonEmptyStringSchema,
+});
+export type WorkspaceFolder = typeof WorkspaceFolder.Type;
+
 /** True for a repository the workspace file lists outside the workspace folder. */
 export function isOutsideWorkspaceRepository(repository: Pick<VcsRepository, "relativePath">) {
   const { relativePath } = repository;
@@ -180,11 +192,25 @@ export function isOutsideWorkspaceRepository(repository: Pick<VcsRepository, "re
 
 /** Absolute paths of the repositories outside the workspace folder, for agents' directory grants. */
 export function outsideWorkspaceRepositoryPaths(
-  repositories: ReadonlyArray<VcsRepository> | undefined,
+  repositories: ReadonlyArray<Pick<VcsRepository, "relativePath" | "path">> | undefined,
 ): ReadonlyArray<string> {
   return (repositories ?? [])
     .filter((repository) => isOutsideWorkspaceRepository(repository))
     .map((repository) => repository.path);
+}
+
+/**
+ * Absolute paths of everything the workspace lists outside its folder, repositories and plain
+ * folders alike, for agents' directory grants.
+ */
+export function outsideWorkspacePaths(workspace: {
+  readonly repositories?: ReadonlyArray<VcsRepository> | undefined;
+  readonly folders?: ReadonlyArray<WorkspaceFolder> | undefined;
+}): ReadonlyArray<string> {
+  return [
+    ...outsideWorkspaceRepositoryPaths(workspace.repositories),
+    ...outsideWorkspaceRepositoryPaths(workspace.folders),
+  ];
 }
 
 /**
@@ -201,6 +227,12 @@ export function workspaceRepositoryPathPrefix(
 export const VcsListRepositoriesResult = Schema.Struct({
   /** Empty when the cwd is itself inside a repository or holds none. */
   repositories: Schema.Array(VcsRepository),
+  /**
+   * Every folder the cwd's `.code-workspace` file lists that exists on disk, git or not, in the
+   * file's order. Files panels and @ search span these. Absent or empty without a workspace
+   * file, when the cwd itself is the only root.
+   */
+  folders: Schema.optional(Schema.Array(WorkspaceFolder)),
 });
 export type VcsListRepositoriesResult = typeof VcsListRepositoriesResult.Type;
 

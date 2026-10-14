@@ -230,9 +230,11 @@ it.effect("with a workspace file, links files, dot-folders and listed folders on
         yield* fileSystem.makeDirectory(path.join(workspaceRoot, folder), { recursive: true });
       }
       yield* fileSystem.writeFileString(path.join(workspaceRoot, "README.md"), "shared\n");
+      const outsideDocs = path.join(baseDir, "team-docs");
+      yield* fileSystem.makeDirectory(outsideDocs);
       yield* fileSystem.writeFileString(
         path.join(workspaceRoot, "team.code-workspace"),
-        '{ "folders": [{ "path": "api" }, { "path": "shared" }] }',
+        '{ "folders": [{ "path": "api" }, { "path": "shared" }, { "path": "../team-docs", "name": "Docs" }] }',
       );
 
       const created = yield* worktrees.create({
@@ -248,6 +250,14 @@ it.effect("with a workspace file, links files, dot-folders and listed folders on
         "api",
         "shared",
         "team.code-workspace",
+      ]);
+      // The run records where each listed folder is reached: the worktree, the link, and the
+      // original folder for one outside the project.
+      const repositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+      assert.deepEqual((yield* repositories.describe(created.path)).folders, [
+        { relativePath: "api", name: "api", path: path.join(created.path, "api") },
+        { relativePath: "shared", name: "shared", path: path.join(created.path, "shared") },
+        { relativePath: outsideDocs, name: "Docs", path: outsideDocs },
       ]);
     }).pipe(Effect.provide(layerTest(baseDir)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

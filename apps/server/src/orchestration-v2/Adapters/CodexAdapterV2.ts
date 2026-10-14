@@ -29,7 +29,7 @@ import {
   defaultInstanceIdForDriver,
   isOrchestrationV2WorkActive,
   OrchestrationV2ProviderGoal,
-  outsideWorkspaceRepositoryPaths,
+  outsideWorkspacePaths,
   ProviderDriverKind,
   type ProviderSetupError,
 } from "@t3tools/contracts";
@@ -759,7 +759,7 @@ export function buildCodexTurnStartParams(input: {
       input.runtimePolicy.sandboxPolicy === undefined
         ? runtimeModeDefaults.sandboxPolicy
         : yield* decodeTurnSandboxPolicy(input.runtimePolicy.sandboxPolicy),
-      outsideWorkspaceRepositoryPaths(input.runtimePolicy.repositories),
+      outsideWorkspacePaths(input.runtimePolicy),
     );
     const selectedEffort = getModelSelectionStringOptionValue(
       input.modelSelection,
@@ -791,13 +791,17 @@ export function buildCodexTurnStartParams(input: {
               model: input.modelSelection.model,
               reasoningEffort: effort ?? "medium",
               repositories: input.runtimePolicy.repositories,
+              folders: input.runtimePolicy.folders,
             },
             {
               browser: input.browserToolsAvailable ?? true,
               device: input.deviceToolsAvailable ?? false,
             },
           )
-        : buildCodexRepositoriesContext(input.runtimePolicy.repositories);
+        : buildCodexRepositoriesContext(
+            input.runtimePolicy.repositories,
+            input.runtimePolicy.folders,
+          );
     const additionalContext =
       t3Context === undefined && Object.keys(appContext).length === 0
         ? undefined

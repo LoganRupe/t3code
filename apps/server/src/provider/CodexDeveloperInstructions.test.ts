@@ -115,6 +115,18 @@ describe("buildCodexRepositoriesContext", () => {
     NodeAssert.strictEqual(buildCodexRepositoriesContext([]), undefined);
     NodeAssert.strictEqual(buildCodexRepositoriesContext(undefined), undefined);
   });
+
+  it("names listed folders that are not repositories alongside them", () => {
+    const folders = [{ relativePath: "../docs", name: "docs", path: "/team/docs" }];
+    const both = buildCodexRepositoriesContext(
+      [{ relativePath: "api", name: "api", path: "/work/api" }],
+      folders,
+    );
+    NodeAssert.match(both!.t3_code_repositories!.value, /<\/workspace_repositories>\n\n<workspace_folders>/);
+    const foldersOnly = buildCodexRepositoriesContext([], folders);
+    NodeAssert.match(foldersOnly!.t3_code_repositories!.value, /^<workspace_folders>/);
+    NodeAssert.doesNotMatch(foldersOnly!.t3_code_repositories!.value, /workspace_repositories/);
+  });
 });
 
 function runtimeInstructions(runtime: Parameters<typeof buildCodexAdditionalContext>[0]) {
