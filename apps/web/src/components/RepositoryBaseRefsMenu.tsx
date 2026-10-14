@@ -1,4 +1,5 @@
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { repositoryBaseRefChoices } from "@t3tools/client-runtime/repository-base-refs";
 import type { EnvironmentId, ThreadId, VcsRepository } from "@t3tools/contracts";
 import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
 import { memo, useMemo } from "react";
@@ -129,20 +130,7 @@ function RepositoryBaseRefSub({
     [environmentId, repository.path],
   );
   const { refs } = usePaginatedBranches(refTarget);
-  // Local branches, plus the default branch's origin copy when it has no local one, so the
-  // default the server would use is always pickable.
-  const branchNames = useMemo(() => {
-    const local = refs.filter((ref) => !ref.isRemote).map((ref) => ref.name);
-    const remoteDefault = refs.find((ref) => ref.isRemote && ref.isDefault);
-    return remoteDefault && !refs.some((ref) => !ref.isRemote && ref.isDefault)
-      ? [remoteDefault.name, ...local]
-      : local;
-  }, [refs]);
-  const defaultName =
-    refs.find((ref) => ref.isDefault && !ref.isRemote)?.name ??
-    refs.find((ref) => ref.isDefault)?.name ??
-    refs.find((ref) => ref.current)?.name ??
-    null;
+  const { branchNames, defaultName } = useMemo(() => repositoryBaseRefChoices(refs), [refs]);
   const selected = pick ?? defaultName;
   const selectedLabel =
     selected && startFromOrigin && !selected.startsWith("origin/")

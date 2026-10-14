@@ -3,6 +3,7 @@ import {
   clampFileAttachmentUploadBytes,
   fileAttachmentTooLargeMessage,
 } from "@t3tools/client-runtime/state/attachments";
+import type { RepositoryBaseRef } from "@t3tools/client-runtime/repository-base-refs";
 import type { EnvironmentShellStatus } from "@t3tools/client-runtime/state/shell";
 import {
   CommandId,
@@ -11,6 +12,7 @@ import {
   MessageId,
   ModelSelection,
   OrchestrationMessageContext,
+  OrchestrationV2RepositoryBaseRef as RepositoryBaseRefSchema,
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
@@ -44,6 +46,7 @@ const QueuedThreadCreationSchema = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   startFromOrigin: Schema.optional(Schema.Boolean),
   pullRequestReference: Schema.optional(Schema.String),
+  repositoryBaseRefs: Schema.optional(Schema.Array(RepositoryBaseRefSchema)),
 });
 
 export const QueuedThreadMessageSchema = Schema.Struct({
@@ -77,6 +80,8 @@ export interface QueuedThreadCreation {
   readonly worktreePath: string | null;
   readonly startFromOrigin?: boolean;
   readonly pullRequestReference?: string;
+  /** Base branches picked per repository of a multi-repo workspace. */
+  readonly repositoryBaseRefs?: ReadonlyArray<RepositoryBaseRef>;
 }
 
 export interface QueuedThreadMessage {
