@@ -34,6 +34,7 @@ import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
+import * as WorkspaceRepositories from "./workspace/WorkspaceRepositories.ts";
 
 it.effect("parks automatic pull until activation without delaying command readiness", () =>
   Effect.scoped(
@@ -140,6 +141,7 @@ it.effect("parks automatic pull until activation without delaying command readin
           listShells: () => Effect.succeed(snapshot.projects),
         }),
         Layer.mock(ProjectService.ProjectService)({ snapshot: Effect.succeed(snapshot) }),
+        Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({}),
         Layer.mock(ThreadManagement.ThreadManagementService)({
           getShellSnapshot: () =>
             Effect.succeed({
