@@ -129,12 +129,20 @@ export const layerFromProjectStore: Layer.Layer<
               }),
             ),
           ));
-        const repositories = yield* workspaceRepositories.list(cwd);
+        const layout = yield* workspaceRepositories.describe(cwd);
+        const repositories = layout.repositories;
+        // The working directory needs no introduction; the other listed folders do.
+        const folders = (layout.folders ?? []).filter(
+          (folder) =>
+            folder.relativePath !== "." &&
+            !repositories.some((repository) => repository.path === folder.path),
+        );
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
           ...(repositories.length === 0 ? {} : { repositories }),
+          ...(folders.length === 0 ? {} : { folders }),
         });
       }),
     });

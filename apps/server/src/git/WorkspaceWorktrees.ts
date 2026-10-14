@@ -172,9 +172,9 @@ export const make = Effect.gen(function* () {
       layout.repositories.map((repository) => repository.relativePath.split("/")[0]),
     );
     const listedFolders =
-      layout.listedFolders === null
+      layout.folders === null
         ? null
-        : new Set(layout.listedFolders.map((folder) => folder.split("/")[0]));
+        : new Set(layout.folders.map((folder) => folder.relativePath.split("/")[0]));
     const names = yield* fileSystem
       .readDirectory(workspaceRoot)
       .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
@@ -250,6 +250,14 @@ export const make = Effect.gen(function* () {
       }
       const root = input.repositories.find((repository) => repository.relativePath === ".");
       const nested = input.repositories.filter((repository) => repository !== root);
+      // Listed folders keep their place in the run: a repository at its worktree, a folder inside
+      // the project at its link, and a plain folder outside the project stays the original.
+      const workspaceFolders = (yield* workspaceRepositories.describe(input.workspaceRoot)).folders;
+      const folderPlacement = (folder: VcsRepository) => {
+        const repository = input.repositories.find((candidate) => candidate.path === folder.path);
+        if (repository !== undefined) return placement(repository);
+        return isOutsideWorkspaceRepository(folder) ? folder.path : folder.relativePath;
+      };
       // The layout file goes first: it is what makes the folder a container, so a failure
       // below can still be cleaned up with `remove`.
       yield* encodeLayout({
@@ -258,6 +266,14 @@ export const make = Effect.gen(function* () {
           name: repository.name,
           source: repository.path,
         })),
+        ...(workspaceFolders === null
+          ? {}
+          : {
+              folders: workspaceFolders.map((folder) => ({
+                relativePath: folderPlacement(folder),
+                name: folder.name,
+              })),
+            }),
       }).pipe(
         Effect.flatMap((contents) =>
           fileSystem

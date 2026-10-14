@@ -61,6 +61,7 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as ProjectFaviconResolver from "../project/ProjectFaviconResolver.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
+import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 import { extractIcnsPng } from "./icns.ts";
 import { openMediaFile, readMediaFileHeader, type OpenMediaFile } from "./MediaFile.ts";
@@ -497,6 +498,31 @@ const finalizeWorkspaceFileAsset = Effect.fn("AssetAccess.finalizeWorkspaceFileA
       fileName: path.basename(resolved.relativePath),
       imageDimensions,
     };
+  },
+);
+
+/**
+ * The root a thread's workspace file is served under. A `.code-workspace` project lists folders
+ * beyond the thread's working directory, so an absolute path inside one of them is served from
+ * that folder, the innermost listed one when they nest. Any other path keeps the working
+ * directory, whose own boundary checks then apply, so nothing outside the listed folders opens.
+ */
+export const workspaceRootForAssetPath = Effect.fn("AssetAccess.workspaceRootForAssetPath")(
+  function* (input: { readonly workspaceRoot: string; readonly resource: AssetResource }) {
+    const path = yield* Path.Path;
+    if (input.resource._tag !== "workspace-file" || !path.isAbsolute(input.resource.path)) {
+      return input.workspaceRoot;
+    }
+    const target = path.normalize(input.resource.path);
+    const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+    const layout = yield* workspaceRepositories.describe(input.workspaceRoot);
+    let owner: string | null = null;
+    for (const folder of layout.folders ?? []) {
+      const relative = path.relative(folder.path, target);
+      if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative)) continue;
+      if (owner === null || folder.path.length > owner.length) owner = folder.path;
+    }
+    return owner ?? input.workspaceRoot;
   },
 );
 

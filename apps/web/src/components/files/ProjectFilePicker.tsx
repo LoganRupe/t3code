@@ -1,7 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
+import { fileRootFromTreePath, fileRootOpenPath } from "@t3tools/client-runtime/project-file-roots";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { useActiveProjectTarget, type ActiveProjectTarget } from "~/hooks/useActiveProjectTarget";
+import { useProjectFileRoots } from "~/hooks/useProjectFileRoots";
 import { useTheme } from "~/hooks/useTheme";
 import { useRightPanelStore } from "~/rightPanelStore";
 import { primaryServerKeybindingsAtom } from "~/state/server";
@@ -72,11 +74,18 @@ function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveP
   const { target } = props;
   const [query, setQuery] = useState("");
   const [highlightedItemValue, setHighlightedItemValue] = useState<string | null>(null);
+  // A `.code-workspace` project's picker spans every folder the file lists.
+  const { roots } = useProjectFileRoots({
+    environmentId: target.environmentId,
+    cwd: target.cwd,
+    projectName: target.projectName,
+  });
   const result = useProjectFilePickerQuery(
     target.environmentId,
     target.cwd,
     query,
     PROJECT_FILE_PICKER_RESULT_LIMIT,
+    { roots },
   );
   const { resolvedTheme } = useTheme();
   const keybindings = useAtomValue(primaryServerKeybindingsAtom);
@@ -107,10 +116,16 @@ function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveP
         ),
         icon: <PierreEntryIcon pathValue={match.path} kind="file" theme={resolvedTheme} />,
         run: async () => {
-          useRightPanelStore.getState().openFile(target.threadRef, match.path);
+          const located = fileRootFromTreePath(roots, match.path);
+          useRightPanelStore
+            .getState()
+            .openFile(
+              target.threadRef,
+              located === null ? match.path : fileRootOpenPath(target.cwd, located),
+            );
         },
       })),
-    [hasMatchedQuery, matches, resolvedTheme, target.threadRef],
+    [hasMatchedQuery, matches, resolvedTheme, roots, target.cwd, target.threadRef],
   );
 
   const emptyStateMessage = getEmptyStateMessage(query, result.error, result.isPending);

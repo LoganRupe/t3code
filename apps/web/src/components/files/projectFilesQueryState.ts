@@ -1,4 +1,5 @@
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import type { ProjectFileRoot } from "@t3tools/client-runtime/project-file-roots";
 import {
   type EnvironmentId,
   type ProjectListEntriesResult,
@@ -225,7 +226,11 @@ export function useProjectFilePickerQuery(
   cwd: string,
   query: string,
   limit: number,
-  options?: { readonly imageOnly?: boolean },
+  options?: {
+    readonly imageOnly?: boolean;
+    /** Search every folder a `.code-workspace` lists; entries come back under their root's label. */
+    readonly roots?: ReadonlyArray<ProjectFileRoot>;
+  },
 ) {
   const search = useProjectPathSearch(
     {
@@ -234,6 +239,7 @@ export function useProjectFilePickerQuery(
       query,
       kind: "file",
       ...(options?.imageOnly ? { imageOnly: true } : {}),
+      ...(options?.roots ? { roots: options.roots } : {}),
     },
     limit,
     { allowEmptyQuery: true },

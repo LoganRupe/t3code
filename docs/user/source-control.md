@@ -158,6 +158,15 @@ folders are linked into that copy rather than duplicated, so edits to them chang
 With a `.code-workspace` file, only the folders it lists are linked, along with top-level files and
 dot-folders.
 
+With a `.code-workspace` file, the files panel and `@` search span every folder the file lists,
+whether or not it is a Git repository, under the names the file gives them. Two folders with the
+same name are told apart by their parent folder. Files in a listed folder outside the project
+folder open, edit and preview like any other; chat links to them use absolute paths, and agents
+are told about every listed folder, including the ones that are not repositories. In a new
+worktree, listed folders that are not repositories stay the original folders, shared with the
+project's other threads. Folders the file does not list, and files the project folder holds
+beside the listed folders, are not shown; add the folder to the workspace file to include it.
+
 The project's setup script runs once in each repository's copy, with `T3CODE_REPO_ROOT` set to the
 checkout the copy came from, so a script can copy files such as `.env` from the original. Each
 copy gets its own terminal. Lines on the setup card say which repository they came from, and the

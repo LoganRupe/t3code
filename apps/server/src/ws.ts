@@ -184,7 +184,7 @@ import * as ServerBrowser from "./preview/ServerBrowser.ts";
 import * as DeviceService from "./device/DeviceService.ts";
 import { remoteSshDeviceHosts } from "./device/localSshDeviceHost.ts";
 import * as PreviewManager from "./preview/Manager.ts";
-import { issueAssetUrl } from "./assets/AssetAccess.ts";
+import { issueAssetUrl, workspaceRootForAssetPath } from "./assets/AssetAccess.ts";
 import {
   attachmentRelativePath,
   chatAttachmentStableKey,
@@ -2811,9 +2811,13 @@ const layerWsRpc = (
                 resource: input.resource,
               });
             }
+            const workspaceRoot = thread.thread.worktreePath ?? project.value.workspaceRoot;
             return yield* issueAssetUrl({
               resource: input.resource,
-              workspaceRoot: thread.thread.worktreePath ?? project.value.workspaceRoot,
+              workspaceRoot: yield* workspaceRootForAssetPath({
+                workspaceRoot,
+                resource: input.resource,
+              }),
             });
           }),
         [WS_METHODS.assetsPersistChatAttachments]: (input) =>
@@ -2884,11 +2888,12 @@ const layerWsRpc = (
         [WS_METHODS.vcsListRefs]: (input) => gitWorkflow.listRefs(input),
         [WS_METHODS.vcsListRepositories]: (input) =>
           Effect.all(
-            [workspaceRepositories.list(input.cwd), workspaceRepositories.workspaceFile(input.cwd)],
+            [workspaceRepositories.describe(input.cwd), workspaceRepositories.workspaceFile(input.cwd)],
             { concurrency: "unbounded" },
           ).pipe(
-            Effect.map(([repositories, workspaceFile]) => ({
-              repositories,
+            Effect.map(([layout, workspaceFile]) => ({
+              repositories: layout.repositories,
+              ...(layout.folders === null ? {} : { folders: layout.folders }),
               ...(workspaceFile === null ? {} : { workspaceFile }),
             })),
           ),
