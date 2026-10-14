@@ -3096,3 +3096,81 @@ it.effect("cancelling a multi-repo setup closes every repository's setup termina
     }).pipe(Effect.provide(harness.layer));
   }),
 );
+
+it.effect("passes each repository's chosen base to the multi-repo worktree builder", () =>
+  Effect.gen(function* () {
+    const repositories = [
+      { relativePath: ".", name: "workspace", path: "/repo" },
+      { relativePath: "api", name: "api", path: "/repo/api" },
+      { relativePath: "../shared", name: "shared", path: "/shared" },
+    ];
+    const harness = makeHarness({ repositories });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:launch:multi-repo-bases",
+          thread: "thread:launch:multi-repo-bases",
+          message: "Build the feature",
+          workspace: {
+            type: "worktree",
+            baseRef: "develop",
+            branch: "feature/bases",
+            repositoryBaseRefs: [{ relativePath: "../shared", baseRef: "release" }],
+          },
+        }),
+      );
+      yield* waitUntil(() =>
+        threads
+          .getThreadProjection(launched.threadId)
+          .pipe(Effect.map((projection) => projection.thread.worktreePath !== null)),
+      );
+      // The root repository takes the strategy's base ref, the branch picker's choice for the
+      // folder; a repository without a pick is left to its default branch.
+      assert.deepEqual(harness.createWorkspaceWorktree.mock.calls[0]?.[0].baseRefs, [
+        { relativePath: ".", baseRef: "develop" },
+        { relativePath: "../shared", baseRef: "release" },
+      ]);
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("checks each chosen base in its own repository of a multi-repo workspace", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness({
+      repositories: [
+        { relativePath: "api", name: "api", path: "/repo/api" },
+        { relativePath: "web", name: "web", path: "/repo/web" },
+      ],
+      hasCommit: ({ cwd, refName }) =>
+        Effect.succeed(refName === "HEAD" || (cwd === "/repo/web" && refName === "release")),
+      git: { hasRefNamed: () => Effect.succeed(false) },
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      // The project folder is no checkout, so the strategy's own base ref is not asked of it.
+      yield* launches.checkWorktreeBase({
+        projectId,
+        workspaceStrategy: {
+          type: "worktree",
+          baseRef: "HEAD",
+          repositoryBaseRefs: [{ relativePath: "web", baseRef: "release" }],
+        },
+      });
+      const error = yield* launches
+        .checkWorktreeBase({
+          projectId,
+          workspaceStrategy: {
+            type: "worktree",
+            baseRef: "HEAD",
+            repositoryBaseRefs: [{ relativePath: "api", baseRef: "release" }],
+          },
+        })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "ThreadLaunchBaseRefError");
+      assert.equal(error.repositoryName, "api");
+      assert.equal(error.baseRef, "release");
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);

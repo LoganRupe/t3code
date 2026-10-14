@@ -162,6 +162,11 @@ interface StartThreadBootstrap {
     readonly baseBranch: string;
     readonly branch?: string;
     readonly startFromOrigin?: boolean;
+    /** Per-repository bases for a multi-repo workspace; others start from their default branch. */
+    readonly repositoryBaseRefs?: ReadonlyArray<{
+      readonly relativePath: string;
+      readonly baseRef: string;
+    }>;
   };
   readonly runSetupScript?: boolean;
 }
@@ -657,6 +662,10 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
             ...(prepareWorktree.startFromOrigin === undefined
               ? {}
               : { startFromOrigin: prepareWorktree.startFromOrigin }),
+            ...(prepareWorktree.repositoryBaseRefs === undefined ||
+            prepareWorktree.repositoryBaseRefs.length === 0
+              ? {}
+              : { repositoryBaseRefs: prepareWorktree.repositoryBaseRefs }),
           }
         : bootstrap?.worktreePath
           ? {

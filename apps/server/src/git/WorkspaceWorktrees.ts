@@ -39,17 +39,23 @@ export interface CreateWorkspaceWorktreeInput {
   readonly workspaceRoot: string;
   readonly repositories: ReadonlyArray<VcsRepository>;
   readonly branch: string;
-  /** Fetch each repository's default branch and start from the remote's copy. */
+  /** Fetch each repository's base and start from the remote's copy. */
   readonly startFromOrigin: boolean;
+  /**
+   * The ref a particular repository starts from, by its `relativePath`. A repository left out
+   * starts from its default branch. A ref that does not resolve in its repository fails the
+   * run instead of silently starting elsewhere.
+   */
+  readonly baseRefs?: ReadonlyArray<{ readonly relativePath: string; readonly baseRef: string }>;
 }
 
 export class WorkspaceWorktrees extends Context.Service<
   WorkspaceWorktrees,
   {
     /**
-     * Create a container with a worktree per repository, each started from its repository's
-     * default branch. The container is reported as soon as it exists so a caller can remove a
-     * partial one with `remove` if a later repository fails.
+     * Create a container with a worktree per repository, each started from the base ref chosen
+     * for it, or its repository's default branch. The container is reported as soon as it
+     * exists so a caller can remove a partial one with `remove` if a later repository fails.
      */
     readonly create: (
       input: CreateWorkspaceWorktreeInput,
@@ -112,33 +118,42 @@ export const make = Effect.gen(function* () {
       })
       .pipe(Effect.map((result) => result.exitCode === 0));
 
-  // The repository's default branch (from its primary remote), or its current checkout.
+  // The ref chosen for the repository, else its default branch (from its primary remote), else
+  // its current checkout. A chosen ref must resolve; a default is only a preference.
   const resolveStart = Effect.fn("WorkspaceWorktrees.resolveStart")(function* (
-    cwd: string,
+    repository: VcsRepository,
     startFromOrigin: boolean,
+    requestedBaseRef: string | null,
   ) {
+    const cwd = repository.path;
     const remote = yield* git.resolvePrimaryRemoteName(cwd).pipe(Effect.option);
-    const defaultBranch =
-      remote._tag === "None"
+    const baseBranch =
+      requestedBaseRef ??
+      (remote._tag === "None"
         ? null
         : yield* git
             .resolveDefaultBranchName(cwd, remote.value)
-            .pipe(Effect.orElseSucceed(() => null));
-    if (remote._tag === "Some" && defaultBranch !== null && startFromOrigin) {
-      yield* git.fetchRemote({ cwd, remoteName: remote.value, refName: defaultBranch });
-      if (
-        yield* git.remoteBranchExists({ cwd, remoteName: remote.value, refName: defaultBranch })
-      ) {
+            .pipe(Effect.orElseSucceed(() => null)));
+    if (remote._tag === "Some" && baseBranch !== null && startFromOrigin) {
+      yield* git.fetchRemote({ cwd, remoteName: remote.value, refName: baseBranch });
+      if (yield* git.remoteBranchExists({ cwd, remoteName: remote.value, refName: baseBranch })) {
         const tracking = yield* git.resolveRemoteTrackingCommit({
           cwd,
-          refName: defaultBranch,
+          refName: baseBranch,
           fallbackRemoteName: remote.value,
         });
-        return { startRef: tracking.commitSha, baseRef: defaultBranch };
+        return { startRef: tracking.commitSha, baseRef: baseBranch };
       }
     }
-    if (defaultBranch !== null && (yield* hasCommit(cwd, defaultBranch))) {
-      return { startRef: defaultBranch, baseRef: defaultBranch };
+    if (baseBranch !== null && (yield* hasCommit(cwd, baseBranch))) {
+      return { startRef: baseBranch, baseRef: baseBranch };
+    }
+    if (requestedBaseRef !== null) {
+      return yield* fail(
+        "WorkspaceWorktrees.resolveStart",
+        cwd,
+        `Base ref "${requestedBaseRef}" does not resolve to a commit in ${repository.name}.`,
+      );
     }
     return { startRef: "HEAD", baseRef: "HEAD" };
   });
@@ -185,11 +200,12 @@ export const make = Effect.gen(function* () {
   });
 
   const createWorktree = Effect.fn("WorkspaceWorktrees.createWorktree")(function* (
-    source: string,
+    repository: VcsRepository,
     worktreePath: string,
     branch: string,
     input: CreateWorkspaceWorktreeInput,
   ) {
+    const source = repository.path;
     yield* fileSystem
       .makeDirectory(path.dirname(worktreePath), { recursive: true })
       .pipe(
@@ -197,7 +213,10 @@ export const make = Effect.gen(function* () {
           fail("WorkspaceWorktrees.create", source, `Could not create ${worktreePath}.`, cause),
         ),
       );
-    const start = yield* resolveStart(source, input.startFromOrigin);
+    const requestedBaseRef =
+      input.baseRefs?.find((entry) => entry.relativePath === repository.relativePath)?.baseRef ??
+      null;
+    const start = yield* resolveStart(repository, input.startFromOrigin, requestedBaseRef);
     yield* git.createWorktree({
       cwd: source,
       refName: start.startRef,
@@ -267,15 +286,10 @@ export const make = Effect.gen(function* () {
         yield* linkSharedEntries(input.workspaceRoot, container);
       } else {
         // The root repository's checkout is the container, so there is nothing to link.
-        yield* createWorktree(root.path, container, branch, input);
+        yield* createWorktree(root, container, branch, input);
       }
       for (const repository of nested) {
-        yield* createWorktree(
-          repository.path,
-          join(container, placement(repository)),
-          branch,
-          input,
-        );
+        yield* createWorktree(repository, join(container, placement(repository)), branch, input);
       }
       return { path: container, branch };
     },
