@@ -1,4 +1,9 @@
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
+import {
+  fileRootFromTreePath,
+  fileRootTreePath,
+  type ProjectFileRoot,
+} from "@t3tools/client-runtime/project-file-roots";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -6,8 +11,35 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
 
-/** Loads only requested directories; collapsing a folder keeps its children cached. */
-export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
+/**
+ * The rows a tree path groups when it is above every root: the next segment of each root label
+ * below it. Same-named roots carry parent segments (`team-a/docs`), so `team-a` is such a row.
+ */
+function groupedRootEntries(roots: ReadonlyArray<ProjectFileRoot>, treePath: string): ProjectEntry[] {
+  const prefix = treePath === "" ? "" : `${treePath}/`;
+  const entries = new Map<string, ProjectEntry>();
+  for (const root of roots) {
+    if (!root.label.startsWith(prefix)) continue;
+    const segment = root.label.slice(prefix.length).split("/")[0]!;
+    const path = `${prefix}${segment}`;
+    if (!entries.has(path)) entries.set(path, { path, kind: "directory" });
+  }
+  return [...entries.values()];
+}
+
+/**
+ * Loads only requested directories; collapsing a folder keeps its children cached.
+ *
+ * Directory keys and entry paths are tree paths. With several roots, the top level is one row per
+ * root, named by its label, and `label/sub` loads `sub` from that root. Tree paths are named by
+ * the roots, so the caller remounts the hook when the root list changes.
+ */
+export function useDirectoryEntries(
+  environmentId: EnvironmentId,
+  roots: ReadonlyArray<ProjectFileRoot>,
+  /** False until the roots are known, so the tree is not listed twice. */
+  enabled = true,
+) {
   const [directories, setDirectories] = useState(new Map<string, readonly ProjectEntry[]>());
   const [errors, setErrors] = useState(new Map<string, string>());
   const [pending, setPending] = useState(0);
@@ -22,13 +54,30 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
 
   const load = useCallback(
     function loadDirectory(directoryPath: string, refresh = false): Promise<void> {
+      if (!enabled) return Promise.resolve();
       const existing = requests.current.get(directoryPath);
       if (existing)
         return refresh ? existing.then(() => loadDirectory(directoryPath, true)) : existing;
       if (!refresh && loaded.current.has(directoryPath)) return Promise.resolve();
+      const target = fileRootFromTreePath(roots, directoryPath);
+      if (target === null) {
+        // Rows above the roots are synthesized from the labels; nothing is read for them. The
+        // update lands asynchronously like a listing, so a load from an effect never sets state
+        // during that effect.
+        loaded.current.add(directoryPath);
+        return Promise.resolve().then(() => {
+          if (!active.current) return;
+          setDirectories((previous) =>
+            new Map(previous).set(directoryPath, groupedRootEntries(roots, directoryPath)),
+          );
+        });
+      }
       loaded.current.add(directoryPath);
       requested.current.add(directoryPath);
-      const atom = projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath } });
+      const atom = projectEnvironment.listEntries({
+        environmentId,
+        input: { cwd: target.root.path, directoryPath: target.relativePath },
+      });
       setPending((count) => count + 1);
       if (!refresh) setLoadingDirectories((previous) => new Set(previous).add(directoryPath));
       const request = (async () => {
@@ -54,10 +103,16 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
             setDirectories((previous) =>
               new Map(previous).set(
                 directoryPath,
-                result.value.entries.filter(
-                  (entry) =>
-                    entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) === directoryPath,
-                ),
+                result.value.entries
+                  .filter(
+                    (entry) =>
+                      entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) ===
+                      target.relativePath,
+                  )
+                  .map((entry) => ({
+                    ...entry,
+                    path: fileRootTreePath(roots, { root: target.root, relativePath: entry.path }),
+                  })),
               ),
             );
             setErrors((previous) => {
@@ -90,7 +145,7 @@ export function useDirectoryEntries(environmentId: EnvironmentId, cwd: string) {
       requests.current.set(directoryPath, request);
       return request;
     },
-    [cwd, environmentId],
+    [enabled, environmentId, roots],
   );
 
   useEffect(() => {

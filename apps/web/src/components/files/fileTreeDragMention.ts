@@ -10,11 +10,18 @@ interface FileTreeDragTransfer {
 export interface FileTreeDragStartEvent {
   readonly dataTransfer: FileTreeDragTransfer | null;
   composedPath(): ReadonlyArray<unknown>;
+  preventDefault(): void;
+  stopPropagation(): void;
 }
 
 export interface FileTreeDragMentionHost {
   /** Drop the tree's gesture-applied selection of the dragged row. */
   deselect(treePath: string): void;
+  /**
+   * The path a dragged row is mentioned by, or null when it names no real path; its tree path
+   * when omitted.
+   */
+  mentionPath?(treePath: string): string | null;
 }
 
 export interface FileTreeDragMentionController {
@@ -74,9 +81,18 @@ export function createFileTreeDragMentionController(
       // part of the current selection drags the whole selection.
       const dragged = selection.includes(itemPath) ? selection : [itemPath];
       const mentions = dragged
-        .map((path) => composerMentionFromTreePath(path))
+        .map((path) => {
+          const treePath = path.replace(/\/+$/, "");
+          const mentionPath = treePath && host.mentionPath ? host.mentionPath(treePath) : treePath;
+          return mentionPath === null ? null : composerMentionFromTreePath(mentionPath);
+        })
         .filter((mention): mention is string => mention !== null);
       if (mentions.length === 0) {
+        // Nothing here names a real path, so there is nothing to drag. Cancel before the tree
+        // sees the event: it would select the rows and add their tree path as text/plain, which
+        // the composer inserts as text.
+        event.preventDefault();
+        event.stopPropagation();
         return;
       }
       draggedPaths = dragged;
