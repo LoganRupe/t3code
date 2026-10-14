@@ -71,6 +71,7 @@ import { useSelectedThreadGitActions } from "../../state/use-selected-thread-git
 import { useSelectedThreadGitState } from "../../state/use-selected-thread-git-state";
 import { useSelectedThreadRequests } from "../../state/use-selected-thread-requests";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
+import { useSelectedThreadGitRepository } from "../../state/use-selected-thread-git-repository";
 import { useThreadComposerState } from "../../state/use-thread-composer-state";
 import { resolveMergeBackTargetThreadId } from "@t3tools/client-runtime/state/thread-relationships";
 import { resolveLatestMergeBackRun } from "@t3tools/client-runtime/state/thread-workflows";
@@ -287,6 +288,8 @@ function ThreadRouteContent(
   const selectedThreadDetailState = props.selectedThreadDetailState;
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
   const { selectedThreadCwd } = useSelectedThreadWorktree();
+  // Git surfaces follow the repository picked in the Git sheet; files and terminals stay put.
+  const { gitCwd } = useSelectedThreadGitRepository();
   const composer = useThreadComposerState();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
@@ -430,10 +433,10 @@ function ThreadRouteContent(
     .filter(Boolean)
     .join(" · ");
   const gitStatus = useEnvironmentQuery(
-    selectedThread !== null && selectedThreadCwd !== null
+    selectedThread !== null && gitCwd !== null
       ? vcsEnvironment.status({
           environmentId: selectedThread.environmentId,
-          input: { cwd: selectedThreadCwd },
+          input: { cwd: gitCwd },
         })
       : null,
   );
@@ -455,7 +458,7 @@ function ThreadRouteContent(
 
   const gitActionProgressTarget = {
     environmentId: selectedThread?.environmentId ?? null,
-    cwd: selectedThreadCwd,
+    cwd: gitCwd,
   };
   const gitActionProgress = useGitActionProgress(gitActionProgressTarget);
 

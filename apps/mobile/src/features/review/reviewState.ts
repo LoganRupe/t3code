@@ -215,6 +215,13 @@ export function setReviewGitSections(
   appAtomRegistry.set(reviewGitSectionsByThreadKeyAtom(threadKey), { cwd, sections });
 }
 
+/** The repository a thread's review and Git sheets share, by `relativePath`. */
+export function useReviewSelectedRepository(threadKey: string | null): string | null {
+  return useAtomValue(
+    threadKey ? reviewRepositoryByThreadKeyAtom(threadKey) : EMPTY_REVIEW_REPOSITORY_ATOM,
+  );
+}
+
 export function setReviewSelectedRepository(threadKey: string, relativePath: string): void {
   appAtomRegistry.set(reviewRepositoryByThreadKeyAtom(threadKey), relativePath);
 }

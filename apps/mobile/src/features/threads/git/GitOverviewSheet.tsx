@@ -39,7 +39,7 @@ import { useEnvironmentQuery } from "../../../state/query";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
-import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
+import { useSelectedThreadGitRepository } from "../../../state/use-selected-thread-git-repository";
 import { vcsEnvironment } from "../../../state/vcs";
 import { resolveGitOverviewReviewNavigationAction } from "./git-overview-navigation";
 import { menuItemIconName, statusSummary } from "./gitSheetComponents";
@@ -49,6 +49,7 @@ import {
   useLinkedPullRequestLines,
 } from "../LinkedPullRequestList";
 import { useLinkedPullRequestActions } from "../useLinkedPullRequestActions";
+import { GitRepositoryPicker } from "./GitRepositoryPicker";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
 
@@ -85,7 +86,14 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
     replace: presentation === "sheet",
     context: selectedThread ?? undefined,
   });
-  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const {
+    repositories,
+    repository,
+    selectRepository,
+    gitCwd: selectedThreadCwd,
+    isThreadRepository,
+    worktreePath: selectedThreadWorktreePath,
+  } = useSelectedThreadGitRepository();
   const linkedPrLines = useLinkedPullRequestLines(selectedThread, selectedEnvironmentRuntime);
   const linkedPrActions = useLinkedPullRequestActions({
     thread: selectedThread,
@@ -105,7 +113,12 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       : null,
   );
 
-  const currentBranchLabel = gitStatus.data?.refName ?? selectedThread?.branch ?? "Detached HEAD";
+  const branchLabel =
+    gitStatus.data?.refName ??
+    (isThreadRepository ? selectedThread?.branch : null) ??
+    "Detached HEAD";
+  const currentBranchLabel =
+    repositories.length > 1 && repository ? `${repository.name} · ${branchLabel}` : branchLabel;
   const currentStatusSummary = statusSummary(gitStatus.data);
   const currentWorktreePath = selectedThreadWorktreePath;
   const gitOperationLabel = gitState.gitOperationLabel;
@@ -247,6 +260,16 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         ) : undefined
       }
     >
+      {repositories.length > 1 ? (
+        <GitRepositoryPicker
+          environmentId={environmentId}
+          repositories={repositories}
+          selectedRelativePath={repository?.relativePath ?? null}
+          disabled={busy}
+          onSelect={selectRepository}
+        />
+      ) : null}
+
       <ListSection>
         {sheetMenuItems.map(({ item, disabledReason }) => (
           <ListRow

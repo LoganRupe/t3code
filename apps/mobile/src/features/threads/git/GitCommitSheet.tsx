@@ -14,7 +14,7 @@ import { useEnvironmentQuery } from "../../../state/query";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
-import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
+import { useSelectedThreadGitRepository } from "../../../state/use-selected-thread-git-repository";
 import { vcsEnvironment } from "../../../state/vcs";
 
 type GitCommitSheetProps = StaticScreenProps<{
@@ -27,7 +27,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { selectedThread } = useThreadSelection();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const { repositories, repository, gitCwd: selectedThreadCwd } = useSelectedThreadGitRepository();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
   const { canWriteSourceControl, canChangeThreadBranch } = gitActions;
@@ -80,7 +80,10 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
       <SheetHeader
         presentation="inline"
         title="Commit changes"
-        subtitle={gitStatus.data?.refName ?? "(detached HEAD)"}
+        subtitle={
+          (repositories.length > 1 && repository ? `${repository.name} · ` : "") +
+          (gitStatus.data?.refName ?? "(detached HEAD)")
+        }
         onCancel={() => navigation.goBack()}
         accessibilityLabel="Cancel commit"
       />
