@@ -1,3 +1,10 @@
+import {
+  fileRootForPath,
+  fileRootFromTreePath,
+  fileRootOpenPath,
+  fileRootTreePath,
+  hasSeveralFileRoots,
+} from "@t3tools/client-runtime/project-file-roots";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -5,44 +12,72 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 
 import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
-import { useDebouncedValue } from "../../state/queries";
+import {
+  projectFileRootsSearch,
+  refreshProjectFileRootsSearch,
+  useDebouncedValue,
+  useStableFileRoots,
+} from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";
+import { fileRootDirectoryTreeEntries, fileRootTreeEntries } from "./fileTree";
+import type { ProjectFileRootsState } from "./useProjectFileRoots";
 
+/**
+ * Entries for the file tree, loaded a directory at a time.
+ *
+ * Paths are tree paths. With `fileRoots` spanning several folders, the top level is one row per
+ * root, named by its label, and every path below carries that label. `openPath` and `treePath`
+ * convert between tree paths and the paths file routes take: relative to `cwd` inside the project
+ * folder, absolute in any other listed folder.
+ */
 export function useFileTreeEntries(input: {
   readonly cwd: string | null;
   readonly environmentId: EnvironmentId | null;
   readonly searchQuery: string;
+  readonly fileRoots?: ProjectFileRootsState | undefined;
 }) {
-  const { cwd, environmentId } = input;
+  const { environmentId } = input;
+  // Until the folder list is known the tree holds, so the folder alone never flashes first.
+  const cwd = input.fileRoots && !input.fileRoots.ready ? null : input.cwd;
+  const refreshRoots = input.fileRoots?.refresh;
+  const listedRoots = useStableFileRoots(input.fileRoots?.roots);
+  const roots = useMemo(
+    () => (cwd === null ? null : (listedRoots ?? [{ label: "", path: cwd }])),
+    [cwd, listedRoots],
+  );
+  const singleRoot = roots !== null && !hasSeveralFileRoots(roots) ? (roots[0] ?? null) : null;
   const searching = input.searchQuery.trim().length > 0;
   const query = input.searchQuery.trim().slice(0, 256);
   const debouncedQuery = useDebouncedValue(query, 200);
-  const root = useEnvironmentQuery(
-    cwd !== null && environmentId !== null
-      ? projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath: "" } })
-      : null,
-  );
-  const search = useEnvironmentQuery(
-    searching && debouncedQuery.length > 0 && cwd !== null && environmentId !== null
-      ? projectEnvironment.searchEntries({
+  const rootListing =
+    singleRoot !== null && environmentId !== null
+      ? projectEnvironment.listEntries({
           environmentId,
-          input: { cwd, query: debouncedQuery, limit: 200 },
+          input: { cwd: singleRoot.path, directoryPath: "" },
         })
-      : null,
+      : null;
+  const root = useEnvironmentQuery(rootListing);
+  const searchKey = useMemo(
+    () =>
+      searching && debouncedQuery.length > 0 && roots !== null && environmentId !== null
+        ? { environmentId, roots, query: debouncedQuery, limit: 200 }
+        : null,
+    [debouncedQuery, environmentId, roots, searching],
   );
+  const search = useEnvironmentQuery(searchKey === null ? null : projectFileRootsSearch(searchKey));
   const [, render] = useReducer((value: number) => value + 1, 0);
   const [entriesRevision, entriesChanged] = useReducer((value: number) => value + 1, 0);
   const refreshVersion = useRef(0);
   const directories = useMemo(
     () => ({
-      cwd,
+      roots,
       environmentId,
       entries: new Map<string, ReadonlyArray<ProjectEntry>>(),
       requested: new Set<string>(),
       pending: new Map<string, AbortController>(),
       errors: new Map<string, string>(),
     }),
-    [cwd, environmentId],
+    [roots, environmentId],
   );
   const [refreshingDirectories, setRefreshingDirectories] = useState<typeof directories | null>(
     null,
@@ -58,19 +93,25 @@ export function useFileTreeEntries(input: {
   const loadDirectory = useCallback(
     (directoryPath: string, refresh = false) => {
       if (
-        cwd === null ||
+        roots === null ||
         environmentId === null ||
         (!refresh && directories.entries.has(directoryPath)) ||
         directories.pending.has(directoryPath)
       ) {
         return;
       }
+      // A row above every root only groups same-named roots; its rows come from the labels.
+      const target = fileRootFromTreePath(roots, directoryPath);
+      if (target === null) return;
       const controller = new AbortController();
       directories.requested.add(directoryPath);
       directories.pending.set(directoryPath, controller);
       directories.errors.delete(directoryPath);
       render();
-      const atom = projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath } });
+      const atom = projectEnvironment.listEntries({
+        environmentId,
+        input: { cwd: target.root.path, directoryPath: target.relativePath },
+      });
       appAtomRegistry.refresh(atom);
       return executeAtomQuery(appAtomRegistry, atom, {
         signal: controller.signal,
@@ -82,10 +123,7 @@ export function useFileTreeEntries(input: {
         if (result._tag === "Success") {
           directories.entries.set(
             directoryPath,
-            result.value.entries.filter(
-              (entry) =>
-                entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) === directoryPath,
-            ),
+            fileRootDirectoryTreeEntries(roots, target, result.value.entries),
           );
           entriesChanged();
         } else {
@@ -98,10 +136,10 @@ export function useFileTreeEntries(input: {
         render();
       });
     },
-    [cwd, directories, environmentId],
+    [directories, environmentId, roots],
   );
   const { refresh: refreshRoot, data: rootData } = root;
-  const { refresh: refreshSearch, data: searchData } = search;
+  const { data: searchData } = search;
   const snapshot = useMemo(() => {
     const merged = new Map<string, ProjectEntry>();
     if (searching) {
@@ -117,13 +155,18 @@ export function useFileTreeEntries(input: {
         }
       }
     };
-    visit((rootData?.entries ?? []).filter((entry) => !entry.path.includes("/")));
+    visit(
+      roots !== null && hasSeveralFileRoots(roots)
+        ? fileRootTreeEntries(roots)
+        : (rootData?.entries ?? []).filter((entry) => !entry.path.includes("/")),
+    );
     return { revision: entriesRevision, entries: [...merged.values()], reachableDirectories };
-  }, [directories, entriesRevision, rootData, searchData, searching]);
+  }, [directories, entriesRevision, rootData, roots, searchData, searching]);
 
   const refresh = useCallback(() => {
+    refreshRoots?.();
     refreshRoot();
-    if (searching) refreshSearch();
+    if (searchKey !== null) refreshProjectFileRootsSearch(searchKey);
     const paths = new Set(
       [...directories.requested].filter((path) => snapshot.reachableDirectories.has(path)),
     );
@@ -140,20 +183,10 @@ export function useFileTreeEntries(input: {
         await loadDirectory(next.value, true);
       }
     };
-    const queries =
-      cwd !== null && environmentId !== null
-        ? [
-            projectEnvironment.listEntries({ environmentId, input: { cwd, directoryPath: "" } }),
-            ...(searching
-              ? [
-                  projectEnvironment.searchEntries({
-                    environmentId,
-                    input: { cwd, query: debouncedQuery, limit: 200 },
-                  }),
-                ]
-              : []),
-          ]
-        : [];
+    const queries = [
+      ...(rootListing === null ? [] : [rootListing]),
+      ...(searchKey === null ? [] : [projectFileRootsSearch(searchKey)]),
+    ];
     const work = [
       ...queries.map((atom) =>
         executeAtomQuery(appAtomRegistry, atom, { reportFailure: false, reportDefect: false }),
@@ -165,16 +198,29 @@ export function useFileTreeEntries(input: {
       if (version === refreshVersion.current) setRefreshingDirectories(null);
     });
   }, [
-    cwd,
-    debouncedQuery,
-    environmentId,
     directories,
     loadDirectory,
     refreshRoot,
-    refreshSearch,
-    searching,
+    refreshRoots,
+    rootListing,
+    searchKey,
     snapshot.reachableDirectories,
   ]);
+  const openPath = useCallback(
+    (treePath: string) => {
+      const target = roots === null ? null : fileRootFromTreePath(roots, treePath);
+      return target === null || cwd === null ? treePath : fileRootOpenPath(cwd, target);
+    },
+    [cwd, roots],
+  );
+  const treePath = useCallback(
+    (path: string | null) => {
+      if (path === null || roots === null || cwd === null) return path;
+      const target = fileRootForPath(roots, cwd, path);
+      return target === null ? null : fileRootTreePath(roots, target);
+    },
+    [cwd, roots],
+  );
 
   return {
     entries: snapshot.entries,
@@ -185,6 +231,7 @@ export function useFileTreeEntries(input: {
       [...directories.errors].find(([path]) => snapshot.reachableDirectories.has(path))?.[1] ??
       null,
     isPending:
+      (input.cwd !== null && cwd === null) ||
       root.isPending ||
       directories.pending.size > 0 ||
       (searching && (query !== debouncedQuery || search.isPending)),
@@ -193,5 +240,7 @@ export function useFileTreeEntries(input: {
     loadingDirectories: new Set(directories.pending.keys()),
     loadDirectory,
     refresh,
+    openPath,
+    treePath,
   };
 }

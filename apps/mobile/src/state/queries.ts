@@ -3,6 +3,12 @@ import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/files
 import { environmentSession } from "./session";
 import { useEnvironmentPresentation } from "./presentation";
 import type { VcsRefTarget } from "@t3tools/client-runtime/state/vcs";
+import {
+  hasSeveralFileRoots,
+  mergeRootSearchResults,
+  projectFileRootsKey,
+  type ProjectFileRoot,
+} from "@t3tools/client-runtime/project-file-roots";
 import type {
   EnvironmentId,
   OrchestrationV2ProjectedTurnItem,
@@ -60,6 +66,67 @@ export interface ComposerPathSearchTarget {
   readonly environmentId: EnvironmentId | null;
   readonly cwd: string | null;
   readonly query: string | null;
+  /**
+   * The roots to search. With several, each is searched for the same query and the entries come
+   * back as tree paths under their root's label. Omitted, or a single root, searches `cwd`.
+   */
+  readonly roots?: ReadonlyArray<ProjectFileRoot> | null | undefined;
+}
+
+interface ProjectRootsSearchKey {
+  readonly environmentId: EnvironmentId;
+  readonly roots: ReadonlyArray<ProjectFileRoot>;
+  readonly query: string;
+  readonly limit: number;
+}
+
+const rootSearchAtom = (key: ProjectRootsSearchKey, root: ProjectFileRoot) =>
+  projectEnvironment.searchEntries({
+    environmentId: key.environmentId,
+    input: { cwd: root.path, query: key.query, limit: key.limit },
+  });
+
+/** One query over several roots; each root's index answers for itself and the results merge. */
+const projectRootsSearchAtom = Atom.family((serializedKey: string) => {
+  const key = JSON.parse(serializedKey) as ProjectRootsSearchKey;
+  return Atom.make((get) =>
+    AsyncResult.all(key.roots.map((root) => get(rootSearchAtom(key, root)))).pipe(
+      AsyncResult.map((results) => mergeRootSearchResults(key.roots, results, key.limit)),
+    ),
+  ).pipe(Atom.withLabel(`mobile:project-roots-search:${serializedKey}`));
+});
+
+/**
+ * Searches the files of every root a project spans. With a single root this is that root's
+ * own search and paths stay relative to it; with several, paths are tree paths under each
+ * root's label.
+ */
+export function projectFileRootsSearch(key: ProjectRootsSearchKey) {
+  return hasSeveralFileRoots(key.roots)
+    ? projectRootsSearchAtom(JSON.stringify(key))
+    : rootSearchAtom(key, key.roots[0]!);
+}
+
+/** A merged search refreshes nothing upstream, so each root's search is refreshed by hand. */
+export function refreshProjectFileRootsSearch(key: ProjectRootsSearchKey): void {
+  for (const root of key.roots) appAtomRegistry.refresh(rootSearchAtom(key, root));
+}
+
+/** Rebuilds a root list from its key, so a list rebuilt each render keeps one identity. */
+export function useStableFileRoots(
+  roots: ReadonlyArray<ProjectFileRoot> | null | undefined,
+): ReadonlyArray<ProjectFileRoot> | null {
+  const key = roots && roots.length > 0 ? projectFileRootsKey(roots) : "";
+  return useMemo(
+    () =>
+      key === ""
+        ? null
+        : key.split("\0\0").map((pair) => {
+            const [label = "", path = ""] = pair.split("\0");
+            return { label, path };
+          }),
+    [key],
+  );
 }
 
 export function useDebouncedValue<A>(value: A, delayMs: number): A {
@@ -303,13 +370,16 @@ export function usePaginatedBranches(target: VcsRefTarget) {
 }
 
 export function useComposerPathSearch(target: ComposerPathSearchTarget) {
+  const stableRoots = useStableFileRoots(target.roots);
+  const roots = stableRoots && hasSeveralFileRoots(stableRoots) ? stableRoots : null;
   const normalizedTarget = useMemo(
     () => ({
       environmentId: target.environmentId,
       cwd: target.cwd,
       query: normalizeComposerPathSearchQuery(target.query),
+      roots,
     }),
-    [target.cwd, target.environmentId, target.query],
+    [roots, target.cwd, target.environmentId, target.query],
   );
   const debouncedTarget = useDebouncedValue(normalizedTarget, COMPOSER_PATH_SEARCH_DEBOUNCE_MS);
   const fileAccessSession = useEnvironmentQuery(
@@ -325,23 +395,21 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget) {
     sessionError: fileAccessSession.error,
   });
   const { canReadFiles } = fileAccess;
-  const searchTarget =
+  const searchKey =
     debouncedTarget.environmentId !== null &&
     debouncedTarget.cwd !== null &&
     debouncedTarget.query.length > 0
       ? {
           environmentId: debouncedTarget.environmentId,
-          input: {
-            cwd: debouncedTarget.cwd,
-            query: debouncedTarget.query,
-            limit: COMPOSER_PATH_SEARCH_LIMIT,
-          },
+          roots: debouncedTarget.roots ?? [{ label: "", path: debouncedTarget.cwd }],
+          query: debouncedTarget.query,
+          limit: COMPOSER_PATH_SEARCH_LIMIT,
         }
       : null;
   const result = useEnvironmentQuery(
-    canReadFiles && searchTarget !== null ? projectEnvironment.searchEntries(searchTarget) : null,
+    canReadFiles && searchKey !== null ? projectFileRootsSearch(searchKey) : null,
   );
-  const hasTarget = searchTarget !== null;
+  const hasTarget = searchKey !== null;
 
   return {
     entries: result.data?.entries ?? [],

@@ -77,6 +77,7 @@ import { VideoPreviewModal, type VideoPreviewSource } from "../../components/Vid
 import { GlassSurface } from "../../components/GlassSurface";
 import { ComposerEditor, type ComposerEditorHandle } from "../../components/ComposerEditor";
 import { fileRoutePathSegments } from "../files/filePath";
+import { useProjectFileRoots } from "../files/useProjectFileRoots";
 import {
   ComposerActionButton,
   ComposerInlineControl,
@@ -491,6 +492,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     return report !== null;
   }, [currentModelSelection.instanceId, onShowUsageLimits, props.serverConfig]);
 
+  const { roots: mentionRoots } = useProjectFileRoots({
+    environmentId: props.environmentId,
+    cwd: props.projectCwd,
+    projectName: project?.title,
+  });
   const composerMenu = useComposerCommandMenu({
     draftMessage: props.draftMessage,
     ownerKey: composerOwnerKey,
@@ -498,6 +504,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     threadShells: useThreadShells(),
     currentThreadId: props.selectedThread.id,
     projectCwd: props.projectCwd,
+    mentionRoots,
     pullRequestProjectId: props.serverConfig?.environment.capabilities.pullRequests
       ? (project?.id ?? null)
       : null,
