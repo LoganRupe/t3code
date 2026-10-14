@@ -10,6 +10,9 @@ const harness = vi.hoisted(() => ({
     selectedEnvironmentRuntime: { connectionState: "connected" } as unknown,
   },
   worktree: { selectedThreadCwd: "/repo" as string | null, selectedThreadWorktreePath: null },
+  repositories: [] as Array<{ relativePath: string; name: string; path: string }>,
+  selectedRepositoryPath: null as string | null,
+  commandCalls: [] as Array<{ command: string; input: unknown }>,
   refreshStatusCalls: [] as Array<unknown>,
   renderCount: 0,
   onRefreshSettled: () => {},
@@ -23,11 +26,17 @@ vi.mock("./use-atom-command", () => ({
           harness.onRefreshSettled();
           return AsyncResult.success({});
         }
-      : async () => AsyncResult.success({}),
+      : async (input: unknown) => {
+          harness.commandCalls.push({ command: String(command), input });
+          return AsyncResult.success({ refName: "feature" });
+        },
 }));
 vi.mock("./vcs", () => ({
-  vcsEnvironment: { refreshStatus: "refreshStatus" },
-  vcsActionManager: { runStackedAction: () => "runStackedAction", track: vi.fn() },
+  vcsEnvironment: { refreshStatus: "refreshStatus", switchRef: "switchRef" },
+  vcsActionManager: {
+    runStackedAction: () => "runStackedAction",
+    track: (_registry: unknown, _target: unknown, _options: unknown, run: () => unknown) => run(),
+  },
 }));
 vi.mock("./threads", () => ({ threadEnvironment: { updateMetadata: "updateMetadata" } }));
 vi.mock("./queries", () => ({ useBranches: () => ({ data: null, refresh: () => {} }) }));
@@ -51,18 +60,27 @@ vi.mock("./use-thread-selection", () => ({
 vi.mock("./use-selected-thread-worktree", () => ({
   useSelectedThreadWorktree: () => harness.worktree,
 }));
+vi.mock("./workspace-repositories", () => ({
+  useWorkspaceRepositories: () => ({ repositories: harness.repositories }),
+}));
+vi.mock("../features/review/reviewState", () => ({
+  useReviewSelectedRepository: () => harness.selectedRepositoryPath,
+  setReviewSelectedRepository: () => {},
+}));
 
 import { useSelectedThreadGitActions } from "./use-selected-thread-git-actions";
 
 let root: Root | null = null;
 let rerender: () => void = () => {};
+let actions: ReturnType<typeof useSelectedThreadGitActions> | null = null;
 
 function Consumer() {
   const [, bump] = useReducer((count: number) => count + 1, 0);
+  const current = useSelectedThreadGitActions();
   useEffect(() => {
     rerender = bump;
+    actions = current;
   });
-  useSelectedThreadGitActions();
   return null;
 }
 
@@ -82,6 +100,9 @@ beforeEach(() => {
     selectedEnvironmentRuntime: { connectionState: "connected" },
   };
   harness.worktree = { selectedThreadCwd: "/repo", selectedThreadWorktreePath: null };
+  harness.repositories = [];
+  harness.selectedRepositoryPath = null;
+  harness.commandCalls = [];
   harness.refreshStatusCalls = [];
   harness.renderCount = 0;
   harness.onRefreshSettled = () => rerender();
@@ -110,4 +131,64 @@ describe("useSelectedThreadGitActions", () => {
       { environmentId: "environment-1", input: { cwd: "/repo" } },
     ]);
   });
+  describe("in a multi-repo workspace", () => {
+    beforeEach(() => {
+      harness.repositories = [
+        { relativePath: ".", name: "workspace", path: "/repo" },
+        { relativePath: "web", name: "web", path: "/repo/web" },
+      ];
+    });
+
+    it("acts on the picked repository and refreshes when the pick changes", async () => {
+      root = createRoot(document.createElement("div"));
+      act(() => root!.render(<Consumer />));
+      await flush();
+
+      harness.selectedRepositoryPath = "web";
+      act(() => rerender());
+      await flush();
+
+      expect(harness.refreshStatusCalls).toEqual([
+        { environmentId: "environment-1", input: { cwd: "/repo" } },
+        { environmentId: "environment-1", input: { cwd: "/repo/web" } },
+      ]);
+    });
+
+    it("leaves the thread's branch alone when switching another repository's branch", async () => {
+      harness.selectedRepositoryPath = "web";
+      root = createRoot(document.createElement("div"));
+      act(() => root!.render(<Consumer />));
+      await flush();
+
+      await act(async () => {
+        await actions!.onCheckoutSelectedThreadBranch("feature");
+      });
+
+      expect(harness.commandCalls).toEqual([
+        {
+          command: "switchRef",
+          input: {
+            environmentId: "environment-1",
+            input: { cwd: "/repo/web", refName: "feature" },
+          },
+        },
+      ]);
+    });
+
+    it("syncs the thread's branch from the workspace folder's own repository", async () => {
+      root = createRoot(document.createElement("div"));
+      act(() => root!.render(<Consumer />));
+      await flush();
+
+      await act(async () => {
+        await actions!.onCheckoutSelectedThreadBranch("feature");
+      });
+
+      expect(harness.commandCalls.map((call) => call.command)).toEqual([
+        "switchRef",
+        "updateMetadata",
+      ]);
+    });
+  });
+
 });
