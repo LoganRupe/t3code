@@ -59,6 +59,13 @@ import { PREFERRED_HIGHLIGHTER } from "~/lib/syntaxHighlighting";
 import { cn } from "~/lib/utils";
 import type { ChatFileAttachment } from "~/types";
 import { isHostPath } from "@t3tools/shared/path";
+import {
+  fileRootForPath,
+  fileRootOpenPath,
+  hasSeveralFileRoots,
+  projectFileRootsKey,
+} from "@t3tools/client-runtime/project-file-roots";
+import { useProjectFileRoots } from "~/hooks/useProjectFileRoots";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
@@ -991,8 +998,35 @@ export default function FilePreviewPanel({
   selectedFilePending,
   workspaceMutationId,
 }: FilePreviewPanelProps) {
+  // A `.code-workspace` project spans the folders it lists, so a file is read, edited and
+  // revealed through the folder that holds it; the surface then works relative to that folder.
+  // An ordinary project keeps its single root, and its relative paths, exactly as before.
+  const {
+    roots: fileRoots,
+    ready: fileRootsReady,
+    refresh: refreshFileRoots,
+  } = useProjectFileRoots({ environmentId, cwd, projectName });
+  const rootTarget =
+    attachment === undefined &&
+    requestedPath !== null &&
+    (hasSeveralFileRoots(fileRoots) || fileRoots[0]?.path !== cwd)
+      ? fileRootForPath(fileRoots, cwd, requestedPath)
+      : null;
+  const fileCwd = rootTarget?.root.path ?? cwd;
+  const fileRootLabel = rootTarget?.root.label ?? projectName;
   const relativePath =
-    attachment === undefined ? resolveFilePreviewPath(requestedPath, cwd) : requestedPath;
+    attachment !== undefined
+      ? requestedPath
+      : rootTarget !== null
+        ? rootTarget.relativePath || null
+        : resolveFilePreviewPath(requestedPath, cwd);
+  // Root-relative paths open through their root, so the rest of the app names them unambiguously.
+  const fromRoot = (path: string) =>
+    rootTarget === null ? path : fileRootOpenPath(cwd, { root: rootTarget.root, relativePath: path });
+  const openFromRoot = (path: string) => onOpenFile(fromRoot(path));
+  // The surface is keyed by the path the store knows, not the root-relative one.
+  const notifyPendingChange = (path: string, pending: boolean) =>
+    onPendingChange(rootTarget !== null && requestedPath !== null ? requestedPath : path, pending);
   const draft = typeof composerDraftTarget === "string";
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
@@ -1021,7 +1055,7 @@ export default function FilePreviewPanel({
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
   const file = useProjectFileQuery(
     environmentId,
-    cwd,
+    fileCwd,
     relativePath,
     attachment === undefined && relativePath !== null,
   );
@@ -1037,8 +1071,14 @@ export default function FilePreviewPanel({
     attachment !== undefined ? null : (relativePath ?? (folderTrail === undefined ? null : ""));
   // A host trail that walked up to the workspace root (`/repo/project` is `""`) no
   // longer passes through the current path, so the crumbs start over there.
+  // Inside a root, the trail is kept relative to that root like the crumbs.
+  const rootFolderTrail = (() => {
+    if (rootTarget === null || folderTrail === undefined) return folderTrail;
+    const trailTarget = fileRootForPath(fileRoots, cwd, folderTrail);
+    return trailTarget?.root.path === rootTarget.root.path ? trailTarget.relativePath : undefined;
+  })();
   const breadcrumbTrail =
-    breadcrumbPath === null ? null : retainedBreadcrumbTrail(folderTrail, breadcrumbPath);
+    breadcrumbPath === null ? null : retainedBreadcrumbTrail(rootFolderTrail, breadcrumbPath);
   // The trail only continues below folders, so a surface with one is a folder
   // before its read settles, and walking up never flashes a file preview.
   const isFolder =
@@ -1125,13 +1165,17 @@ export default function FilePreviewPanel({
       breadcrumbTrail !== null && breadcrumbPathOf(breadcrumbTrail) === crumbPath
         ? breadcrumbTrail
         : crumbPath;
-    onNavigateFolder(path, retainedBreadcrumbTrail(breadcrumbTrail ?? undefined, path), !isFolder);
+    onNavigateFolder(
+      fromRoot(path),
+      fromRoot(retainedBreadcrumbTrail(breadcrumbTrail ?? undefined, path)),
+      !isFolder,
+    );
   };
   const absolutePath =
     breadcrumbPath === ""
-      ? cwd
+      ? fileCwd
       : relativePath && attachment === undefined
-        ? resolvePathLinkTarget(relativePath, cwd)
+        ? resolvePathLinkTarget(relativePath, fileCwd)
         : null;
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
   useWorkspaceMutationRefresh({
@@ -1145,7 +1189,7 @@ export default function FilePreviewPanel({
       !selectedFilePending,
     mutationId: workspaceMutationId,
     refresh: file.refresh,
-    resourceKey: `file:${environmentId}:${cwd}:${relativePath ?? ""}`,
+    resourceKey: `file:${environmentId}:${fileCwd}:${relativePath ?? ""}`,
   });
 
   useEffect(() => {
@@ -1176,7 +1220,7 @@ export default function FilePreviewPanel({
       const result = await openFileInPreview({
         threadRef,
         filePath: absolutePath,
-        workspaceRoot: cwd,
+        workspaceRoot: fileCwd,
         httpBaseUrl: environmentHttpBaseUrl,
         createAssetUrl,
         openPreview,
@@ -1225,11 +1269,11 @@ export default function FilePreviewPanel({
           >
             <div className="flex h-full w-max min-w-full items-center text-xs">
               <FileBreadcrumbs
-                cwd={cwd}
+                cwd={fileCwd}
                 environmentId={environmentId}
                 onNavigateFolder={navigateToFolder}
-                onOpenFile={onOpenFile}
-                projectName={projectName}
+                onOpenFile={openFromRoot}
+                projectName={fileRootLabel}
                 relativePath={breadcrumbPath}
                 trail={breadcrumbTrail}
                 workspaceMutationId={workspaceMutationId}
@@ -1329,7 +1373,7 @@ export default function FilePreviewPanel({
               threadRef={threadRef}
               draft={draft}
               absolutePath={absolutePath}
-              workspaceRoot={cwd}
+              workspaceRoot={fileCwd}
               name={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
@@ -1340,7 +1384,7 @@ export default function FilePreviewPanel({
               threadRef={threadRef}
               draft={draft}
               absolutePath={absolutePath}
-              workspaceRoot={cwd}
+              workspaceRoot={fileCwd}
               name={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
@@ -1351,7 +1395,7 @@ export default function FilePreviewPanel({
               threadRef={threadRef}
               draft={draft}
               absolutePath={absolutePath}
-              workspaceRoot={cwd}
+              workspaceRoot={fileCwd}
               alt={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
@@ -1362,7 +1406,7 @@ export default function FilePreviewPanel({
               threadRef={threadRef}
               draft={draft}
               absolutePath={absolutePath}
-              workspaceRoot={cwd}
+              workspaceRoot={fileCwd}
               title={relativePath}
               workspaceMutationId={workspaceMutationId}
             />
@@ -1387,7 +1431,7 @@ export default function FilePreviewPanel({
                   <p className="text-muted-foreground">
                     Workspace folder:{" "}
                     <code className="break-all font-mono select-all">
-                      {file.readError?.cwd ?? cwd}
+                      {file.readError?.cwd ?? fileCwd}
                     </code>
                     . Check the link's path or locate the file in Files.
                   </p>
@@ -1403,13 +1447,13 @@ export default function FilePreviewPanel({
               <RenderedMarkdownSurface
                 key={relativePath}
                 environmentId={environmentId}
-                cwd={cwd}
+                cwd={fileCwd}
                 relativePath={relativePath}
                 threadRef={threadRef}
                 contents={file.data.contents}
                 workspaceMutationId={workspaceMutationId}
                 readOnly={isHostFile || !canWriteFiles}
-                onPendingChange={onPendingChange}
+                onPendingChange={notifyPendingChange}
               />
             ) : tableDelimiter && renderTable ? (
               <DelimitedTablePreview
@@ -1422,7 +1466,7 @@ export default function FilePreviewPanel({
               <SourceFilePreview
                 name={relativePath}
                 text={file.data.contents}
-                cacheKey={projectFileCacheKey(cwd, relativePath, file.data.contents)}
+                cacheKey={projectFileCacheKey(fileCwd, relativePath, file.data.contents)}
                 onPostRender={onFilePostRender}
               />
             ) : (
@@ -1430,7 +1474,7 @@ export default function FilePreviewPanel({
                 <EditableFileSurface
                   key={`${relativePath}:${resolvedTheme}`}
                   environmentId={environmentId}
-                  cwd={cwd}
+                  cwd={fileCwd}
                   relativePath={relativePath}
                   composerDraftTarget={composerDraftTarget}
                   contents={file.data.contents}
@@ -1438,7 +1482,7 @@ export default function FilePreviewPanel({
                   revealRequestId={revealRequestId}
                   wordWrap={wordWrap}
                   onPostRender={onFilePostRender}
-                  onPendingChange={onPendingChange}
+                  onPendingChange={notifyPendingChange}
                 />
               </DiffWorkerPoolProvider>
             )
@@ -1454,15 +1498,25 @@ export default function FilePreviewPanel({
             )}
           >
             <FileBrowserPanel
-              key={`${environmentId}:${hostFolderPath ?? cwd}`}
+              // Tree paths are named by the roots, so a changed root list starts the tree over.
+              key={`${environmentId}:${hostFolderPath ?? `${cwd}:${projectFileRootsKey(fileRoots)}`}`}
               environmentId={environmentId}
               cwd={hostFolderPath ?? cwd}
               projectName={hostFolderPath ?? projectName}
               hostFolder={hostFolderPath !== null}
-              selectedPath={
+              roots={
                 hostFolderPath === null
-                  ? relativePath
-                  : trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
+                  ? fileRoots
+                  : [{ label: hostFolderPath, path: hostFolderPath }]
+              }
+              rootsReady={hostFolderPath !== null || fileRootsReady}
+              {...(hostFolderPath === null ? { onRefreshRoots: refreshFileRoots } : {})}
+              selectedPath={
+                hostFolderPath !== null
+                  ? trailChildOf(hostFolderPath, breadcrumbTrail ?? hostFolderPath)
+                  : rootTarget !== null
+                    ? requestedPath
+                    : relativePath
               }
               selectedPathRevealId={revealRequestId}
               onOpenFile={onOpenFile}

@@ -224,6 +224,37 @@ describe("ReviewService", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("allows the folders a project's workspace file lists outside the project", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const workspaceRoot = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-workspace-" });
+      const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-base-" });
+      const parent = yield* fs.makeTempDirectoryScoped({ prefix: "t3-review-multi-" });
+      const projectRoot = `${parent}/team`;
+      const outsideRepository = `${parent}/api`;
+      const outsideFolder = `${parent}/design`;
+      const unlisted = `${parent}/other`;
+      for (const directory of [projectRoot, `${outsideRepository}/.git`, outsideFolder, unlisted]) {
+        yield* fs.makeDirectory(directory, { recursive: true });
+      }
+      yield* fs.writeFileString(
+        `${projectRoot}/team.code-workspace`,
+        JSON.stringify({ folders: [{ path: "../api", name: "API" }, { path: "../design" }] }),
+      );
+
+      const review = (cwd: string) =>
+        Effect.gen(function* () {
+          const service = yield* ReviewService.ReviewService;
+          return yield* service.getDiffPreview({ cwd });
+        }).pipe(Effect.provide(layer({ workspaceRoot, baseDir, projectRoots: [projectRoot] })));
+
+      assert.strictEqual((yield* review(outsideRepository)).cwd, outsideRepository);
+      assert.strictEqual((yield* review(outsideFolder)).cwd, outsideFolder);
+      const error = yield* review(unlisted).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "VcsRepositoryDetectionError");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("allows the worktree a thread is bound to, and nothing else outside the project", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;

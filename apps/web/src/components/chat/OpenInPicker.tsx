@@ -209,6 +209,7 @@ export const OpenInPicker = memo(function OpenInPicker({
   availableEditors,
   openInCwd,
   openInCwdIsFile = false,
+  openInWorkspaceFile = null,
   presentation = "toolbar",
   compact = false,
   enableShortcut = true,
@@ -220,6 +221,11 @@ export const OpenInPicker = memo(function OpenInPicker({
   availableEditors: ReadonlyArray<EditorId>;
   openInCwd: string | null;
   openInCwdIsFile?: boolean;
+  /**
+   * The `.code-workspace` file `openInCwd` opens as. Editors that understand workspace files
+   * get it instead, both when the server launches them and in SSH deep links.
+   */
+  openInWorkspaceFile?: string | null;
   presentation?: "toolbar" | "menu";
   compact?: boolean;
   enableShortcut?: boolean;
@@ -254,6 +260,7 @@ export const OpenInPicker = memo(function OpenInPicker({
         ...remote.host,
         absolutePath: openInCwd,
         isFile: openInCwdIsFile,
+        ...(openInWorkspaceFile ? { workspaceFile: openInWorkspaceFile } : {}),
       });
       if (url === undefined) return;
       // Only record hint-seen/preferred when the shell actually accepted
@@ -271,6 +278,7 @@ export const OpenInPicker = memo(function OpenInPicker({
       input: {
         cwd: openInCwd,
         editor,
+        ...(openInWorkspaceFile ? { workspaceFile: openInWorkspaceFile } : {}),
         ...(revealFileManager && editor === "file-manager" ? { reveal: true } : {}),
       },
     });

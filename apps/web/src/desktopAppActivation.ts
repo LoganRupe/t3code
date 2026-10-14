@@ -9,6 +9,8 @@ import type {
   ThreadId,
 } from "@t3tools/contracts";
 
+import { projectFolderForPath } from "./lib/projectPaths";
+
 export interface DesktopAppActivationProject {
   readonly id: ProjectId;
   readonly environmentId: EnvironmentId;
@@ -76,10 +78,13 @@ export async function handleDesktopAppActivationRequest(
     );
   }
 
-  let projectId = dependencies.findProject(target.environmentId, request.workspaceRoot)?.id ?? null;
+  // `t3 app <file>.code-workspace` adds the folder holding the file, the way the pickers do;
+  // discovery then reads the file from that folder.
+  const workspaceRoot = projectFolderForPath(request.workspaceRoot);
+  let projectId = dependencies.findProject(target.environmentId, workspaceRoot)?.id ?? null;
   if (projectId === null) {
     try {
-      projectId = await dependencies.createProject(target.environmentId, request.workspaceRoot);
+      projectId = await dependencies.createProject(target.environmentId, workspaceRoot);
       await dependencies.waitForProject({ environmentId: target.environmentId, projectId });
     } catch (error) {
       return failure(

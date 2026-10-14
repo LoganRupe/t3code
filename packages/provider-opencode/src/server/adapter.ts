@@ -29,7 +29,7 @@ import {
   type OrchestrationV2Subagent,
   type OrchestrationV2TurnItem,
   type PlanId,
-  outsideWorkspaceRepositoryPaths,
+  outsideWorkspacePaths,
   ProviderDriverKind,
   type ProviderInstanceId,
   type ProviderRequestKind,
@@ -663,8 +663,8 @@ export function openCodePermissionRules(
     (!requiresApproval && sandboxType === "workspaceWrite")
   ) {
     rules.push({ permission: "edit", pattern: "*", action: "allow" });
-    // Repositories the workspace lists outside the cwd are part of the project, not external.
-    for (const root of outsideWorkspaceRepositoryPaths(runtimePolicy.repositories)) {
+    // Folders the workspace lists outside the cwd are part of the project, not external.
+    for (const root of outsideWorkspacePaths(runtimePolicy)) {
       rules.push({
         permission: "external_directory",
         pattern: `${root.replace(/\/$/, "")}/*`,
@@ -3243,6 +3243,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                   harness: "OpenCode",
                   model: turnInput.modelSelection.model,
                   repositories: turnInput.runtimePolicy.repositories,
+                  folders: turnInput.runtimePolicy.folders,
                 }),
               ]
                 .filter(Boolean)

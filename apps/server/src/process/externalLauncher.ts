@@ -7,6 +7,7 @@ import {
   ExternalLauncherEditorSpawnError,
   ExternalLauncherUnknownEditorError,
   ExternalLauncherUnsupportedEditorError,
+  resolveEditorTarget,
   ExternalLauncherUnsupportedTargetError,
   type EditorId,
   type FileManagerRevealKind,
@@ -519,6 +520,7 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   }
 
   if (editorDef.commands) {
+    const target = resolveEditorTarget(input);
     const { command, baseArgs } = Option.getOrElse(
       yield* resolveEditorCommand(editorDef, env),
       () => ({
@@ -528,9 +530,9 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     );
     return {
       editor: editorDef.id,
-      target: input.cwd,
+      target,
       command,
-      args: [...baseArgs, ...resolveCommandEditorArgs(editorDef, input.cwd)],
+      args: [...baseArgs, ...resolveCommandEditorArgs(editorDef, target)],
     };
   }
 

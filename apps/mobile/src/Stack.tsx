@@ -85,6 +85,8 @@ import { NewTaskDraftRouteScreen } from "./features/threads/NewTaskDraftRouteScr
 import {
   NewTaskBranchPickerRouteScreen,
   NewTaskEnvironmentPickerRouteScreen,
+  NewTaskRepositoriesPickerRouteScreen,
+  NewTaskRepositoryBranchPickerRouteScreen,
 } from "./features/threads/NewTaskContextPickerScreens";
 import {
   ExistingThreadSettingsRouteProvider,
@@ -491,6 +493,20 @@ const NewTaskSheetStack = createNativeStackNavigator({
       linking: "draft/branch",
       options: {
         title: "Branch",
+      },
+    }),
+    NewTaskRepositories: createNativeStackScreen({
+      screen: NewTaskRepositoriesPickerRouteScreen,
+      linking: "draft/repositories",
+      options: {
+        title: "Repositories",
+      },
+    }),
+    NewTaskRepositoryBranch: createNativeStackScreen({
+      screen: NewTaskRepositoryBranchPickerRouteScreen,
+      linking: "draft/repositories/branch",
+      options: {
+        title: "Base branch",
       },
     }),
     NewTaskFile: createNativeStackScreen({

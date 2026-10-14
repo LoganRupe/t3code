@@ -133,6 +133,7 @@ import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValid
 import { resolveDraftProjectSelection } from "./new-task-project-selection";
 import {
   resolveNewTaskBranchLabel,
+  resolveRepositoryBaseRefsLabel,
   resolveNewTaskWorkspaceLabel,
 } from "./new-task-context-presentation";
 import { useIncomingShare } from "../sharing/IncomingShareProvider";
@@ -140,6 +141,7 @@ import { selectIncomingShareAttachmentsForServer } from "../sharing/incoming-sha
 import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
 import { fileRoutePathSegments } from "../files/filePath";
+import { useProjectFileRoots } from "../files/useProjectFileRoots";
 import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
 
 function NewTaskWorkspaceIcon(props: {
@@ -470,6 +472,11 @@ export function NewTaskDraftScreen(props: {
       ? selectedProject?.workspaceRoot
       : (flow.selectedWorktreePath ?? selectedProject?.workspaceRoot)) || null;
   const stripAttachments = composerStripAttachments(flow.attachments);
+  const { roots: mentionRoots } = useProjectFileRoots({
+    environmentId: selectedProject?.environmentId ?? null,
+    cwd: composerWorkspaceCwd,
+    projectName: selectedProject?.title,
+  });
   const composerMenu = useComposerCommandMenu({
     draftMessage: flow.prompt,
     ownerKey: flow.draftKey,
@@ -480,6 +487,7 @@ export function NewTaskDraftScreen(props: {
       : null,
     pullRequestRepository: selectedProject?.repositoryIdentity?.displayName ?? null,
     projectCwd: composerWorkspaceCwd,
+    mentionRoots,
     selectedProviderStatus: flow.selectedProviderStatus,
     hasThread: false,
     hasCompactableConversation: false,
@@ -995,6 +1003,14 @@ export function NewTaskDraftScreen(props: {
     worktreePath: flow.selectedWorktreePath,
   });
   const showBranchLoading = flow.branchesLoading && flow.availableBranches.length === 0;
+  // A new worktree of a multi-repo workspace gives every repository its own copy; those other
+  // than the folder's own can each start from a branch the user picks.
+  const showsRepositoryBaseRefs =
+    flow.workspaceMode === "worktree" && flow.baseRefRepositories.length > 0;
+  const repositoryBaseRefsLabel = resolveRepositoryBaseRefsLabel({
+    repositoryCount: flow.baseRefRepositories.length,
+    pickCount: flow.repositoryBaseRefs.length,
+  });
 
   async function handlePickMedia(): Promise<void> {
     if (isComposerInteractionLocked || voiceInput.isBusy) {
@@ -1199,7 +1215,7 @@ export function NewTaskDraftScreen(props: {
       !modelSelection ||
       (initialMessageText.length === 0 && draft.attachments.length === 0) ||
       flow.submitting ||
-      (workspaceMode === "worktree" && !selectedBranchName)
+      (workspaceMode === "worktree" && flow.folderHasBranch && !selectedBranchName)
     ) {
       return;
     }
@@ -1366,7 +1382,7 @@ export function NewTaskDraftScreen(props: {
     !flow.submitting &&
     pendingPastedTextAttachmentCount === 0 &&
     !voiceInput.blocksSubmission &&
-    !(flow.workspaceMode === "worktree" && !flow.selectedBranchName);
+    !(flow.workspaceMode === "worktree" && flow.folderHasBranch && !flow.selectedBranchName);
   const openDraftDocument = (attachment: ComposerDocumentAttachment) => {
     // A draft attachment lives only in the draft. Without its key the screen would fall through
     // to a remote lookup for bytes the server has never seen.
@@ -1452,7 +1468,9 @@ export function NewTaskDraftScreen(props: {
     void KeyboardController.dismiss({ animated: true });
     navigation.dispatch(StackActions.push("NewTask", { incomingShareId: props.incomingShareId }));
   };
-  const openContextPicker = (routeName: "NewTaskBranch" | "NewTaskEnvironment") => {
+  const openContextPicker = (
+    routeName: "NewTaskBranch" | "NewTaskEnvironment" | "NewTaskRepositories",
+  ) => {
     if (isComposerInteractionLocked) {
       return;
     }
@@ -1567,15 +1585,30 @@ export function NewTaskDraftScreen(props: {
         showChevron={false}
       />
 
-      <ComposerInlineControl
-        accessibilityLabel={`${flow.workspaceMode === "worktree" ? "Base branch" : "Branch"}: ${selectedBranchLabel}`}
-        chevronDirection="right"
-        disabled={isComposerInteractionLocked}
-        icon="arrow.triangle.branch"
-        label={showBranchLoading ? "Loading branches…" : selectedBranchLabel}
-        maxWidth={190}
-        onPress={() => openContextPicker("NewTaskBranch")}
-      />
+      {flow.folderHasBranch ? (
+        <ComposerInlineControl
+          accessibilityLabel={`${flow.workspaceMode === "worktree" ? "Base branch" : "Branch"}: ${selectedBranchLabel}`}
+          chevronDirection="right"
+          disabled={isComposerInteractionLocked}
+          icon="arrow.triangle.branch"
+          label={showBranchLoading ? "Loading branches…" : selectedBranchLabel}
+          maxWidth={showsRepositoryBaseRefs ? 130 : 190}
+          onPress={() => openContextPicker("NewTaskBranch")}
+        />
+      ) : null}
+
+      {showsRepositoryBaseRefs ? (
+        <ComposerInlineControl
+          accessibilityHint="Picks a base branch for each repository"
+          accessibilityLabel={`Base branches: ${repositoryBaseRefsLabel}`}
+          chevronDirection="right"
+          disabled={isComposerInteractionLocked}
+          icon="square.3.layers.3d"
+          label={repositoryBaseRefsLabel}
+          maxWidth={150}
+          onPress={() => openContextPicker("NewTaskRepositories")}
+        />
+      ) : null}
     </View>
   );
 

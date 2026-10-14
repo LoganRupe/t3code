@@ -51,6 +51,12 @@ import type { ComposerEditorSelection } from "../../components/ComposerEditor";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useComposerPathSearch, useComposerPullRequestSearch } from "../../state/queries";
+import {
+  fileRootFromTreePath,
+  fileRootOpenPath,
+  hasSeveralFileRoots,
+  type ProjectFileRoot,
+} from "@t3tools/client-runtime/project-file-roots";
 import type { ComposerCommandItem } from "./ComposerCommandPopover";
 import { matchesSlashSkillQuery } from "./composerSlashSkillSearch";
 
@@ -174,6 +180,7 @@ export function useComposerCommandMenu({
   threadShells = EMPTY_THREAD_SHELLS,
   currentThreadId = null,
   projectCwd,
+  mentionRoots = null,
   pullRequestProjectId = null,
   pullRequestRepository = null,
   threadPullRequests,
@@ -192,6 +199,11 @@ export function useComposerCommandMenu({
   readonly threadShells?: ReadonlyArray<EnvironmentThreadShell>;
   readonly currentThreadId?: ThreadId | null;
   readonly projectCwd: string | null;
+  /**
+   * Folders `@` search spans for a `.code-workspace` project. A match in a listed folder other
+   * than the project folder is mentioned by its absolute path.
+   */
+  readonly mentionRoots?: ReadonlyArray<ProjectFileRoot> | null;
   readonly pullRequestProjectId?: ProjectId | null;
   readonly pullRequestRepository?: string | null;
   readonly threadPullRequests?: ReadonlyArray<ThreadPullRequestLink>;
@@ -342,6 +354,7 @@ export function useComposerCommandMenu({
     environmentId,
     cwd: trigger?.kind === "path" ? projectCwd : null,
     query: trigger?.kind === "path" ? trigger.query : null,
+    roots: mentionRoots,
   });
   const pullRequestSearch = useComposerPullRequestSearch({
     environmentId,
@@ -505,11 +518,17 @@ export function useComposerCommandMenu({
       return [
         ...threadItems,
         ...pathSearch.entries.map((entry) => {
+          // With several roots the entry is a tree path under its root's label, which reads
+          // well as the description; the mention names the file the way chat links do.
           const parts = entry.path.split("/");
+          const located =
+            mentionRoots !== null && hasSeveralFileRoots(mentionRoots) && projectCwd !== null
+              ? fileRootFromTreePath(mentionRoots, entry.path)
+              : null;
           return {
             id: `path:${entry.path}`,
             type: "path" as const,
-            path: entry.path,
+            path: located === null ? entry.path : fileRootOpenPath(projectCwd ?? "", located),
             kind: entry.kind,
             label: parts[parts.length - 1] ?? entry.path,
             description: parts.length > 1 ? parts.slice(0, -1).join("/") : "",

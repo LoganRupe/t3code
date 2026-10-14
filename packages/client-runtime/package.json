@@ -35,6 +35,14 @@
       "types": "./src/load-balancing.ts",
       "default": "./src/load-balancing.ts"
     },
+    "./project-file-roots": {
+      "types": "./src/projectFileRoots.ts",
+      "default": "./src/projectFileRoots.ts"
+    },
+    "./repository-base-refs": {
+      "types": "./src/repositoryBaseRefs.ts",
+      "default": "./src/repositoryBaseRefs.ts"
+    },
     "./project-favicon-cache": {
       "types": "./src/projectFaviconCache.ts",
       "default": "./src/projectFaviconCache.ts"

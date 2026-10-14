@@ -4,7 +4,7 @@ import { readLocalApi } from "../localApi";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { ComposerContextLabel } from "./ComposerContextLabel";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ProjectId, ThreadId, VcsRepository } from "@t3tools/contracts";
 import {
   ChevronDownIcon,
   FolderGit2Icon,
@@ -46,6 +46,7 @@ import { BranchToolbarEnvironmentSelector } from "./BranchToolbarEnvironmentSele
 import type { PendingServerUpdate } from "./ServerUpdateAction";
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
+import { RepositoryBaseRefsMenu } from "./RepositoryBaseRefsMenu";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
@@ -90,6 +91,8 @@ interface BranchToolbarProps {
   showGitControls: boolean;
   /** Defaults to `showGitControls`; a multi-repo workspace has no single branch to pick. */
   showBranchSelector?: boolean;
+  /** The repositories of a multi-repo workspace, each of which can get its own base branch. */
+  workspaceRepositories?: ReadonlyArray<VcsRepository>;
   draftId?: DraftId;
   onEnvModeChange: (mode: EnvMode) => void;
   envMode: EnvMode;
@@ -583,6 +586,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   isServerThread,
   showGitControls,
   showBranchSelector = showGitControls,
+  workspaceRepositories,
   draftId,
   onEnvModeChange,
   envMode,
@@ -666,6 +670,14 @@ export const BranchToolbar = memo(function BranchToolbar({
   const [stripElement, setStripElement] = useState<HTMLDivElement | null>(null);
   const labelsOverflow = useLabelsOverflow(stripElement);
 
+  // A new isolated run of a multi-repo workspace gives every repository its own worktree. The
+  // workspace folder's own repository, when it is one, keeps the regular branch selector; the
+  // others get a base branch picker of their own.
+  const otherRepositories =
+    effectiveEnvMode === "worktree" && !activeWorktreePath && workspaceRepositories
+      ? workspaceRepositories.filter((repository) => repository.relativePath !== ".")
+      : [];
+
   if (!activeProject) return null;
 
   if (layout === "panel") {
@@ -691,6 +703,16 @@ export const BranchToolbar = memo(function BranchToolbar({
             previousWorktreeLabel={previousWorktreeLabel}
             previousWorktreeBranch={previousWorktreeSeed?.branch ?? null}
             onUsePreviousWorktree={onUsePreviousWorktree}
+          />
+        ) : null}
+        {panelSection !== "branch" && otherRepositories.length > 0 ? (
+          <RepositoryBaseRefsMenu
+            displayMode="panel"
+            environmentId={environmentId}
+            threadId={threadId}
+            repositories={otherRepositories}
+            startFromOrigin={startFromOrigin}
+            {...(showBranchSelector ? {} : { onStartFromOriginChange })}
           />
         ) : null}
         {panelSection !== "workspace" ? (
@@ -812,6 +834,15 @@ export const BranchToolbar = memo(function BranchToolbar({
         />
       ) : null}
 
+      {otherRepositories.length > 0 ? (
+        <RepositoryBaseRefsMenu
+          environmentId={environmentId}
+          threadId={threadId}
+          repositories={otherRepositories}
+          startFromOrigin={startFromOrigin}
+          {...(showBranchSelector ? {} : { onStartFromOriginChange })}
+        />
+      ) : null}
       {showBranchSelector ? (
         <BranchToolbarBranchSelector
           forceNewWorktree={forceNewWorktree}

@@ -210,6 +210,7 @@ import {
   replaceComposerContextReferences,
   toKindScopedComposerContextId,
 } from "@t3tools/shared/composerContextReferences";
+import { useProjectFileRoots } from "../../hooks/useProjectFileRoots";
 import {
   getRestingComposerImagePreviewCounts,
   resolveRestingComposerControlsLayout,
@@ -2576,10 +2577,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
   const environmentThreadShells = useThreadShells(isPathTrigger);
+  // A `.code-workspace` project's `@` search spans every folder the file lists.
+  const { roots: fileRoots } = useProjectFileRoots({
+    environmentId,
+    cwd: isPathTrigger ? gitCwd : null,
+  });
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
+    roots: fileRoots,
   });
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&
