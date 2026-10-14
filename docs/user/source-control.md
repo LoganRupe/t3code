@@ -152,6 +152,12 @@ folders are linked into that copy rather than duplicated, so edits to them chang
 With a `.code-workspace` file, only the folders it lists are linked, along with top-level files and
 dot-folders.
 
+The project's setup script runs once in each repository's copy, with `T3CODE_REPO_ROOT` set to the
+checkout the copy came from, so a script can copy files such as `.env` from the original. Each
+copy gets its own terminal. Lines on the setup card say which repository they came from, and the
+card names any repository whose run failed. A script that runs when the thread settles runs the
+same way.
+
 ## Create a pull request
 
 Use a thread's Git actions to commit, push, and create a pull request. T3 Code can generate commit

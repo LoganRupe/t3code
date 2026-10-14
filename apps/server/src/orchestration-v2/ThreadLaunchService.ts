@@ -321,7 +321,8 @@ const make = Effect.gen(function* () {
     const reused = input.reusedWorktree;
     const tracked = input.workspaceStrategy.type === "worktree" || reused !== undefined;
     let createdWorktreePath: string | null = null;
-    let setupTerminalId: string | null = null;
+    // One per repository in a multi-repo isolated run, otherwise just the one.
+    let setupTerminalIds: ReadonlyArray<string> = [];
     let workspaceRecorded = false;
     let runReleased = false;
     if (input.workspaceStrategy.type === "worktree") {
@@ -620,7 +621,7 @@ const make = Effect.gen(function* () {
 
       let awaitAsyncSetup = Effect.void;
       if (setup.status === "started") {
-        setupTerminalId = setup.terminalId;
+        setupTerminalIds = setup.repositories?.map((run) => run.terminalId) ?? [setup.terminalId];
         yield* setupTracker.update(threadId, (snapshot) => ({
           ...snapshot,
           setupScript: {
@@ -632,16 +633,28 @@ const make = Effect.gen(function* () {
         if (setup.completion) {
           const awaitCompletion = Effect.gen(function* () {
             const completion = yield* setup.completion!;
+            // A multi-repo run names the repositories that failed; a clean one
+            // reads like a single checkout's.
+            const failures = (completion.repositories ?? [])
+              .filter((repository) => repository.exitCode !== 0)
+              .map(
+                (repository) =>
+                  `${repository.name}: exited with ${repository.exitCode ?? "no exit code"}`,
+              );
+            const detail =
+              failures.length > 0
+                ? failures.join(", ")
+                : `exited with ${completion.exitCode ?? "no exit code"}`;
             yield* setupTracker.stage(threadId, "setup-script", {
               status: completion.exitCode === 0 ? "done" : "failed",
-              detail: `exited with ${completion.exitCode ?? "no exit code"}`,
+              detail,
             });
             if (completion.exitCode !== 0 && !setup.async)
               return yield* mapError(
                 input,
                 "run-setup-script",
                 threadId,
-              )(`Setup script exited with ${completion.exitCode ?? "no exit code"}.`);
+              )(`Setup script ${detail}.`);
           });
           if (setup.async) {
             awaitAsyncSetup = awaitCompletion.pipe(
@@ -693,10 +706,13 @@ const make = Effect.gen(function* () {
             cancelled ? "cancelled" : "failed",
             cancelled ? null : failureDetail(Cause.squash(cause)),
           );
-          if (cancelled && setupTerminalId)
-            yield* terminals
-              .close({ threadId, terminalId: setupTerminalId, deleteHistory: true })
-              .pipe(Effect.ignore);
+          if (cancelled)
+            yield* Effect.forEach(
+              setupTerminalIds,
+              (terminalId) =>
+                terminals.close({ threadId, terminalId, deleteHistory: true }).pipe(Effect.ignore),
+              { discard: true },
+            );
           if (
             tracked &&
             createdWorktreePath &&

@@ -14,10 +14,12 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import * as ServerSettings from "../serverSettings.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
+import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 import * as ProjectService from "./ProjectService.ts";
 
 export interface ProjectSetupScriptRunnerResultNoScript {
@@ -38,13 +40,34 @@ export interface ProjectSetupScriptRunnerResultStarted {
    * exit code is null when the terminal exited or was closed before the
    * sentinel arrived. Only present when `observeCompletion` was requested.
    * An exit code of 0 closes the setup shell if it has nothing left running.
+   * In an isolated run of several repositories it resolves once every
+   * repository's run has, and reports each one under `repositories`.
    */
   readonly completion?: Effect.Effect<ProjectSetupScriptCompletion>;
+  /**
+   * One entry per repository when the worktree is an isolated run of a
+   * multi-repo workspace: the script ran once in each repository's worktree,
+   * in its own terminal. `terminalId` and `cwd` above are the first entry's.
+   * Absent for a single checkout.
+   */
+  readonly repositories?: ReadonlyArray<ProjectSetupScriptRepositoryRun>;
+}
+
+export interface ProjectSetupScriptRepositoryRun {
+  readonly name: string;
+  readonly cwd: string;
+  readonly terminalId: string;
 }
 
 export interface ProjectSetupScriptCompletion {
+  /** 0 only when every run exited with 0; otherwise the first failing run's code. */
   readonly exitCode: number | null;
   readonly durationMs: number;
+  /** Each repository's own exit, in the order the script was started. */
+  readonly repositories?: ReadonlyArray<{
+    readonly name: string;
+    readonly exitCode: number | null;
+  }>;
 }
 
 export interface ProjectSetupScriptOutputLine {
@@ -199,11 +222,42 @@ function wrapCommandForCompletion(
   }
 }
 
+const TERMINAL_ID_MAX_LENGTH = 128;
+
+/**
+ * The terminal id for one repository's run of a script, within the terminal
+ * id limit. An id that would run over it keeps a hash of the whole, so two
+ * repositories whose paths differ only past the limit still get their own
+ * terminal instead of one stopping the other's script.
+ */
+export function repositoryTerminalId(baseTerminalId: string, repositoryPath: string): string {
+  const id = `${baseTerminalId}-${repositoryPath.replace(/[\\/]/g, "-")}`;
+  if (id.length <= TERMINAL_ID_MAX_LENGTH) return id;
+  let hash = 0;
+  for (let index = 0; index < id.length; index += 1) {
+    hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
+  }
+  const digest = hash.toString(16).padStart(8, "0");
+  return `${id.slice(0, TERMINAL_ID_MAX_LENGTH - digest.length - 1)}-${digest}`;
+}
+
+/** Where one run of the script goes: a checkout, and the repository it belongs to. */
+interface ScriptTarget {
+  readonly cwd: string;
+  readonly terminalId: string;
+  /** The repository's name, when the script runs once per repository. */
+  readonly name: string | null;
+  /** The original checkout the worktree came from, exposed as `T3CODE_REPO_ROOT`. */
+  readonly repoRoot: string | null;
+}
+
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const projects = yield* ProjectService.ProjectService;
   const terminalManager = yield* TerminalManager.TerminalManager;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
+  const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+  const path = yield* Path.Path;
   const crypto = yield* Crypto.Crypto;
   const completionShell = resolveCompletionShell(
     yield* HostProcess.Platform,
@@ -382,104 +436,176 @@ export const make = Effect.gen(function* () {
       (trigger === "settle"
         ? `settle-${script.id}-${(yield* crypto.randomUUIDv4.pipe(Effect.orDie)).slice(0, 8)}`
         : `setup-${script.id}`);
-    const cwd = input.worktreePath;
-    const env = {
-      ...projectScriptRuntimeEnv({
-        project: { cwd: project.workspaceRoot },
-        worktreePath: input.worktreePath,
-      }),
-      // Setup can run before a client attaches. Truecolor probes in tools such
-      // as Vite+ wait for terminal replies that nobody can send at that point.
-      // Keep TERM's 256-color support without advertising truecolor here.
-      COLORTERM: "",
-    };
     const observe = input.observeCompletion;
-    const completionToken = observe
-      ? (yield* crypto.randomUUIDv4.pipe(Effect.orDie)).replaceAll("-", "")
-      : null;
-    const commandLine =
-      observe && completionToken
-        ? wrapCommandForCompletion(
-            script.command,
-            completionShell,
-            completionSentinel(completionToken),
-          )
-        : script.command;
 
-    yield* terminalManager
-      .open({
-        threadId: input.threadId,
-        terminalId,
-        cwd,
-        worktreePath: input.worktreePath,
-        // Setup may run before a terminal client attaches to answer color probes.
-        env: { ...env, NO_COLOR: "1", FORCE_COLOR: "0" },
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProjectSetupScriptOperationError({
-              ...errorContext,
-              operation: "openTerminal",
-              cause,
-            }),
+    // An isolated run of a multi-repo workspace is a container with one
+    // worktree per repository, and the script is written for a repository: it
+    // runs once in each, told which checkout the worktree came from. A root
+    // repository's worktree is the container itself, so it keeps the plain
+    // terminal id, the one the setup card and existing links open.
+    const isolatedRun = yield* workspaceRepositories.readIsolatedRun(input.worktreePath);
+    const targets: ReadonlyArray<ScriptTarget> =
+      isolatedRun === null || isolatedRun.repositories.length === 0
+        ? [{ cwd: input.worktreePath, terminalId, name: null, repoRoot: null }]
+        : isolatedRun.repositories
+            .toSorted((left, right) =>
+              left.relativePath === "." ? -1 : right.relativePath === "." ? 1 : 0,
+            )
+            .map((repository) => ({
+              cwd: path.resolve(input.worktreePath, repository.relativePath),
+              terminalId:
+                repository.relativePath === "."
+                  ? terminalId
+                  : repositoryTerminalId(terminalId, repository.relativePath),
+              name: repository.name,
+              repoRoot: repository.source,
+            }));
+
+    const launch = Effect.fn("ProjectSetupScriptRunner.launch")(function* (target: ScriptTarget) {
+      const env = {
+        ...projectScriptRuntimeEnv({
+          project: { cwd: project.workspaceRoot },
+          worktreePath: target.cwd,
+          ...(target.repoRoot === null ? {} : { extraEnv: { T3CODE_REPO_ROOT: target.repoRoot } }),
+        }),
+        // Setup can run before a client attaches. Truecolor probes in tools such
+        // as Vite+ wait for terminal replies that nobody can send at that point.
+        // Keep TERM's 256-color support without advertising truecolor here.
+        COLORTERM: "",
+      };
+      const completionToken = observe
+        ? (yield* crypto.randomUUIDv4.pipe(Effect.orDie)).replaceAll("-", "")
+        : null;
+      const commandLine =
+        observe && completionToken
+          ? wrapCommandForCompletion(
+              script.command,
+              completionShell,
+              completionSentinel(completionToken),
+            )
+          : script.command;
+      // Several runs share one setup card, so each line says where it came from.
+      const onOutputLine =
+        observe?.onOutputLine === undefined
+          ? undefined
+          : target.name === null
+            ? observe.onOutputLine
+            : (line: string) => observe.onOutputLine!(`[${target.name}] ${line}`);
+
+      yield* terminalManager
+        .open({
+          threadId: input.threadId,
+          terminalId: target.terminalId,
+          cwd: target.cwd,
+          worktreePath: input.worktreePath,
+          // Setup may run before a terminal client attaches to answer color probes.
+          env: { ...env, NO_COLOR: "1", FORCE_COLOR: "0" },
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProjectSetupScriptOperationError({
+                ...errorContext,
+                operation: "openTerminal",
+                cause,
+              }),
+          ),
+        );
+      // Subscribe before writing so the sentinel cannot race past the listener.
+      const observed =
+        observe && completionToken
+          ? yield* observeTerminalCompletion({
+              threadId: input.threadId,
+              terminalId: target.terminalId,
+              sentinel: completionSentinel(completionToken),
+              sentinelPattern: completionSentinelPattern(completionToken),
+              echoedWrapperLines: commandLine.split("\r").filter((line) => line.length > 0),
+              onOutputLine,
+            })
+          : undefined;
+
+      yield* terminalManager
+        .write({
+          threadId: input.threadId,
+          terminalId: target.terminalId,
+          data: `${commandLine}\r`,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProjectSetupScriptOperationError({
+                ...errorContext,
+                operation: "writeCommand",
+                cause,
+              }),
+          ),
+          // Nothing will ever settle the completion if the command never ran.
+          Effect.tapError(() => Effect.sync(() => observed?.unsubscribe())),
+        );
+
+      // A clean run leaves only an idle prompt behind; its output stays in the
+      // terminal history. A failed run keeps its shell open for a look.
+      const completion = observed?.completion.pipe(
+        Effect.tap(({ exitCode }) =>
+          exitCode === 0
+            ? terminalManager.closeIdle({
+                threadId: input.threadId,
+                terminalId: target.terminalId,
+              })
+            : Effect.void,
         ),
       );
-    // Subscribe before writing so the sentinel cannot race past the listener.
-    const observed =
-      observe && completionToken
-        ? yield* observeTerminalCompletion({
-            threadId: input.threadId,
-            terminalId,
-            sentinel: completionSentinel(completionToken),
-            sentinelPattern: completionSentinelPattern(completionToken),
-            echoedWrapperLines: commandLine.split("\r").filter((line) => line.length > 0),
-            onOutputLine: observe.onOutputLine,
-          })
-        : undefined;
+      return { target, completion };
+    });
 
-    yield* terminalManager
-      .write({
-        threadId: input.threadId,
-        terminalId,
-        data: `${commandLine}\r`,
-      })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProjectSetupScriptOperationError({
-              ...errorContext,
-              operation: "writeCommand",
-              cause,
-            }),
-        ),
-        // Nothing will ever settle the completion if the command never ran.
-        Effect.tapError(() => Effect.sync(() => observed?.unsubscribe())),
-      );
-
-    // A clean run leaves only an idle prompt behind; its output stays in the
-    // terminal history. A failed run keeps its shell open for a look.
-    const completion = observed?.completion.pipe(
-      Effect.tap(({ exitCode }) =>
-        exitCode === 0
-          ? terminalManager.closeIdle({ threadId: input.threadId, terminalId })
-          : Effect.void,
-      ),
-    );
+    const launched = yield* Effect.forEach(targets, launch);
+    const first = launched[0]!;
+    const completions = launched.flatMap((run) => (run.completion ? [run] : []));
+    const completion: Effect.Effect<ProjectSetupScriptCompletion> | undefined =
+      completions.length === 0
+        ? undefined
+        : first.target.name === null
+          ? first.completion
+          : Effect.forEach(completions, (run) => run.completion!, {
+              concurrency: "unbounded",
+            }).pipe(
+              Effect.map((results) => {
+                const failing = results.find((result) => result.exitCode !== 0);
+                return {
+                  exitCode: failing === undefined ? 0 : failing.exitCode,
+                  durationMs: Math.max(...results.map((result) => result.durationMs)),
+                  repositories: results.map((result, index) => ({
+                    name: completions[index]!.target.name!,
+                    exitCode: result.exitCode,
+                  })),
+                };
+              }),
+            );
 
     return {
       status: "started",
       scriptId: script.id,
       scriptName: script.name,
       scriptCommand: script.command,
-      terminalId,
-      cwd,
+      terminalId: first.target.terminalId,
+      cwd: first.target.cwd,
       async: script.async !== false,
       ...(completion ? { completion } : {}),
+      ...(first.target.name === null
+        ? {}
+        : {
+            repositories: launched.map((run) => ({
+              name: run.target.name!,
+              cwd: run.target.cwd,
+              terminalId: run.target.terminalId,
+            })),
+          }),
     } as const;
   });
 
   return ProjectSetupScriptRunner.of({ runForThread });
 });
 
-export const layer = Layer.effect(ProjectSetupScriptRunner, make);
+export const layer = Layer.effect(ProjectSetupScriptRunner, make).pipe(
+  Layer.provide(WorkspaceRepositories.layer),
+);
