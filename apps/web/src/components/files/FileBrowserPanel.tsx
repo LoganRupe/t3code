@@ -4,10 +4,16 @@ import type {
   ContextMenuOpenContext as TreeContextMenuOpenContext,
 } from "@pierre/trees";
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
+import {
+  fileRootForPath,
+  fileRootTreePath,
+  hasSeveralFileRoots,
+  type ProjectFileRoot,
+} from "@t3tools/client-runtime/project-file-roots";
 import { FileTree, useFileTree, useFileTreeSearch, useFileTreeSelector } from "@pierre/trees/react";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
 import { ChevronsDownUp, ChevronsUpDown } from "lucide";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "~/components/ui/button";
 import { InputGroup, InputGroupInput } from "~/components/ui/input-group";
@@ -23,6 +29,7 @@ import { readLocalApi } from "~/localApi";
 import { T3_PIERRE_ICONS } from "~/pierre-icons";
 import { PIERRE_TREE_UNSAFE_CSS, pierreTreeStyle } from "~/pierre-tree-theme";
 
+import { fileTreeEntryTarget } from "./filePath";
 import { createFileTreeDragMentionController } from "./fileTreeDragMention";
 import { areAllDirectoriesExpanded, setAllDirectoriesExpanded } from "./fileTreeExpansion";
 import { buildFileTreePathUpdates } from "./fileTreePathReconciliation";
@@ -33,7 +40,19 @@ interface FileBrowserPanelProps {
   environmentId: EnvironmentId;
   cwd: string;
   projectName: string;
-  /** Entry currently open in the surface; revealed and selected in the tree. A directory is expanded. */
+  /**
+   * The folders the tree spans. Several roots each get a top-level row named by their label, and
+   * rows below act on their real folder; a single root lists its entries at the top level.
+   */
+  roots: ReadonlyArray<ProjectFileRoot>;
+  /** False until the roots are known; the tree waits rather than listing the project folder first. */
+  rootsReady: boolean;
+  /** Re-reads the workspace file, so a refresh also picks up a changed folder list. */
+  onRefreshRoots?: () => void;
+  /**
+   * Entry currently open in the surface; revealed and selected in the tree. A directory is
+   * expanded. Relative to `cwd`, or absolute for a file in another root.
+   */
   selectedPath: string | null;
   /** Bumped when the same path should be revealed again (e.g. re-opened from search). */
   selectedPathRevealId: number;
@@ -99,7 +118,10 @@ export default function FileBrowserPanel({
   environmentId,
   cwd,
   projectName,
-  selectedPath,
+  roots,
+  rootsReady,
+  onRefreshRoots,
+  selectedPath: selectedOpenPath,
   selectedPathRevealId,
   onOpenFile,
   onRefreshSelectedFile,
@@ -112,14 +134,47 @@ export default function FileBrowserPanel({
     entries: directoryEntries,
     load,
     refresh,
-    ready,
+    ready: directoriesReady,
     error,
     isPending,
     loadingDirectories,
-  } = useDirectoryEntries(environmentId, cwd);
+  } = useDirectoryEntries(environmentId, roots, rootsReady);
+  const ready = rootsReady && directoriesReady;
+  // Rows are tree paths; an open from outside the tree (a chat link, the file picker) is mapped
+  // onto the row of the root that holds it. A path no root holds has no row to reveal.
+  const selectedPath = useMemo(() => {
+    if (selectedOpenPath === null) return null;
+    const target = fileRootForPath(roots, cwd, selectedOpenPath);
+    if (target === null) return hasSeveralFileRoots(roots) ? null : selectedOpenPath;
+    return fileRootTreePath(roots, target) || null;
+  }, [cwd, roots, selectedOpenPath]);
+  // What a row's actions act on: its real file, resolved through its root rather than the label
+  // its tree path starts with.
+  const entryTarget = useCallback(
+    (treePath: string) => fileTreeEntryTarget({ roots, cwd, treePath }),
+    [cwd, roots],
+  );
+  const entryTargetRef = useRef(entryTarget);
+  useEffect(() => {
+    entryTargetRef.current = entryTarget;
+  }, [entryTarget]);
+  // The drag controller lives for the panel's lifetime, so it reads the current roots through
+  // the ref rather than being rebuilt, which would desync it from the tree's handlers.
+  const mentionPathForTreePath = useCallback(
+    (treePath: string) => entryTargetRef.current(treePath)?.mentionPath ?? null,
+    [],
+  );
   const [query, setQuery] = useState("");
   const [expandAll, setExpandAll] = useState(false);
-  const pathSearch = useProjectPathSearch({ environmentId, cwd, query: query.slice(0, 256) }, 200);
+  const pathSearch = useProjectPathSearch(
+    {
+      environmentId,
+      cwd: hasSeveralFileRoots(roots) ? cwd : (roots[0]?.path ?? cwd),
+      query: query.slice(0, 256),
+      roots,
+    },
+    200,
+  );
   const entries = useMemo(() => {
     const result = new Map(directoryEntries.map((entry) => [entry.path, entry]));
     if (query.trim() && !pathSearch.isPending) {
@@ -172,14 +227,32 @@ export default function FileBrowserPanel({
       return;
     }
     const relativePath = item.path.replace(/\/$/, "");
-    const mention = serializeComposerFileLink(relativePath);
+    const target = entryTarget(relativePath);
     const pointer = contextMenuPointerRef.current;
     const pointerIsFresh = pointer !== null && performance.now() - pointer.at < 1000;
     const anchorRect = context.anchorElement.getBoundingClientRect();
     const position = pointerIsFresh
       ? { x: pointer.x, y: pointer.y }
       : { x: anchorRect.left, y: anchorRect.bottom };
-    const fileTarget = { environmentId, filePath: relativePath, workspaceRoot: cwd };
+    if (target === null) {
+      // A row that only groups roots whose folders share no parent has nothing to act on; say so
+      // rather than leave the right-click looking broken.
+      try {
+        await api.contextMenu.show(
+          [{ id: "no-folder", label: "No single folder for this group", disabled: true }],
+          position,
+        );
+      } finally {
+        context.close();
+      }
+      return;
+    }
+    const mention = serializeComposerFileLink(target.mentionPath);
+    const fileTarget = {
+      environmentId,
+      filePath: target.filePath,
+      workspaceRoot: target.workspaceRoot,
+    };
     const fileMenuItems = fileContextMenu.buildItems(fileTarget);
     try {
       const clicked = await api.contextMenu.show(
@@ -248,8 +321,9 @@ export default function FileBrowserPanel({
     () =>
       createFileTreeDragMentionController({
         deselect: (path) => treeModelRef.current?.getItem(path)?.deselect(),
+        mentionPath: mentionPathForTreePath,
       }),
-    [],
+    [mentionPathForTreePath],
   );
   const { model } = useFileTree({
     composition: {
@@ -282,8 +356,10 @@ export default function FileBrowserPanel({
       }
       const selectedPath = selectedPaths.at(-1)?.replace(/\/$/, "");
       if (selectedPath && entryKindsRef.current.get(selectedPath) === "file") {
+        const target = entryTargetRef.current(selectedPath);
+        if (target === null) return;
         treeSelectionPathRef.current = selectedPath;
-        onOpenFile(selectedPath);
+        onOpenFile(target.openPath);
       }
     },
     paths: [],
@@ -372,6 +448,7 @@ export default function FileBrowserPanel({
     search.setValue(value);
   };
   const handleRefresh = () => {
+    onRefreshRoots?.();
     refresh();
     if (query.trim()) pathSearch.refresh();
     onRefreshSelectedFile?.();
@@ -379,6 +456,7 @@ export default function FileBrowserPanel({
   useWorkspaceMutationRefresh({
     mutationId: workspaceMutationId,
     refresh: () => {
+      onRefreshRoots?.();
       refresh();
       if (query.trim()) pathSearch.refresh();
     },

@@ -420,7 +420,8 @@ import { threadEnvironment } from "../state/threads";
 import { workspacePreparationRetryRunIds } from "@t3tools/client-runtime/state/turn-item-presentation";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
-import { useWorkspaceRepositories } from "../hooks/useWorkspaceRepositories";
+import { useWorkspaceFile, useWorkspaceRepositories } from "../hooks/useWorkspaceRepositories";
+import { repositoryBaseRefsForSend } from "../repositoryBaseRefStore";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
 import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
@@ -4168,13 +4169,6 @@ export default function ChatView(props: ChatViewProps) {
     primaryEnvironmentId,
     remoteOpenMode: remoteOpenState.mode,
   });
-  useOpenFavoriteEditorShortcut({
-    enabled: showOpenInPicker,
-    environmentId: activeThread?.environmentId ?? environmentId,
-    keybindings,
-    availableEditors,
-    openInCwd: gitCwd,
-  });
   const manualCompactionProviderAvailable = useMemo(
     () =>
       hasAvailableCompactionProvider({
@@ -4275,6 +4269,21 @@ export default function ChatView(props: ChatViewProps) {
     environmentId,
     cwd: gitStatusCwd,
     isRepo: liveIsGitRepo,
+  });
+  // A project, or its isolated run, opens in editors as its `.code-workspace` file when it has
+  // one, so the editor shows the same folders, under the same names, as the project does.
+  const openInWorkspaceFile = useWorkspaceFile({
+    environmentId,
+    cwd: gitStatusCwd,
+    isRepo: liveIsGitRepo,
+  });
+  useOpenFavoriteEditorShortcut({
+    enabled: showOpenInPicker,
+    environmentId: activeThread?.environmentId ?? environmentId,
+    keybindings,
+    availableEditors,
+    openInCwd: gitCwd,
+    openInWorkspaceFile,
   });
   // A multi-repo workspace folder is not a repository, but its repositories get the Git
   // surfaces: worktree runs, diffs and per-repository source control.
@@ -9677,6 +9686,7 @@ export default function ChatView(props: ChatViewProps) {
                       baseBranch: activeThreadBranch!,
                       requireWorktree: true,
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                      ...repositoryBaseRefsForSend(activeThread, workspaceRepositories),
                     },
                     runSetupScript: true,
                   },
@@ -10020,6 +10030,7 @@ export default function ChatView(props: ChatViewProps) {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                      ...repositoryBaseRefsForSend(activeThread, workspaceRepositories),
                     },
                     runSetupScript: true,
                   }
@@ -11315,6 +11326,7 @@ export default function ChatView(props: ChatViewProps) {
     availableEditors,
     showOpenInPicker,
     gitCwd,
+    openInWorkspaceFile,
     isGitRepo,
     workspaceRepositories,
     envLocked,
@@ -11975,6 +11987,7 @@ export default function ChatView(props: ChatViewProps) {
                                 threadId={activeThread.id}
                                 showGitControls={hasGitSurfaces}
                                 showBranchSelector={isGitRepo}
+                                workspaceRepositories={workspaceRepositories}
                                 {...(routeKind === "draft" && draftId ? { draftId } : {})}
                                 onEnvModeChange={onEnvModeChange}
                                 startFromOrigin={startFromOrigin}

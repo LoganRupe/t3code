@@ -8,6 +8,10 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { buildReviewParsedDiff, type ReviewParsedDiff } from "./reviewModel";
 
 const EMPTY_GIT_REVIEW_SECTIONS = Object.freeze<ReadonlyArray<ReviewDiffPreviewSource>>([]);
+const EMPTY_GIT_REVIEW_CACHE = Object.freeze<ReviewGitSectionsCache>({
+  cwd: null,
+  sections: EMPTY_GIT_REVIEW_SECTIONS,
+});
 const EMPTY_REVIEW_TURN_DIFFS = Object.freeze<Readonly<Record<string, string>>>({});
 const EMPTY_REVIEW_LOADING_TURN_IDS = Object.freeze<Readonly<Record<string, boolean>>>({});
 const EMPTY_REVIEW_ASYNC_STATE = Object.freeze<ReviewAsyncState>({
@@ -17,7 +21,7 @@ const EMPTY_REVIEW_ASYNC_STATE = Object.freeze<ReviewAsyncState>({
 const EMPTY_REVIEW_SECTION_FILE_IDS = Object.freeze<
   Readonly<Record<string, ReadonlyArray<string> | undefined>>
 >({});
-const EMPTY_REVIEW_GIT_SECTIONS_ATOM = Atom.make(EMPTY_GIT_REVIEW_SECTIONS).pipe(
+const EMPTY_REVIEW_GIT_SECTIONS_ATOM = Atom.make(EMPTY_GIT_REVIEW_CACHE).pipe(
   Atom.keepAlive,
   Atom.withLabel("mobile:review:git-sections:null"),
 );
@@ -33,13 +37,17 @@ const EMPTY_REVIEW_ASYNC_STATE_ATOM = Atom.make(EMPTY_REVIEW_ASYNC_STATE).pipe(
   Atom.keepAlive,
   Atom.withLabel("mobile:review:async-state:null"),
 );
+const EMPTY_REVIEW_REPOSITORY_ATOM = Atom.make<string | null>(null).pipe(
+  Atom.keepAlive,
+  Atom.withLabel("mobile:review:repository:null"),
+);
 const EMPTY_REVIEW_SECTION_FILE_IDS_ATOM = Atom.make(EMPTY_REVIEW_SECTION_FILE_IDS).pipe(
   Atom.keepAlive,
   Atom.withLabel("mobile:review:section-file-ids:null"),
 );
 
 const reviewGitSectionsByThreadKeyAtom = Atom.family((threadKey: string) =>
-  Atom.make(EMPTY_GIT_REVIEW_SECTIONS).pipe(
+  Atom.make(EMPTY_GIT_REVIEW_CACHE).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:git-sections:${threadKey}`),
   ),
@@ -56,6 +64,14 @@ const reviewSelectedSectionIdByThreadKeyAtom = Atom.family((threadKey: string) =
   Atom.make<string | null>(null).pipe(
     Atom.keepAlive,
     Atom.withLabel(`mobile:review:selected-section-id:${threadKey}`),
+  ),
+);
+
+// Relative path of the repository a multi-repo thread reviews; null follows the default.
+const reviewRepositoryByThreadKeyAtom = Atom.family((threadKey: string) =>
+  Atom.make<string | null>(null).pipe(
+    Atom.keepAlive,
+    Atom.withLabel(`mobile:review:repository:${threadKey}`),
   ),
 );
 
@@ -103,9 +119,17 @@ const reviewParsedDiffCacheAtom = Atom.make(() => ({
   sourceCharacterCount: 0,
 })).pipe(Atom.keepAlive, Atom.withLabel("mobile:review:parsed-diffs"));
 
+interface ReviewGitSectionsCache {
+  readonly cwd: string | null;
+  readonly sections: ReadonlyArray<ReviewDiffPreviewSource>;
+}
+
 export interface ReviewCacheForThread {
   readonly threadKey: string | null;
   readonly gitSections: ReadonlyArray<ReviewDiffPreviewSource>;
+  /** The checkout `gitSections` came from; a multi-repo thread switches between several. */
+  readonly gitSectionsCwd: string | null;
+  readonly selectedRepositoryPath: string | null;
   readonly turnDiffById: Readonly<Record<string, string>>;
   readonly selectedSectionId: string | null;
   readonly asyncState: ReviewAsyncState;
@@ -139,8 +163,11 @@ export function useReviewCacheForThread(input: {
   readonly threadId?: ThreadId;
 }): ReviewCacheForThread {
   const threadKey = buildThreadKey(input);
-  const gitSections = useAtomValue(
+  const gitSectionsCache = useAtomValue(
     threadKey ? reviewGitSectionsByThreadKeyAtom(threadKey) : EMPTY_REVIEW_GIT_SECTIONS_ATOM,
+  );
+  const selectedRepositoryPath = useAtomValue(
+    threadKey ? reviewRepositoryByThreadKeyAtom(threadKey) : EMPTY_REVIEW_REPOSITORY_ATOM,
   );
   const turnDiffById = useAtomValue(
     threadKey ? reviewTurnDiffByThreadKeyAtom(threadKey) : EMPTY_REVIEW_TURN_DIFFS_ATOM,
@@ -169,7 +196,9 @@ export function useReviewCacheForThread(input: {
 
   return {
     threadKey,
-    gitSections,
+    gitSections: gitSectionsCache.sections,
+    gitSectionsCwd: gitSectionsCache.cwd,
+    selectedRepositoryPath,
     turnDiffById,
     selectedSectionId,
     asyncState,
@@ -181,9 +210,14 @@ export function useReviewCacheForThread(input: {
 
 export function setReviewGitSections(
   threadKey: string,
+  cwd: string,
   sections: ReadonlyArray<ReviewDiffPreviewSource>,
 ): void {
-  appAtomRegistry.set(reviewGitSectionsByThreadKeyAtom(threadKey), sections);
+  appAtomRegistry.set(reviewGitSectionsByThreadKeyAtom(threadKey), { cwd, sections });
+}
+
+export function setReviewSelectedRepository(threadKey: string, relativePath: string): void {
+  appAtomRegistry.set(reviewRepositoryByThreadKeyAtom(threadKey), relativePath);
 }
 
 export function setReviewTurnDiff(threadKey: string, sectionId: string, diff: string): void {

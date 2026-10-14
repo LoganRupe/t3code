@@ -6852,6 +6852,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               harness: flavor.runtimeHarness ?? driver,
               model: turnInput.modelSelection.model,
               repositories: turnInput.runtimePolicy.repositories,
+              folders: turnInput.runtimePolicy.folders,
             }),
           });
           return { prompt, instructionState: text === messageText ? undefined : instructionState };

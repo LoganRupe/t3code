@@ -192,6 +192,7 @@ import {
   type TerminalContextSelection,
 } from "../../lib/terminalContext";
 import { useComposerPathSearch } from "../../lib/composerPathSearchState";
+import { useProjectFileRoots } from "../../hooks/useProjectFileRoots";
 import { replaceComposerContextReferences } from "@t3tools/shared/composerContextReferences";
 import {
   getRestingComposerImagePreviewCounts,
@@ -2610,10 +2611,16 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isPathTrigger = composerTriggerKind === "path";
   // Thread shells only feed `@` thread matches, so skip shell updates otherwise.
   const environmentThreadShells = useThreadShells(isPathTrigger);
+  // A `.code-workspace` project's `@` search spans every folder the file lists.
+  const { roots: fileRoots } = useProjectFileRoots({
+    environmentId,
+    cwd: isPathTrigger ? gitCwd : null,
+  });
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
+    roots: fileRoots,
   });
   const compactSlashCommandAvailable =
     composerTrigger?.kind === "slash-command" &&

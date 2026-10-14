@@ -1,7 +1,8 @@
-import type { ProviderInteractionMode, VcsRepository } from "@t3tools/contracts";
+import type { ProviderInteractionMode, VcsRepository, WorkspaceFolder } from "@t3tools/contracts";
 import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
 import {
   buildRuntimeInstructions,
+  buildWorkspaceFoldersInstructions,
   buildWorkspaceRepositoriesInstructions,
 } from "@t3tools/provider-core/server/runtimeInstructions";
 
@@ -189,6 +190,7 @@ export interface CodexRuntimeInfo {
   readonly modelName?: string | undefined;
   readonly reasoningEffort: string;
   readonly repositories?: ReadonlyArray<VcsRepository> | undefined;
+  readonly folders?: ReadonlyArray<WorkspaceFolder> | undefined;
 }
 
 /** Mode prompt for `turn/start.collaborationMode.settings.developer_instructions`. */
@@ -228,10 +230,16 @@ export function buildCodexAdditionalContext(
   };
 }
 
-/** The repository list alone, for turns that run without the `t3-code` MCP server. */
+/** The workspace's repository and folder lists alone, for turns that run without the `t3-code` MCP server. */
 export function buildCodexRepositoriesContext(
   repositories: ReadonlyArray<VcsRepository> | undefined,
+  folders?: ReadonlyArray<WorkspaceFolder> | undefined,
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> | undefined {
-  const value = buildWorkspaceRepositoriesInstructions(repositories);
+  const value = [
+    buildWorkspaceRepositoriesInstructions(repositories),
+    buildWorkspaceFoldersInstructions(folders),
+  ]
+    .filter((section) => section.length > 0)
+    .join("\n\n");
   return value ? { t3_code_repositories: { kind: "application", value } } : undefined;
 }

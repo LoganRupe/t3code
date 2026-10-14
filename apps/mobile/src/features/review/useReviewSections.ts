@@ -1,4 +1,5 @@
 import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/filesystem";
+import { resolveReviewRepository } from "@t3tools/client-runtime/state/review";
 import { environmentSession } from "../../state/session";
 import { useCallback, useEffect, useMemo } from "react";
 import * as DateTime from "effect/DateTime";
@@ -7,28 +8,33 @@ import {
   deriveThreadCheckpointSummaries,
   type ThreadCheckpointSummary,
 } from "@t3tools/client-runtime/state/thread-checkpoints";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ReviewDiffPreviewSource, ThreadId } from "@t3tools/contracts";
 
 import { useCheckpointDiff } from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { reviewEnvironment } from "../../state/review";
+import { useWorkspaceRepositories } from "../../state/workspace-repositories";
 import { useSelectedThreadProjection } from "../../state/use-thread-detail";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import {
   buildReviewSectionItems,
   getDefaultReviewSectionId,
   getReadyReviewCheckpoints,
+  getReviewGitSectionId,
   getReviewSectionIdForCheckpoint,
 } from "./reviewModel";
 import {
   setReviewAsyncError,
   setReviewGitSections,
+  setReviewSelectedRepository,
   setReviewSelectedSectionId,
   setReviewTurnDiff,
   setReviewTurnDiffLoading,
   type ReviewCacheForThread,
 } from "./reviewState";
+
+const NO_GIT_SECTIONS: ReadonlyArray<ReviewDiffPreviewSource> = [];
 
 export function useReviewSections(input: {
   readonly enabled?: boolean;
@@ -51,21 +57,34 @@ export function useReviewSections(input: {
   const { canReadFiles } = fileAccess;
   const selectedThread = useSelectedThreadProjection();
   const { selectedThreadCwd } = useSelectedThreadWorktree();
+  // A multi-repo workspace folder lists its repositories; an ordinary checkout lists none.
+  // Turn diffs already cover every repository, while Uncommitted and Changes compare one.
+  const { repositories, settled: repositoriesSettled } = useWorkspaceRepositories({
+    environmentId: enabled ? environmentId : undefined,
+    cwd: selectedThreadCwd,
+  });
+  const repository = resolveReviewRepository(repositories, reviewCache.selectedRepositoryPath);
+  const gitDiffCwd = repository?.path ?? selectedThreadCwd;
   const diffPreview = useEnvironmentQuery(
-    canReadFiles && enabled && environmentId !== undefined && selectedThreadCwd !== null
+    canReadFiles && enabled && environmentId !== undefined && gitDiffCwd !== null
       ? reviewEnvironment.diffPreview({
           environmentId,
-          input: { cwd: selectedThreadCwd },
+          input: { cwd: gitDiffCwd },
         })
       : null,
   );
   const { loadingTurnIds } = reviewCache.asyncState;
 
   useEffect(() => {
-    if (reviewCache.threadKey && diffPreview.data) {
-      setReviewGitSections(reviewCache.threadKey, diffPreview.data.sources);
+    if (reviewCache.threadKey && gitDiffCwd !== null && diffPreview.data) {
+      setReviewGitSections(reviewCache.threadKey, gitDiffCwd, diffPreview.data.sources);
     }
-  }, [diffPreview.data, reviewCache.threadKey]);
+  }, [diffPreview.data, gitDiffCwd, reviewCache.threadKey]);
+  // Another repository's cached sections must not stand in while this one loads.
+  const cachedGitSections =
+    reviewCache.gitSectionsCwd === gitDiffCwd ? reviewCache.gitSections : NO_GIT_SECTIONS;
+  // Until the repository list arrives, the folder's own diff may be the wrong one (or fail).
+  const loadingGitSections = fileAccess.isPending || diffPreview.isPending || !repositoriesSettled;
 
   const readyCheckpoints = useMemo(
     () =>
@@ -89,11 +108,12 @@ export function useReviewSections(input: {
       checkpoints: readyCheckpoints,
       gitSections:
         canReadFiles || fileAccess.isPending
-          ? (diffPreview.data?.sources ?? reviewCache.gitSections)
+          ? ((repositoriesSettled ? diffPreview.data?.sources : null) ?? cachedGitSections)
           : [],
       turnDiffById: reviewCache.turnDiffById,
       loadingTurnIds,
-      loadingGitSections: fileAccess.isPending || diffPreview.isPending,
+      loadingGitSections,
+      repository,
     });
     // Keep the selected section while its grant loads, without displaying cached host files.
     return fileAccess.isPending
@@ -102,13 +122,15 @@ export function useReviewSections(input: {
         )
       : sections;
   }, [
+    cachedGitSections,
     canReadFiles,
     diffPreview.data?.sources,
-    diffPreview.isPending,
     fileAccess.isPending,
+    loadingGitSections,
     loadingTurnIds,
     readyCheckpoints,
-    reviewCache.gitSections,
+    repositoriesSettled,
+    repository,
     reviewCache.turnDiffById,
   ]);
   const selectedSection = useMemo(
@@ -134,6 +156,8 @@ export function useReviewSections(input: {
     if (
       reviewSections.length > 0 &&
       reviewCache.threadKey &&
+      // A repository's own sections only exist once the list says which one is reviewed.
+      repositoriesSettled &&
       (!reviewCache.selectedSectionId || !selectedSectionIdExists)
     ) {
       setReviewSelectedSectionId(reviewCache.threadKey, fallbackSectionId);
@@ -141,6 +165,7 @@ export function useReviewSections(input: {
   }, [
     fallbackSectionId,
     reviewCache.selectedSectionId,
+    repositoriesSettled,
     reviewCache.threadKey,
     reviewSections.length,
     selectedSectionIdExists,
@@ -194,6 +219,25 @@ export function useReviewSections(input: {
     diffPreview.refresh();
   }, [activeTurnDiff, diffPreview, enabled, selectedSection?.kind]);
 
+  // Keeps Uncommitted or Changes selected across the switch; from a turn, opens Changes.
+  const selectRepository = useCallback(
+    (relativePath: string) => {
+      const next = repositories.find((candidate) => candidate.relativePath === relativePath);
+      if (!reviewCache.threadKey || !next) {
+        return;
+      }
+      setReviewSelectedRepository(reviewCache.threadKey, relativePath);
+      setReviewSelectedSectionId(
+        reviewCache.threadKey,
+        getReviewGitSectionId(
+          selectedSection?.kind === "working-tree" ? "working-tree" : "branch-range",
+          next,
+        ),
+      );
+    },
+    [repositories, reviewCache.threadKey, selectedSection?.kind],
+  );
+
   const selectSection = useCallback(
     (sectionId: string) => {
       if (reviewCache.threadKey) {
@@ -205,15 +249,21 @@ export function useReviewSections(input: {
 
   return {
     error:
-      diffPreview.error ??
+      (repositoriesSettled ? diffPreview.error : null) ??
       activeTurnDiff.error ??
       reviewCache.asyncState.error ??
       (selectedSection === null && !fileAccess.isPending && !canReadFiles
         ? (fileAccess.error ?? "This connection cannot read local diffs.")
         : null),
     isSelectedSectionPending:
-      selectedSection?.kind === "turn" ? activeTurnDiff.isPending : diffPreview.isPending,
-    loadingGitDiffs: fileAccess.isPending || diffPreview.isPending,
+      selectedSection?.kind === "turn"
+        ? activeTurnDiff.isPending
+        : diffPreview.isPending || !repositoriesSettled,
+    loadingGitDiffs: loadingGitSections,
+    gitDiffCwd,
+    repositories,
+    repository,
+    selectRepository,
     diffPreviewRevision: diffPreview.data
       ? DateTime.formatIso(diffPreview.data.generatedAt)
       : undefined,

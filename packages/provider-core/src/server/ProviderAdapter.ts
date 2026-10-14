@@ -33,6 +33,7 @@ import {
   RunId,
   ThreadId,
   VcsRepository,
+  WorkspaceFolder,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Schema from "effect/Schema";
@@ -51,6 +52,11 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   cwd: Schema.NullOr(Schema.String),
   /** Repositories a multi-repo `cwd` holds, for the agent's instructions. */
   repositories: Schema.optional(Schema.Array(VcsRepository)),
+  /**
+   * Folders the workspace file lists that are not repositories, apart from `cwd` itself. The
+   * agent is told about them and granted the ones outside `cwd`.
+   */
+  folders: Schema.optional(Schema.Array(WorkspaceFolder)),
   approvalPolicy: Schema.optional(Schema.Unknown),
   sandboxPolicy: Schema.optional(Schema.Unknown),
   reasoningEffort: Schema.optional(Schema.String),

@@ -34,22 +34,29 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
+import { writeIsolatedRunWorkspaceFile } from "./isolatedRunWorkspaceFile.ts";
 
 export interface CreateWorkspaceWorktreeInput {
   readonly workspaceRoot: string;
   readonly repositories: ReadonlyArray<VcsRepository>;
   readonly branch: string;
-  /** Fetch each repository's default branch and start from the remote's copy. */
+  /** Fetch each repository's base and start from the remote's copy. */
   readonly startFromOrigin: boolean;
+  /**
+   * The ref a particular repository starts from, by its `relativePath`. A repository left out
+   * starts from its default branch. A ref that does not resolve in its repository fails the
+   * run instead of silently starting elsewhere.
+   */
+  readonly baseRefs?: ReadonlyArray<{ readonly relativePath: string; readonly baseRef: string }>;
 }
 
 export class WorkspaceWorktrees extends Context.Service<
   WorkspaceWorktrees,
   {
     /**
-     * Create a container with a worktree per repository, each started from its repository's
-     * default branch. The container is reported as soon as it exists so a caller can remove a
-     * partial one with `remove` if a later repository fails.
+     * Create a container with a worktree per repository, each started from the base ref chosen
+     * for it, or its repository's default branch. The container is reported as soon as it
+     * exists so a caller can remove a partial one with `remove` if a later repository fails.
      */
     readonly create: (
       input: CreateWorkspaceWorktreeInput,
@@ -75,7 +82,7 @@ export class WorkspaceWorktrees extends Context.Service<
   }
 >()("t3/git/WorkspaceWorktrees") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
@@ -112,33 +119,42 @@ export const make = Effect.gen(function* () {
       })
       .pipe(Effect.map((result) => result.exitCode === 0));
 
-  // The repository's default branch (from its primary remote), or its current checkout.
+  // The ref chosen for the repository, else its default branch (from its primary remote), else
+  // its current checkout. A chosen ref must resolve; a default is only a preference.
   const resolveStart = Effect.fn("WorkspaceWorktrees.resolveStart")(function* (
-    cwd: string,
+    repository: VcsRepository,
     startFromOrigin: boolean,
+    requestedBaseRef: string | null,
   ) {
+    const cwd = repository.path;
     const remote = yield* git.resolvePrimaryRemoteName(cwd).pipe(Effect.option);
-    const defaultBranch =
-      remote._tag === "None"
+    const baseBranch =
+      requestedBaseRef ??
+      (remote._tag === "None"
         ? null
         : yield* git
             .resolveDefaultBranchName(cwd, remote.value)
-            .pipe(Effect.orElseSucceed(() => null));
-    if (remote._tag === "Some" && defaultBranch !== null && startFromOrigin) {
-      yield* git.fetchRemote({ cwd, remoteName: remote.value, refName: defaultBranch });
-      if (
-        yield* git.remoteBranchExists({ cwd, remoteName: remote.value, refName: defaultBranch })
-      ) {
+            .pipe(Effect.orElseSucceed(() => null)));
+    if (remote._tag === "Some" && baseBranch !== null && startFromOrigin) {
+      yield* git.fetchRemote({ cwd, remoteName: remote.value, refName: baseBranch });
+      if (yield* git.remoteBranchExists({ cwd, remoteName: remote.value, refName: baseBranch })) {
         const tracking = yield* git.resolveRemoteTrackingCommit({
           cwd,
-          refName: defaultBranch,
+          refName: baseBranch,
           fallbackRemoteName: remote.value,
         });
-        return { startRef: tracking.commitSha, baseRef: defaultBranch };
+        return { startRef: tracking.commitSha, baseRef: baseBranch };
       }
     }
-    if (defaultBranch !== null && (yield* hasCommit(cwd, defaultBranch))) {
-      return { startRef: defaultBranch, baseRef: defaultBranch };
+    if (baseBranch !== null && (yield* hasCommit(cwd, baseBranch))) {
+      return { startRef: baseBranch, baseRef: baseBranch };
+    }
+    if (requestedBaseRef !== null) {
+      return yield* fail(
+        "WorkspaceWorktrees.resolveStart",
+        cwd,
+        `Base ref "${requestedBaseRef}" does not resolve to a commit in ${repository.name}.`,
+      );
     }
     return { startRef: "HEAD", baseRef: "HEAD" };
   });
@@ -156,9 +172,9 @@ export const make = Effect.gen(function* () {
       layout.repositories.map((repository) => repository.relativePath.split("/")[0]),
     );
     const listedFolders =
-      layout.listedFolders === null
+      layout.folders === null
         ? null
-        : new Set(layout.listedFolders.map((folder) => folder.split("/")[0]));
+        : new Set(layout.folders.map((folder) => folder.relativePath.split("/")[0]));
     const names = yield* fileSystem
       .readDirectory(workspaceRoot)
       .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
@@ -185,11 +201,12 @@ export const make = Effect.gen(function* () {
   });
 
   const createWorktree = Effect.fn("WorkspaceWorktrees.createWorktree")(function* (
-    source: string,
+    repository: VcsRepository,
     worktreePath: string,
     branch: string,
     input: CreateWorkspaceWorktreeInput,
   ) {
+    const source = repository.path;
     yield* fileSystem
       .makeDirectory(path.dirname(worktreePath), { recursive: true })
       .pipe(
@@ -197,7 +214,10 @@ export const make = Effect.gen(function* () {
           fail("WorkspaceWorktrees.create", source, `Could not create ${worktreePath}.`, cause),
         ),
       );
-    const start = yield* resolveStart(source, input.startFromOrigin);
+    const requestedBaseRef =
+      input.baseRefs?.find((entry) => entry.relativePath === repository.relativePath)?.baseRef ??
+      null;
+    const start = yield* resolveStart(repository, input.startFromOrigin, requestedBaseRef);
     yield* git.createWorktree({
       cwd: source,
       refName: start.startRef,
@@ -230,6 +250,14 @@ export const make = Effect.gen(function* () {
       }
       const root = input.repositories.find((repository) => repository.relativePath === ".");
       const nested = input.repositories.filter((repository) => repository !== root);
+      // Listed folders keep their place in the run: a repository at its worktree, a folder inside
+      // the project at its link, and a plain folder outside the project stays the original.
+      const workspaceFolders = (yield* workspaceRepositories.describe(input.workspaceRoot)).folders;
+      const folderPlacement = (folder: VcsRepository) => {
+        const repository = input.repositories.find((candidate) => candidate.path === folder.path);
+        if (repository !== undefined) return placement(repository);
+        return isOutsideWorkspaceRepository(folder) ? folder.path : folder.relativePath;
+      };
       // The layout file goes first: it is what makes the folder a container, so a failure
       // below can still be cleaned up with `remove`.
       yield* encodeLayout({
@@ -238,6 +266,14 @@ export const make = Effect.gen(function* () {
           name: repository.name,
           source: repository.path,
         })),
+        ...(workspaceFolders === null
+          ? {}
+          : {
+              folders: workspaceFolders.map((folder) => ({
+                relativePath: folderPlacement(folder),
+                name: folder.name,
+              })),
+            }),
       }).pipe(
         Effect.flatMap((contents) =>
           fileSystem
@@ -267,14 +303,30 @@ export const make = Effect.gen(function* () {
         yield* linkSharedEntries(input.workspaceRoot, container);
       } else {
         // The root repository's checkout is the container, so there is nothing to link.
-        yield* createWorktree(root.path, container, branch, input);
+        yield* createWorktree(root, container, branch, input);
       }
       for (const repository of nested) {
-        yield* createWorktree(
-          repository.path,
-          join(container, placement(repository)),
-          branch,
-          input,
+        yield* createWorktree(repository, join(container, placement(repository)), branch, input);
+      }
+      // Editors open the run the way they open the project. Losing that is not worth failing.
+      const projectWorkspaceFile = yield* workspaceRepositories.workspaceFile(input.workspaceRoot);
+      if (projectWorkspaceFile !== null) {
+        yield* writeIsolatedRunWorkspaceFile({
+          projectWorkspaceFile,
+          container,
+          repositories: input.repositories.map((repository) => ({
+            source: repository.path,
+            worktree: join(container, placement(repository)),
+          })),
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not write an isolated run's workspace file", {
+              container,
+              cause,
+            }),
+          ),
         );
       }
       return { path: container, branch };
@@ -391,6 +443,9 @@ export const make = Effect.gen(function* () {
       if (!(yield* exists(input.path))) {
         yield* fileSystem
           .remove(WorkspaceRepositories.isolatedRunLayoutPath(input.path), { force: true })
+          .pipe(Effect.ignore);
+        yield* fileSystem
+          .remove(WorkspaceRepositories.isolatedRunWorkspaceFilePath(input.path), { force: true })
           .pipe(Effect.ignore);
       }
     },

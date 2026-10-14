@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { fileBreadcrumbChildren, fileBreadcrumbParent, fileBreadcrumbs } from "./filePath";
+import {
+  fileBreadcrumbChildren,
+  fileBreadcrumbParent,
+  fileBreadcrumbs,
+  fileTreeEntryTarget,
+  rootGroupFolder,
+} from "./filePath";
 
 describe("fileBreadcrumbs", () => {
   it("builds project, directory, and file crumbs", () => {
@@ -93,5 +99,91 @@ describe("fileBreadcrumbParent", () => {
     ["", null],
   ])("returns the parent of %j", (path, expected) => {
     expect(fileBreadcrumbParent(path)).toBe(expected);
+  });
+});
+
+describe("fileTreeEntryTarget", () => {
+  const cwd = "/work/context";
+  const roots = [
+    { label: "context", path: "/work/context" },
+    { label: "Web", path: "/work/context/web" },
+    { label: "team-a/docs", path: "/work/team-a/docs" },
+    { label: "team-b/docs", path: "/work/team-b/docs" },
+  ];
+
+  it("acts on the real file behind a labelled row", () => {
+    expect(fileTreeEntryTarget({ roots, cwd, treePath: "team-a/docs/guide.md" })).toEqual({
+      workspaceRoot: "/work/team-a/docs",
+      filePath: "guide.md",
+      mentionPath: "/work/team-a/docs/guide.md",
+      openPath: "/work/team-a/docs/guide.md",
+    });
+    // A root inside the project folder is still named from the project folder.
+    expect(fileTreeEntryTarget({ roots, cwd, treePath: "Web/src/main.ts" })).toEqual({
+      workspaceRoot: "/work/context/web",
+      filePath: "src/main.ts",
+      mentionPath: "/work/context/web/src/main.ts",
+      openPath: "/work/context/web/src/main.ts",
+    });
+    expect(fileTreeEntryTarget({ roots, cwd, treePath: "context/README.md" })).toEqual({
+      workspaceRoot: "/work/context",
+      filePath: "README.md",
+      mentionPath: "README.md",
+      openPath: "README.md",
+    });
+  });
+
+  it("names a root's own row from its parent folder", () => {
+    expect(fileTreeEntryTarget({ roots, cwd, treePath: "Web/" })).toEqual({
+      workspaceRoot: "/work/context",
+      filePath: "web",
+      mentionPath: "/work/context/web",
+      openPath: "/work/context/web",
+    });
+  });
+
+  it("resolves a row that only groups roots to the folder they share, or to nothing", () => {
+    expect(fileTreeEntryTarget({ roots, cwd, treePath: "team-a" })).toEqual({
+      workspaceRoot: "/work",
+      filePath: "team-a",
+      mentionPath: "/work/team-a",
+      openPath: "/work/team-a",
+    });
+    const worktrees = [
+      { label: "client/app", path: "/runs/feature/app" },
+      { label: "server/app", path: "/runs/feature/app-2" },
+    ];
+    expect(fileTreeEntryTarget({ roots: worktrees, cwd, treePath: "client" })).toBeNull();
+    const drives = [
+      { label: "C:/docs", path: "C:/docs" },
+      { label: "D:/docs", path: "D:/docs" },
+    ];
+    expect(fileTreeEntryTarget({ roots: drives, cwd, treePath: "C:" })).toBeNull();
+  });
+
+  it("is the plain tree path for an ordinary project", () => {
+    expect(
+      fileTreeEntryTarget({ roots: [{ label: "context", path: cwd }], cwd, treePath: "src/a.ts" }),
+    ).toEqual({
+      workspaceRoot: cwd,
+      filePath: "src/a.ts",
+      mentionPath: "src/a.ts",
+      openPath: "src/a.ts",
+    });
+  });
+});
+
+describe("rootGroupFolder", () => {
+  it("finds the folder same-named roots sit in", () => {
+    expect(
+      rootGroupFolder(
+        [
+          { label: "team-a/docs", path: "/work/team-a/docs" },
+          { label: "team-b/docs", path: "/work/team-b/docs" },
+        ],
+        "team-a",
+      ),
+    ).toBe("/work/team-a");
+    expect(rootGroupFolder([{ label: "docs", path: "/work/docs" }], "docs")).toBeNull();
   });
 });

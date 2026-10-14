@@ -80,14 +80,23 @@ const providerInstanceFor = (instanceId: ProviderInstanceId) =>
 const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(
     Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({
-      list: (cwd) =>
+      describe: (cwd) =>
         Effect.succeed(
           cwd === "/multi-repo-root"
-            ? [
-                { relativePath: "api", name: "api", path: "/multi-repo-root/api" },
-                { relativePath: "web", name: "Web", path: "/multi-repo-root/web" },
-              ]
-            : [],
+            ? {
+                repositories: [
+                  { relativePath: "api", name: "api", path: "/multi-repo-root/api" },
+                  { relativePath: "web", name: "Web", path: "/multi-repo-root/web" },
+                ],
+                folders: [
+                  { relativePath: ".", name: "multi-repo-root", path: "/multi-repo-root" },
+                  { relativePath: "api", name: "api", path: "/multi-repo-root/api" },
+                  { relativePath: "web", name: "Web", path: "/multi-repo-root/web" },
+                  { relativePath: "shared", name: "shared", path: "/multi-repo-root/shared" },
+                  { relativePath: "../docs", name: "Docs", path: "/docs" },
+                ],
+              }
+            : { repositories: [], folders: null },
         ),
     }),
   ),
@@ -164,7 +173,13 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
         { relativePath: "api", name: "api", path: "/multi-repo-root/api" },
         { relativePath: "web", name: "Web", path: "/multi-repo-root/web" },
       ]);
+      // Listed folders that are neither the cwd nor a repository reach the adapter as folders.
+      assert.deepEqual(multiRepo.folders, [
+        { relativePath: "shared", name: "shared", path: "/multi-repo-root/shared" },
+        { relativePath: "../docs", name: "Docs", path: "/docs" },
+      ]);
       assert.isUndefined(singleRepo.repositories);
+      assert.isUndefined(singleRepo.folders);
     }),
   );
 

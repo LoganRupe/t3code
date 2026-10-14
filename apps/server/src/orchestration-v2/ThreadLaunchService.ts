@@ -64,6 +64,10 @@ export type ThreadLaunchWorkspaceStrategy =
       readonly baseRef: string;
       readonly branch?: string | undefined;
       readonly startFromOrigin?: boolean | undefined;
+      /** Per-repository bases in a multi-repo workspace; see the contract for the rules. */
+      readonly repositoryBaseRefs?:
+        | ReadonlyArray<{ readonly relativePath: string; readonly baseRef: string }>
+        | undefined;
     };
 
 export interface ThreadLaunchInitialMessage {
@@ -158,10 +162,16 @@ export class ThreadLaunchBaseRefError extends Schema.TaggedError<ThreadLaunchBas
     projectTitle: Schema.String,
     workspaceRoot: Schema.String,
     baseRef: Schema.String,
+    /** The repository of a multi-repo workspace the ref was checked in, when not the project itself. */
+    repositoryName: Schema.optional(Schema.String),
   },
 ) {
   override get message(): string {
-    return `Base ref "${this.baseRef}" does not resolve to a commit in project "${this.projectTitle}" (${this.workspaceRoot}).`;
+    const where =
+      this.repositoryName === undefined
+        ? `project "${this.projectTitle}" (${this.workspaceRoot})`
+        : `repository "${this.repositoryName}" of project "${this.projectTitle}" (${this.workspaceRoot})`;
+    return `Base ref "${this.baseRef}" does not resolve to a commit in ${where}.`;
   }
 }
 
@@ -195,6 +205,20 @@ export class ThreadLaunchService extends Context.Service<
 >()("t3/orchestration-v2/ThreadLaunchService") {}
 
 const isThreadLaunchError = Schema.is(ThreadLaunchError);
+
+/**
+ * The base one repository of a multi-repo workspace was asked to start from, or null for its
+ * default branch. The workspace folder's own repository takes the strategy's base ref, the one
+ * the branch picker shows for the folder, unless it is listed on its own.
+ */
+function repositoryBaseRefFor(
+  strategy: Extract<ThreadLaunchWorkspaceStrategy, { type: "worktree" }>,
+  relativePath: string,
+): string | null {
+  const listed = strategy.repositoryBaseRefs?.find((entry) => entry.relativePath === relativePath);
+  if (listed !== undefined) return listed.baseRef;
+  return relativePath === "." ? strategy.baseRef : null;
+}
 
 function failureDetail(error: unknown): string {
   if (isThreadLaunchError(error)) {
@@ -269,37 +293,55 @@ const make = Effect.gen(function* () {
     "ThreadLaunchService.checkWorktreeBase",
   )(function* (input) {
     const strategy = input.workspaceStrategy;
-    // `:/text` is a commit search, which cannot be asked for a commit type.
-    if (strategy.type !== "worktree" || strategy.baseRef.startsWith(":")) return;
-    const { baseRef } = strategy;
-    // Anything this cannot establish is left for the launch to report: a
-    // missing project, a folder that is not a repository, a failing Git.
-    const unresolved = yield* Effect.gen(function* () {
-      const project = Option.getOrUndefined(yield* projects.getById(input.projectId));
-      if (project === undefined) return undefined;
-      const cwd = project.workspaceRoot;
-      // `git worktree add` reads `-` as the previous checkout.
-      if (yield* git.hasCommit({ cwd, refName: baseRef === "-" ? "@{-1}" : baseRef }))
-        return undefined;
-      // Provisioning fetches the base from origin when it can, and runs a
-      // repository with no commits yet without a worktree.
-      if (
-        strategy.startFromOrigin === true &&
-        (yield* git.remoteExists({ cwd, remoteName: "origin" }))
-      )
-        return undefined;
-      // `git worktree add` also starts from a remote-tracking branch of that
-      // name; any ref carrying it is reason enough to let Git decide.
-      if (yield* git.hasRefNamed({ cwd, refName: baseRef })) return undefined;
-      return (yield* git.hasCommit({ cwd, refName: "HEAD" })) ? project : undefined;
-    }).pipe(Effect.orElseSucceed(() => undefined));
-    if (unresolved !== undefined)
-      return yield* new ThreadLaunchBaseRefError({
-        projectId: unresolved.id,
-        projectTitle: unresolved.title,
-        workspaceRoot: unresolved.workspaceRoot,
-        baseRef,
-      });
+    if (strategy.type !== "worktree") return;
+    // Whether `baseRef` fails to resolve in the checkout at `cwd`. Anything
+    // this cannot establish is left for the launch to report: a folder that
+    // is not a repository, a failing Git.
+    const isUnresolved = (cwd: string, baseRef: string) =>
+      Effect.gen(function* () {
+        // `:/text` is a commit search, which cannot be asked for a commit type.
+        if (baseRef.startsWith(":")) return false;
+        // `git worktree add` reads `-` as the previous checkout.
+        if (yield* git.hasCommit({ cwd, refName: baseRef === "-" ? "@{-1}" : baseRef }))
+          return false;
+        // Provisioning fetches the base from origin when it can, and runs a
+        // repository with no commits yet without a worktree.
+        if (
+          strategy.startFromOrigin === true &&
+          (yield* git.remoteExists({ cwd, remoteName: "origin" }))
+        )
+          return false;
+        // `git worktree add` also starts from a remote-tracking branch of that
+        // name; any ref carrying it is reason enough to let Git decide.
+        if (yield* git.hasRefNamed({ cwd, refName: baseRef })) return false;
+        return yield* git.hasCommit({ cwd, refName: "HEAD" });
+      }).pipe(Effect.orElseSucceed(() => false));
+    const project = Option.getOrUndefined(
+      yield* projects.getById(input.projectId).pipe(Effect.orElseSucceed(() => Option.none())),
+    );
+    if (project === undefined) return;
+    const repositories = yield* workspaceRepositories.list(project.workspaceRoot);
+    // A multi-repo workspace checks each chosen base in its own repository;
+    // the project folder itself is no checkout to ask.
+    const checks =
+      repositories.length === 0
+        ? [{ cwd: project.workspaceRoot, baseRef: strategy.baseRef, repositoryName: undefined }]
+        : repositories.flatMap((repository) => {
+            const baseRef = repositoryBaseRefFor(strategy, repository.relativePath);
+            return baseRef === null
+              ? []
+              : [{ cwd: repository.path, baseRef, repositoryName: repository.name }];
+          });
+    for (const check of checks) {
+      if (yield* isUnresolved(check.cwd, check.baseRef))
+        return yield* new ThreadLaunchBaseRefError({
+          projectId: project.id,
+          projectTitle: project.title,
+          workspaceRoot: project.workspaceRoot,
+          baseRef: check.baseRef,
+          ...(check.repositoryName === undefined ? {} : { repositoryName: check.repositoryName }),
+        });
+    }
   });
 
   const prepareInBackground = Effect.fn("ThreadLaunchService.prepareInBackground")(function* (
@@ -321,7 +363,8 @@ const make = Effect.gen(function* () {
     const reused = input.reusedWorktree;
     const tracked = input.workspaceStrategy.type === "worktree" || reused !== undefined;
     let createdWorktreePath: string | null = null;
-    let setupTerminalId: string | null = null;
+    // One per repository in a multi-repo isolated run, otherwise just the one.
+    let setupTerminalIds: ReadonlyArray<string> = [];
     let workspaceRecorded = false;
     let runReleased = false;
     if (input.workspaceStrategy.type === "worktree") {
@@ -411,9 +454,13 @@ const make = Effect.gen(function* () {
           : [];
       if (input.workspaceStrategy.type === "worktree" && repositories.length > 0) {
         yield* reportWorktreePhase;
-        // Each repository starts from its own default branch; the strategy's base ref names a
-        // branch of one repository and does not apply.
-        const startFromOrigin = input.workspaceStrategy.startFromOrigin === true;
+        // A repository starts from the base chosen for it, else its own default branch.
+        const strategy = input.workspaceStrategy;
+        const startFromOrigin = strategy.startFromOrigin === true;
+        const baseRefs = repositories.flatMap((repository) => {
+          const baseRef = repositoryBaseRefFor(strategy, repository.relativePath);
+          return baseRef === null ? [] : [{ relativePath: repository.relativePath, baseRef }];
+        });
         yield* setupTracker.stageStatus(threadId, "fetch", startFromOrigin ? "running" : "skipped");
         yield* setupTracker.stageStatus(threadId, "checkout", "running");
         const created = yield* workspaceWorktrees
@@ -423,6 +470,7 @@ const make = Effect.gen(function* () {
               repositories,
               branch: branch!,
               startFromOrigin,
+              ...(baseRefs.length === 0 ? {} : { baseRefs }),
             },
             {
               onContainerClaimed: (path) =>
@@ -620,7 +668,7 @@ const make = Effect.gen(function* () {
 
       let awaitAsyncSetup = Effect.void;
       if (setup.status === "started") {
-        setupTerminalId = setup.terminalId;
+        setupTerminalIds = setup.repositories?.map((run) => run.terminalId) ?? [setup.terminalId];
         yield* setupTracker.update(threadId, (snapshot) => ({
           ...snapshot,
           setupScript: {
@@ -632,16 +680,28 @@ const make = Effect.gen(function* () {
         if (setup.completion) {
           const awaitCompletion = Effect.gen(function* () {
             const completion = yield* setup.completion!;
+            // A multi-repo run names the repositories that failed; a clean one
+            // reads like a single checkout's.
+            const failures = (completion.repositories ?? [])
+              .filter((repository) => repository.exitCode !== 0)
+              .map(
+                (repository) =>
+                  `${repository.name}: exited with ${repository.exitCode ?? "no exit code"}`,
+              );
+            const detail =
+              failures.length > 0
+                ? failures.join(", ")
+                : `exited with ${completion.exitCode ?? "no exit code"}`;
             yield* setupTracker.stage(threadId, "setup-script", {
               status: completion.exitCode === 0 ? "done" : "failed",
-              detail: `exited with ${completion.exitCode ?? "no exit code"}`,
+              detail,
             });
             if (completion.exitCode !== 0 && !setup.async)
               return yield* mapError(
                 input,
                 "run-setup-script",
                 threadId,
-              )(`Setup script exited with ${completion.exitCode ?? "no exit code"}.`);
+              )(`Setup script ${detail}.`);
           });
           if (setup.async) {
             awaitAsyncSetup = awaitCompletion.pipe(
@@ -693,10 +753,13 @@ const make = Effect.gen(function* () {
             cancelled ? "cancelled" : "failed",
             cancelled ? null : failureDetail(Cause.squash(cause)),
           );
-          if (cancelled && setupTerminalId)
-            yield* terminals
-              .close({ threadId, terminalId: setupTerminalId, deleteHistory: true })
-              .pipe(Effect.ignore);
+          if (cancelled)
+            yield* Effect.forEach(
+              setupTerminalIds,
+              (terminalId) =>
+                terminals.close({ threadId, terminalId, deleteHistory: true }).pipe(Effect.ignore),
+              { discard: true },
+            );
           if (
             tracked &&
             createdWorktreePath &&

@@ -12,12 +12,14 @@ export function useOpenFavoriteEditorShortcut({
   keybindings,
   availableEditors,
   openInCwd,
+  openInWorkspaceFile,
 }: {
   enabled: boolean;
   environmentId: EnvironmentId;
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   openInCwd: string | null;
+  openInWorkspaceFile: string | null;
 }) {
   const openInEditorMutation = useAtomCommand(shellEnvironment.openInEditor, "open in editor");
   const [preferredEditor] = usePreferredEditor(availableEditors);
@@ -34,10 +36,19 @@ export function useOpenFavoriteEditorShortcut({
         input: {
           cwd: openInCwd,
           editor: preferredEditor,
+          ...(openInWorkspaceFile ? { workspaceFile: openInWorkspaceFile } : {}),
         },
       });
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [enabled, environmentId, keybindings, openInCwd, openInEditorMutation, preferredEditor]);
+  }, [
+    enabled,
+    environmentId,
+    keybindings,
+    openInCwd,
+    openInEditorMutation,
+    openInWorkspaceFile,
+    preferredEditor,
+  ]);
 }

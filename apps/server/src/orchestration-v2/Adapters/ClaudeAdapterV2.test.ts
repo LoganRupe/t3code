@@ -223,7 +223,7 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.include(options.settings, { showThinkingSummaries: true });
   });
 
-  it("grants repositories the workspace lists outside the cwd", () => {
+  it("grants repositories and folders the workspace lists outside the cwd", () => {
     const options = ClaudeAdapterV2.makeClaudeQueryOptions({
       modelSelection: CLAUDE_TEST_MODEL_SELECTION,
       nativeThreadId: "outside-thread",
@@ -235,8 +235,21 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
         { relativePath: "api", name: "api", path: "/workspace/api" },
         { relativePath: "../team/lib", name: "lib", path: "/team/lib" },
       ],
+      folders: [
+        { relativePath: "shared", name: "shared", path: "/workspace/shared" },
+        { relativePath: "../team/docs", name: "docs", path: "/team/docs" },
+      ],
     });
-    assert.deepEqual(options.additionalDirectories, ["/workspace", "/attachments", "/team/lib"]);
+    assert.deepEqual(options.additionalDirectories, [
+      "/workspace",
+      "/attachments",
+      "/team/lib",
+      "/team/docs",
+    ]);
+    const systemPrompt = options.systemPrompt as { readonly append: string };
+    assert.include(systemPrompt.append, "<workspace_folders>");
+    assert.include(systemPrompt.append, "- shared\n");
+    assert.include(systemPrompt.append, "- /team/docs (docs)\n");
   });
 
   it("preserves an explicit omitted thinking display", () => {
