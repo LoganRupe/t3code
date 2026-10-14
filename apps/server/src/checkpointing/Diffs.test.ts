@@ -59,7 +59,7 @@ describe("prefixNumstatPaths", () => {
 
     expect(parseTurnDiffFilesFromNumstat(prefixNumstatPaths(numstat, "api"))).toEqual([
       { path: "api/image.png", additions: 0, deletions: 0 },
-      { path: "api/new.ts", additions: 0, deletions: 0 },
+      { path: "api/new.ts", previousPath: "api/old.ts", additions: 0, deletions: 0 },
       { path: "api/src/a.ts", additions: 1, deletions: 0 },
     ]);
     expect(prefixNumstatPaths("", "api")).toBe("");

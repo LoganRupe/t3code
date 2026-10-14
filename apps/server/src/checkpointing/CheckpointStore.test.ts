@@ -353,6 +353,48 @@ it.layer(layerTest)("CheckpointStore.layer", (it) => {
         );
       }),
     );
+
+    it.effect("lists authored paths per repository, keeping every change where HEAD stayed", () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeWorkspace;
+        const api = NodePath.join(workspace, "api");
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const threadId = ThreadId.make("thread-multi-repo-authored");
+        const refs = {
+          cwd: workspace,
+          fromCheckpointRef: checkpointRefForThreadTurn(threadId, 0),
+          toCheckpointRef: checkpointRefForThreadTurn(threadId, 1),
+        };
+
+        yield* git(api, ["checkout", "-b", "upstream"]);
+        yield* writeTextFile(NodePath.join(api, "upstream.txt"), "upstream\n");
+        yield* git(api, ["add", "."]);
+        yield* git(api, ["commit", "-m", "upstream"], { committedAt: "2020-01-01T00:00:00Z" });
+        yield* git(api, ["checkout", "-"]);
+        yield* checkpointStore.captureCheckpoint({
+          cwd: workspace,
+          checkpointRef: refs.fromCheckpointRef,
+        });
+        yield* checkpointStore.captureCheckpoint({
+          cwd: workspace,
+          checkpointRef: refs.toCheckpointRef,
+        });
+        expect(yield* checkpointStore.listAuthoredPaths(refs)).toBeNull();
+
+        // api pulls upstream in and edits a file; web only edits, so its HEAD stays put.
+        yield* git(api, ["merge", "upstream", "--ff-only"]);
+        yield* writeTextFile(NodePath.join(api, "README.md"), "# edited\n");
+        yield* writeTextFile(NodePath.join(workspace, "web", "app.ts"), "export {};\n");
+        yield* checkpointStore.captureCheckpoint({
+          cwd: workspace,
+          checkpointRef: refs.toCheckpointRef,
+        });
+
+        expect(yield* checkpointStore.listAuthoredPaths(refs)).toEqual(
+          new Set(["api/README.md", "web/app.ts"]),
+        );
+      }),
+    );
   });
 
   describe("diffCheckpoints", () => {
