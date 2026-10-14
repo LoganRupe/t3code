@@ -14,7 +14,7 @@ import { useEnvironmentQuery } from "../../../state/query";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
-import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
+import { useSelectedThreadGitRepository } from "../../../state/use-selected-thread-git-repository";
 import { vcsEnvironment } from "../../../state/vcs";
 import { SheetActionButton } from "./gitSheetComponents";
 
@@ -28,7 +28,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const { selectedThread } = useThreadSelection();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const { repositories, repository, gitCwd: selectedThreadCwd } = useSelectedThreadGitRepository();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
   const { canWriteSourceControl, canChangeThreadBranch } = gitActions;
@@ -119,6 +119,7 @@ export function GitCommitSheet(_props: GitCommitSheetProps) {
             <View className="android:gap-1 ios:flex-row ios:items-center ios:justify-between ios:gap-3">
               <Text className="text-foreground-muted text-sm font-medium">Branch</Text>
               <Text className="text-foreground text-base android:font-t3-medium ios:font-t3-bold">
+                {repositories.length > 1 && repository ? `${repository.name} · ` : ""}
                 {gitStatus.data?.refName ?? "(detached HEAD)"}
               </Text>
             </View>

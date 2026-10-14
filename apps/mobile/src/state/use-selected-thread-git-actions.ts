@@ -30,7 +30,7 @@ import { setPendingConnectionError } from "./use-remote-environment-registry";
 import { useAtomCommand } from "./use-atom-command";
 import { showGitActionResult } from "./use-vcs-action-state";
 import { useThreadSelection } from "./use-thread-selection";
-import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
+import { useSelectedThreadGitRepository } from "./use-selected-thread-git-repository";
 
 export function useSelectedThreadGitActions() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
@@ -51,8 +51,14 @@ export function useSelectedThreadGitActions() {
     selectedThread?.environmentId ?? null,
     AuthOrchestrationOperateScope,
   );
-  const canChangeThreadBranch = canWriteSourceControl && canOperateThread;
-  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const {
+    gitCwd: selectedThreadCwd,
+    isThreadRepository,
+    branchListCwd,
+    worktreePath: selectedThreadWorktreePath,
+  } = useSelectedThreadGitRepository();
+  // Another repository's branch is not the thread's, so changing it needs no thread scope.
+  const canChangeThreadBranch = canWriteSourceControl && (canOperateThread || !isThreadRepository);
   const runStackedAction = useAtomCommand(
     vcsActionManager.runStackedAction({
       environmentId: selectedThread?.environmentId ?? null,
@@ -61,14 +67,13 @@ export function useSelectedThreadGitActions() {
     { reportFailure: false },
   );
 
-  const selectedThreadGitRootCwd = selectedThreadProject?.workspaceRoot ?? null;
   const branchTarget = useMemo(
     () => ({
       environmentId: selectedThread?.environmentId ?? null,
-      cwd: selectedThreadGitRootCwd,
+      cwd: branchListCwd,
       query: null,
     }),
-    [selectedThread?.environmentId, selectedThreadGitRootCwd],
+    [selectedThread?.environmentId, branchListCwd],
   );
   const branchState = useBranches(branchTarget);
   const updateThreadGitContext = useCallback(
@@ -189,6 +194,7 @@ export function useSelectedThreadGitActions() {
         !selectedThreadCwd ||
         !readEnvironmentScope(selectedThread.environmentId, AuthSourceControlWriteScope) ||
         (options?.changesThreadBranch === true &&
+          isThreadRepository &&
           !readEnvironmentScope(selectedThread.environmentId, AuthOrchestrationOperateScope))
       ) {
         return null;
@@ -218,7 +224,7 @@ export function useSelectedThreadGitActions() {
       }
       return result.value;
     },
-    [selectedThread, selectedThreadCwd, selectedThreadProject],
+    [isThreadRepository, selectedThread, selectedThreadCwd, selectedThreadProject],
   );
 
   const refreshSelectedThreadBranches = useCallback(async (): Promise<ReadonlyArray<VcsRef>> => {
@@ -240,16 +246,17 @@ export function useSelectedThreadGitActions() {
       // The Git mutation already landed; refresh what the worktree shows even
       // when the thread metadata update is denied, so the sheet does not keep
       // displaying the previous branch.
-      const updateResult = input.nextThreadState
-        ? await updateThreadGitContext(input.thread, input.nextThreadState)
-        : AsyncResult.success(undefined);
+      const updateResult =
+        input.nextThreadState && isThreadRepository
+          ? await updateThreadGitContext(input.thread, input.nextThreadState)
+          : AsyncResult.success(undefined);
       branchState.refresh();
       await refreshSelectedThreadGitStatus({ quiet: true, cwd: input.cwd });
       return AsyncResult.isFailure(updateResult)
         ? AsyncResult.failure(updateResult.cause)
         : AsyncResult.success(undefined);
     },
-    [branchState, refreshSelectedThreadGitStatus, updateThreadGitContext],
+    [branchState, isThreadRepository, refreshSelectedThreadGitStatus, updateThreadGitContext],
   );
 
   const onCheckoutSelectedThreadBranch = useCallback(

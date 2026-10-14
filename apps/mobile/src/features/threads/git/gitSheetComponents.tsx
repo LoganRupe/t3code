@@ -87,8 +87,11 @@ export function SheetListRow(props: {
   readonly title: string;
   readonly subtitle?: string | null;
   readonly disabled?: boolean;
+  /** `"checkmark"` marks a picker's chosen row; `"none"` leaves the trailing edge empty. */
+  readonly accessory?: "chevron" | "checkmark" | "none";
   readonly onPress: () => void;
 }) {
+  const accessory = props.accessory ?? "chevron";
   return (
     <Pressable
       className="flex-row items-center py-3 disabled:opacity-[0.45] android:min-h-16 android:gap-4 android:px-4 android:active:bg-subtle ios:gap-3 ios:px-1"
@@ -111,7 +114,14 @@ export function SheetListRow(props: {
           <Text className="text-foreground-muted text-xs leading-snug">{props.subtitle}</Text>
         ) : null}
       </View>
-      {Platform.OS !== "android" ? (
+      {accessory === "checkmark" ? (
+        <SymbolView
+          name="checkmark"
+          size={15}
+          tintColorClassName="accent-primary"
+          type="monochrome"
+        />
+      ) : accessory === "chevron" && Platform.OS !== "android" ? (
         <SymbolView
           name="chevron.right"
           size={13}
