@@ -21,6 +21,7 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { isFilesystemRoot, managedWorktreesDirectories } from "../worktreesDirectory.ts";
+import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
 export class ReviewService extends Context.Service<
@@ -44,6 +45,7 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const settings = yield* ServerSettings.ServerSettingsService;
   const projectStore = yield* ProjectStore.ProjectStoreV2;
+  const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
 
   const canonicalizePath = (value: string) => {
     const resolvedPath = path.resolve(value);
@@ -110,6 +112,21 @@ export const make = Effect.gen(function* () {
       if (root !== null && isWithinRoot(candidate, root)) {
         return;
       }
+      // A multi-repo workspace file can list repositories and folders outside the project
+      // folder (`../api`); those are as much the project's as its own folder.
+      const layout = yield* workspaceRepositories.describe(project.workspaceRoot);
+      const listedPaths = [
+        ...layout.repositories.map((repository) => repository.path),
+        ...(layout.folders ?? []).map((folder) => folder.path),
+      ];
+      for (const listedPath of listedPaths) {
+        const listedRoot = yield* canonicalizePath(listedPath).pipe(
+          Effect.orElseSucceed(() => null),
+        );
+        if (listedRoot !== null && isWithinRoot(candidate, listedRoot)) {
+          return;
+        }
+      }
     }
 
     return yield* new VcsRepositoryDetectionError({
@@ -174,4 +191,6 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(ReviewService, make);
+export const layer = Layer.effect(ReviewService, make).pipe(
+  Layer.provide(WorkspaceRepositories.layer),
+);
