@@ -33,7 +33,7 @@ import type { CheckpointStoreError } from "./Errors.ts";
 import type { VcsCheckpointOps } from "../vcs/VcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
-import { prefixNumstatPaths, prefixPatchPaths } from "./Diffs.ts";
+import { parseTurnDiffFilesFromNumstat, prefixNumstatPaths, prefixPatchPaths } from "./Diffs.ts";
 
 export interface CaptureCheckpointInput {
   readonly cwd: string;
@@ -307,28 +307,39 @@ export const make = Effect.gen(function* () {
     "listAuthoredPaths",
   )(function* (input) {
     const targets = yield* resolveTargets(input.cwd);
-    // Null keeps every changed path, so one repository without an answer keeps them all.
+    if (targets.length === 1 && targets[0]!.pathPrefix === null) {
+      const checkpoints = yield* resolveCheckpoints("CheckpointStore.listAuthoredPaths", input.cwd);
+      return yield* checkpoints.listAuthoredPaths(input);
+    }
+    // Null means every changed path in that repository belongs to the work, so it contributes
+    // its whole diff. The workspace answers null only when no repository moved its HEAD.
     const perTarget = yield* forEachTarget(targets, (target) =>
       Effect.gen(function* () {
+        const prefixed = (path: string) => `${target.pathPrefix}/${path}`;
+        const comparable =
+          (yield* hasRefIn(target, input.fromCheckpointRef)) &&
+          (yield* hasRefIn(target, input.toCheckpointRef));
+        if (!comparable) return { authored: null, changed: [] };
         const checkpoints = yield* resolveCheckpoints(
           "CheckpointStore.listAuthoredPaths",
           target.cwd,
         );
-        if (target.pathPrefix === null) {
-          return yield* checkpoints.listAuthoredPaths({ ...input, cwd: target.cwd });
-        }
-        const comparable =
-          (yield* hasRefIn(target, input.fromCheckpointRef)) &&
-          (yield* hasRefIn(target, input.toCheckpointRef));
-        if (!comparable) return null;
-        const paths = yield* checkpoints.listAuthoredPaths({ ...input, cwd: target.cwd });
-        if (paths === null) return null;
-        const prefix = target.pathPrefix;
-        return new Set(Array.from(paths, (path) => `${prefix}/${path}`));
+        const authored = yield* checkpoints.listAuthoredPaths({ ...input, cwd: target.cwd });
+        if (authored !== null) return { authored: Array.from(authored, prefixed), changed: [] };
+        const numstat = yield* checkpoints.diffCheckpoints({
+          ...input,
+          cwd: target.cwd,
+          ignoreWhitespace: false,
+          format: "numstat",
+        });
+        const changed = parseTurnDiffFilesFromNumstat(numstat).flatMap((file) =>
+          file.previousPath === undefined ? [file.path] : [file.path, file.previousPath],
+        );
+        return { authored: null, changed: changed.map(prefixed) };
       }),
     );
-    if (perTarget.some((paths) => paths === null)) return null;
-    return new Set(perTarget.flatMap((paths) => Array.from(paths ?? [])));
+    if (perTarget.every((result) => result.authored === null)) return null;
+    return new Set(perTarget.flatMap((result) => result.authored ?? result.changed));
   });
 
   const deleteCheckpointRefs: CheckpointStore["Service"]["deleteCheckpointRefs"] = Effect.fn(
