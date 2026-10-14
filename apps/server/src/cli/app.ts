@@ -250,7 +250,9 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
 export const appCommand = Command.make("app", {
   baseDir: baseDirFlag,
   workspaceRoot: Argument.String("path").pipe(
-    Argument.withDescription("Project directory. Default: current directory."),
+    Argument.withDescription(
+      "Project directory or its .code-workspace file. Default: current directory.",
+    ),
     Argument.optional,
   ),
 }).pipe(

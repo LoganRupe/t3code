@@ -201,6 +201,11 @@ export function workspaceRepositoryPathPrefix(
 export const VcsListRepositoriesResult = Schema.Struct({
   /** Empty when the cwd is itself inside a repository or holds none. */
   repositories: Schema.Array(VcsRepository),
+  /**
+   * Absolute path of the `.code-workspace` file editors should open for the cwd: the folder's
+   * own file, or the one written for an isolated run. Absent when there is none.
+   */
+  workspaceFile: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type VcsListRepositoriesResult = typeof VcsListRepositoriesResult.Type;
 

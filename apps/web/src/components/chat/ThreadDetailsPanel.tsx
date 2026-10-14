@@ -40,6 +40,8 @@ export interface ThreadDetailsPanelProps extends Pick<
   availableEditors: ReadonlyArray<EditorId>;
   showOpenInPicker: boolean;
   gitCwd: string | null;
+  /** The `.code-workspace` file "Open in" hands to editors that open one. */
+  openInWorkspaceFile: string | null;
   isGitRepo: boolean;
   /** Repositories of a multi-repo workspace; each gets its own source control. */
   workspaceRepositories: ReadonlyArray<VcsRepository>;
@@ -131,6 +133,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   environmentId={props.environmentId}
                   availableEditors={props.availableEditors}
                   openInCwd={props.gitCwd}
+                  openInWorkspaceFile={props.openInWorkspaceFile}
                   displayMode="panel"
                 />
               ) : null}

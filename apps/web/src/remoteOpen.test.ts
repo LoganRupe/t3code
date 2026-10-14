@@ -129,6 +129,18 @@ describe("buildRemoteOpenUrl", () => {
     ).toBe("vscode://vscode-remote/ssh-remote+sol.tail1234.ts.net/home/theo/code/my%20repo");
   });
 
+  it("links the workspace file for editors that open one", () => {
+    const input = {
+      host: "sol",
+      absolutePath: "/home/theo/team",
+      workspaceFile: "/home/theo/team/team.code-workspace",
+    };
+    expect(buildRemoteOpenUrl({ ...input, editor: "vscode" })).toBe(
+      "vscode://vscode-remote/ssh-remote+sol/home/theo/team/team.code-workspace",
+    );
+    expect(buildRemoteOpenUrl({ ...input, editor: "zed" })).toBe("zed://ssh/sol/home/theo/team");
+  });
+
   it("uses the fork's scheme", () => {
     expect(buildRemoteOpenUrl({ editor: "cursor", host: "sol", absolutePath: "/tmp/x" })).toBe(
       "cursor://vscode-remote/ssh-remote+sol/tmp/x",

@@ -320,3 +320,88 @@ it.effect(
       }).pipe(Effect.provide(layerTest(baseDir)));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+it.effect(
+  "an isolated run opens in editors with the folders the project's workspace file lists",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-workspace-worktrees-",
+      });
+      yield* Effect.gen(function* () {
+        const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+        const repositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+        const workspaceRoot = path.join(baseDir, "context");
+        const outside = path.join(baseDir, "elsewhere", "api");
+        yield* initRepository(workspaceRoot);
+        yield* initRepository(outside);
+        yield* fileSystem.makeDirectory(path.join(workspaceRoot, "docs"));
+        const projectFile = path.join(workspaceRoot, "team.code-workspace");
+        yield* fileSystem.writeFileString(
+          projectFile,
+          `{
+          // Comments and trailing commas are fine in a workspace file.
+          "folders": [{ "path": "." }, { "path": "../elsewhere/api", "name": "API" }, { "path": "docs" },],
+          "settings": { "editor.tabSize": 2 },
+        }`,
+        );
+        assert.equal(yield* repositories.workspaceFile(workspaceRoot), projectFile);
+
+        const created = yield* worktrees.create({
+          workspaceRoot,
+          repositories: [
+            { relativePath: ".", name: "context", path: workspaceRoot },
+            { relativePath: "../elsewhere/api", name: "API", path: outside },
+          ],
+          branch: "t3code/editor",
+          startFromOrigin: false,
+        });
+
+        const runFile = yield* repositories.workspaceFile(created.path);
+        assert.equal(runFile, `${created.path}.code-workspace`);
+        assert.deepEqual(JSON.parse(yield* fileSystem.readFileString(runFile!)), {
+          folders: [
+            { path: created.path, name: "context" },
+            { path: path.join(created.path, "API"), name: "API" },
+            { path: path.join(workspaceRoot, "docs") },
+          ],
+          settings: { "editor.tabSize": 2 },
+        });
+
+        yield* worktrees.remove({ path: created.path, force: true });
+        assert.isFalse(yield* fileSystem.exists(runFile!));
+      }).pipe(Effect.provide(layerTest(baseDir)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("an isolated run of a project without a workspace file opens as its folder", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-workspace-worktrees-",
+    });
+    yield* Effect.gen(function* () {
+      const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+      const repositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+      const workspaceRoot = path.join(baseDir, "project");
+      yield* initRepository(path.join(workspaceRoot, "api"));
+      yield* initRepository(path.join(workspaceRoot, "web"));
+
+      const created = yield* worktrees.create({
+        workspaceRoot,
+        repositories: [
+          { relativePath: "api", name: "api", path: path.join(workspaceRoot, "api") },
+          { relativePath: "web", name: "web", path: path.join(workspaceRoot, "web") },
+        ],
+        branch: "t3code/plain",
+        startFromOrigin: false,
+      });
+
+      assert.isNull(yield* repositories.workspaceFile(created.path));
+      assert.isNull(yield* repositories.workspaceFile(workspaceRoot));
+    }).pipe(Effect.provide(layerTest(baseDir)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

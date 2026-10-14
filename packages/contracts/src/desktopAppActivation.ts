@@ -11,6 +11,7 @@ export const DesktopAppActivationRequest = Schema.Struct({
   version: Schema.Literal(DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION),
   requestId: TrimmedNonEmptyString,
   type: Schema.Literal("open-workspace"),
+  /** The project folder, or a `.code-workspace` file, which adds the folder holding it. */
   workspaceRoot: TrimmedNonEmptyString,
   platform: DesktopAppActivationPlatform,
 });

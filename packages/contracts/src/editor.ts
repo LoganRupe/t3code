@@ -23,6 +23,12 @@ type EditorDefinition = {
    * which uses the code to choose the IDE backend.
    */
   readonly jetbrainsProductCode?: string;
+  /**
+   * Whether the editor opens a `.code-workspace` file as a multi-root workspace. The VS Code
+   * family does; Zed and JetBrains would show the raw JSON and the file manager would hand it
+   * to the OS opener, so those keep getting the folder.
+   */
+  readonly supportsWorkspaceFile?: boolean;
 };
 
 export const EDITORS = [
@@ -34,15 +40,30 @@ export const EDITORS = [
     baseArgs: ["--classic"],
     launchStyle: "goto",
     remoteScheme: "cursor",
+    supportsWorkspaceFile: true,
   },
-  { id: "trae", label: "Trae", commands: ["trae"], launchStyle: "goto" },
-  { id: "kiro", label: "Kiro", commands: ["kiro"], baseArgs: ["ide"], launchStyle: "goto" },
+  {
+    id: "trae",
+    label: "Trae",
+    commands: ["trae"],
+    launchStyle: "goto",
+    supportsWorkspaceFile: true,
+  },
+  {
+    id: "kiro",
+    label: "Kiro",
+    commands: ["kiro"],
+    baseArgs: ["ide"],
+    launchStyle: "goto",
+    supportsWorkspaceFile: true,
+  },
   {
     id: "vscode",
     label: "VS Code",
     commands: ["code"],
     launchStyle: "goto",
     remoteScheme: "vscode",
+    supportsWorkspaceFile: true,
   },
   {
     id: "vscode-insiders",
@@ -50,6 +71,7 @@ export const EDITORS = [
     commands: ["code-insiders"],
     launchStyle: "goto",
     remoteScheme: "vscode-insiders",
+    supportsWorkspaceFile: true,
   },
   {
     id: "vscodium",
@@ -57,6 +79,7 @@ export const EDITORS = [
     commands: ["codium"],
     launchStyle: "goto",
     remoteScheme: "vscodium",
+    supportsWorkspaceFile: true,
   },
   {
     id: "zed",
@@ -72,6 +95,7 @@ export const EDITORS = [
     // ships `antigravity-ide`, so it comes first for install-folder lookups.
     commands: ["antigravity-ide", "agy-ide"],
     launchStyle: "goto",
+    supportsWorkspaceFile: true,
   },
   {
     id: "idea",
@@ -173,6 +197,12 @@ export const LaunchEditorInput = Schema.Struct({
       honored by the "file-manager" editor; clients must check the server's
       `shellRevealInFileManager` config flag before sending this. */
   reveal: Schema.optional(Schema.Boolean),
+  /**
+   * The `.code-workspace` file `cwd` opens as, from `vcs.listRepositories`. Editors that open
+   * workspace files get it instead of `cwd`, so a multi-repo project shows every folder the
+   * file lists, under the names it gives them.
+   */
+  workspaceFile: Schema.optional(TrimmedNonEmptyString),
 });
 export type LaunchEditorInput = typeof LaunchEditorInput.Type;
 
@@ -189,17 +219,35 @@ export const remoteSchemeForEditor = (id: EditorId): string | undefined => {
   return editor === undefined ? undefined : remoteSchemeOf(editor);
 };
 
+/** The workspace file when there is one and the editor opens it as a workspace, else `cwd`. */
+export function resolveEditorTarget(input: {
+  readonly editor: EditorId;
+  readonly cwd: string;
+  readonly workspaceFile?: string | undefined;
+}): string {
+  const editor: EditorDefinition | undefined = EDITORS.find(
+    (candidate) => candidate.id === input.editor,
+  );
+  return input.workspaceFile && editor?.supportsWorkspaceFile === true
+    ? input.workspaceFile
+    : input.cwd;
+}
+
 /**
  * Builds a `<scheme>://vscode-remote/ssh-remote+<host><path>` deep link (Zed
  * takes `zed://ssh/<host><path>`, JetBrains IDEs a Toolbox App
  * `jetbrains://gateway/ssh/environment?...` link) that opens `absolutePath` on
  * `host` in the local editor over SSH. Returns undefined for editors without
  * remote deep-link support.
+ *
+ * `workspaceFile` needs no separate URI form: VS Code's protocol handler opens the link as a
+ * workspace rather than a folder whenever the path ends in `.code-workspace`.
  */
 export const buildRemoteOpenUrl = (input: {
   readonly editor: EditorId;
   readonly host: string;
   readonly absolutePath: string;
+  readonly workspaceFile?: string | undefined;
 }): string | undefined => {
   const scheme = remoteSchemeForEditor(input.editor);
   if (scheme === undefined) {
@@ -217,8 +265,13 @@ export const buildRemoteOpenUrl = (input: {
     });
     return `${scheme}://gateway/ssh/environment?${params.toString()}`;
   }
+  const target = resolveEditorTarget({
+    editor: input.editor,
+    cwd: input.absolutePath,
+    workspaceFile: input.workspaceFile,
+  });
   // Windows server paths (`C:\...`) appear as `/C:/...` in vscode-remote URIs.
-  const posixPath = input.absolutePath.replaceAll("\\", "/");
+  const posixPath = target.replaceAll("\\", "/");
   const rootedPath = posixPath.startsWith("/") ? posixPath : `/${posixPath}`;
   const encodedHost = encodeURIComponent(input.host);
   if (input.editor === "zed") {
@@ -226,7 +279,7 @@ export const buildRemoteOpenUrl = (input: {
     // Windows `C:\Users\x` must become `/Users/x` (verified in #8938). Other
     // drives are untested and kept as is rather than silently remapped, and a
     // POSIX path that happens to start with `/C:` is left alone.
-    const zedPath = /^[Cc]:[\\/]/.test(input.absolutePath) ? rootedPath.slice(3) : rootedPath;
+    const zedPath = /^[Cc]:[\\/]/.test(target) ? rootedPath.slice(3) : rootedPath;
     const encodedZedPath = zedPath.split("/").map(encodeURIComponent).join("/");
     return `${scheme}://ssh/${encodedHost}${encodedZedPath}`;
   }
