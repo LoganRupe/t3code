@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import type { RepositoryBaseRef } from "@t3tools/client-runtime/repository-base-refs";
 import {
   EnvironmentId as EnvironmentIdSchema,
   ModelSelection as ModelSelectionSchema,
@@ -7,6 +8,7 @@ import {
   COMPOSER_CONTEXT_MAX_RECORDS,
   ForwardCompatibleArray,
   OrchestrationMessageContext,
+  OrchestrationV2RepositoryBaseRef as RepositoryBaseRefSchema,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   ProjectId as ProjectIdSchema,
   ProviderInteractionMode as ProviderInteractionModeSchema,
@@ -361,6 +363,8 @@ export interface ComposerDraftWorkspaceSelection {
   readonly startFromOrigin?: boolean;
   /** Resolve and check out this PR when the queued task is sent. */
   readonly pullRequestReference?: string;
+  /** Base branches picked per repository of a multi-repo workspace; others use their default. */
+  readonly repositoryBaseRefs?: ReadonlyArray<RepositoryBaseRef>;
 }
 
 export type ComposerDraftSettingsUpdate = Pick<
@@ -374,6 +378,7 @@ const ComposerDraftWorkspaceSelectionSchema = Schema.Struct({
   worktreePath: Schema.NullOr(Schema.String),
   startFromOrigin: Schema.optional(Schema.Boolean),
   pullRequestReference: Schema.optional(Schema.String),
+  repositoryBaseRefs: Schema.optional(Schema.Array(RepositoryBaseRefSchema)),
 });
 
 const ComposerDraftProjectSchema = Schema.Struct({
@@ -1201,7 +1206,9 @@ export async function removeDeliveredCloudQueuedMessage(
             editor.workspaceSelection.pullRequestReference !==
               message.creation?.pullRequestReference ||
             (editor.workspaceSelection.startFromOrigin ?? false) !==
-              (message.creation?.startFromOrigin ?? false))))
+              (message.creation?.startFromOrigin ?? false) ||
+            JSON.stringify(editor.workspaceSelection.repositoryBaseRefs ?? []) !==
+              JSON.stringify(message.creation?.repositoryBaseRefs ?? []))))
     )
       continue;
     const drafts = { ...saved.drafts };

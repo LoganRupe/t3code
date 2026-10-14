@@ -8,18 +8,13 @@ import {
   deriveThreadCheckpointSummaries,
   type ThreadCheckpointSummary,
 } from "@t3tools/client-runtime/state/thread-checkpoints";
-import type {
-  EnvironmentId,
-  ReviewDiffPreviewSource,
-  ThreadId,
-  VcsRepository,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ReviewDiffPreviewSource, ThreadId } from "@t3tools/contracts";
 
 import { useCheckpointDiff } from "../../state/queries";
 import { useEnvironmentQuery } from "../../state/query";
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { reviewEnvironment } from "../../state/review";
-import { vcsEnvironment } from "../../state/vcs";
+import { useWorkspaceRepositories } from "../../state/workspace-repositories";
 import { useSelectedThreadProjection } from "../../state/use-thread-detail";
 import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import {
@@ -39,7 +34,6 @@ import {
   type ReviewCacheForThread,
 } from "./reviewState";
 
-const NO_REPOSITORIES: ReadonlyArray<VcsRepository> = [];
 const NO_GIT_SECTIONS: ReadonlyArray<ReviewDiffPreviewSource> = [];
 
 export function useReviewSections(input: {
@@ -65,18 +59,10 @@ export function useReviewSections(input: {
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   // A multi-repo workspace folder lists its repositories; an ordinary checkout lists none.
   // Turn diffs already cover every repository, while Uncommitted and Changes compare one.
-  const listsRepositories = enabled && environmentId !== undefined && selectedThreadCwd !== null;
-  const repositoriesQuery = useEnvironmentQuery(
-    listsRepositories
-      ? vcsEnvironment.listRepositories({
-          environmentId,
-          input: { cwd: selectedThreadCwd },
-        })
-      : null,
-  );
-  const repositories = repositoriesQuery.data?.repositories ?? NO_REPOSITORIES;
-  const repositoriesSettled =
-    !listsRepositories || repositoriesQuery.data !== null || repositoriesQuery.error !== null;
+  const { repositories, settled: repositoriesSettled } = useWorkspaceRepositories({
+    environmentId: enabled ? environmentId : undefined,
+    cwd: selectedThreadCwd,
+  });
   const repository = resolveReviewRepository(repositories, reviewCache.selectedRepositoryPath);
   const gitDiffCwd = repository?.path ?? selectedThreadCwd;
   const diffPreview = useEnvironmentQuery(

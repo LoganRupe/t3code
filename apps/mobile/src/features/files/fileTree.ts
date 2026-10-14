@@ -1,3 +1,8 @@
+import {
+  fileRootTreePath,
+  type ProjectFileRoot,
+  type ProjectFileRootTarget,
+} from "@t3tools/client-runtime/project-file-roots";
 import type { ProjectEntry } from "@t3tools/contracts";
 import { normalizeSearchQuery, scoreQueryMatch } from "@t3tools/shared/searchRanking";
 
@@ -121,6 +126,35 @@ export function buildFileTree(entries: ReadonlyArray<ProjectEntry>): ReadonlyArr
   }
 
   return [...root.children.values()].sort(compareNodes).map(freezeNode);
+}
+
+/**
+ * The top level of a tree over several roots: one folder row per root, named by its label.
+ * Same-named roots carry parent segments (`team-a/docs`), and `buildFileTree` shows the shared
+ * segment as a row of its own.
+ */
+export function fileRootTreeEntries(roots: ReadonlyArray<ProjectFileRoot>): ProjectEntry[] {
+  return roots.map((root) => ({ path: root.label, kind: "directory" }));
+}
+
+/**
+ * A listing of one directory in a root, as tree rows: only its direct children, named by their
+ * tree path so files from different roots never collide.
+ */
+export function fileRootDirectoryTreeEntries(
+  roots: ReadonlyArray<ProjectFileRoot>,
+  target: ProjectFileRootTarget,
+  entries: ReadonlyArray<ProjectEntry>,
+): ProjectEntry[] {
+  return entries
+    .filter(
+      (entry) =>
+        entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) === target.relativePath,
+    )
+    .map((entry) => ({
+      ...entry,
+      path: fileRootTreePath(roots, { root: target.root, relativePath: entry.path }),
+    }));
 }
 
 export function defaultExpandedTreePaths(nodes: ReadonlyArray<FileTreeNode>): ReadonlySet<string> {

@@ -10,8 +10,8 @@ import {
 } from "@t3tools/client-runtime/state/thread-search";
 import { type VcsRefTarget } from "@t3tools/client-runtime/state/vcs";
 import {
-  fileRootTreePath,
   hasSeveralFileRoots,
+  mergeRootSearchResults,
   projectFileRootsKey,
   type ProjectFileRoot,
 } from "@t3tools/client-runtime/project-file-roots";
@@ -21,7 +21,6 @@ import type {
   ProjectEntry,
   ProjectEntryKind,
   ProjectSearchEntriesInput,
-  ProjectSearchEntriesResult,
   ThreadId,
   TurnItemId,
   VcsListRefsResult,
@@ -247,37 +246,6 @@ const projectRootsSearchAtom = Atom.family((serializedKey: string) => {
     ),
   ).pipe(Atom.withLabel(`web:project-roots-search:${serializedKey}`));
 });
-
-/**
- * Merges one search result per root into a single listing of tree paths. Results interleave
- * round-robin, since ranks do not compare across indexes, and stop at `limit` so the payload
- * stays the size of one search; anything left over marks the listing truncated.
- */
-export function mergeRootSearchResults(
-  roots: ReadonlyArray<ProjectFileRoot>,
-  results: ReadonlyArray<ProjectSearchEntriesResult>,
-  limit: number,
-): ProjectSearchEntriesResult {
-  const entries: ProjectEntry[] = [];
-  const width = Math.max(...results.map((result) => result.entries.length), 0);
-  for (let index = 0; index < width && entries.length < limit; index++) {
-    results.forEach((result, rootIndex) => {
-      const entry = result.entries[index];
-      const root = roots[rootIndex];
-      if (entry === undefined || root === undefined || entries.length >= limit) return;
-      entries.push({
-        ...entry,
-        path: fileRootTreePath(roots, { root, relativePath: entry.path }),
-      });
-    });
-  }
-  return {
-    entries,
-    truncated:
-      results.some((result) => result.truncated) ||
-      results.reduce((total, result) => total + result.entries.length, 0) > entries.length,
-  };
-}
 
 export function areProjectPathSearchTargetsEqual(
   left: ProjectPathSearchTarget,

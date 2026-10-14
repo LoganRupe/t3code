@@ -152,7 +152,8 @@ next to the scope. In the mobile app's review screen, pick it under **Repository
 menu. **New worktree** gives the thread its own copy of every repository on one branch.
 Each copy starts from that repository's default branch unless you pick another one: the repositories
 menu beside the branch controls lists every repository with its own branch list, and **Default
-branch** puts a repository back. When the project folder is itself a repository, it starts from
+branch** puts a repository back. In the mobile app, the repositories control sits beside the branch
+when starting a new task. When the project folder is itself a repository, it starts from
 the branch the regular selector shows. The project's other top-level files and
 folders are linked into that copy rather than duplicated, so edits to them change the originals.
 With a `.code-workspace` file, only the folders it lists are linked, along with top-level files and

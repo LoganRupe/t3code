@@ -10,7 +10,8 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import * as Haptics from "expo-haptics";
-import { useNavigation } from "@react-navigation/native";
+import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { repositoryBaseRefChoices } from "@t3tools/client-runtime/repository-base-refs";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Alert, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -24,6 +25,7 @@ import { ThemedSwitch } from "../../components/ThemedSwitch";
 import { cn } from "../../lib/cn";
 import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
 import { useServerConfigs } from "../../state/entities";
+import { useDebouncedValue, usePaginatedBranches } from "../../state/queries";
 import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { vcsEnvironment } from "../../state/vcs";
@@ -383,6 +385,223 @@ export function NewTaskBranchPickerRouteScreen() {
   );
 }
 
+function NavigationRow(props: {
+  readonly isLast: boolean;
+  readonly onPress: () => void;
+  readonly subtitle: string;
+  readonly title: string;
+}) {
+  if (Platform.OS === "android") {
+    return (
+      <MaterialListRow
+        className="bg-grouped-card"
+        title={props.title}
+        subtitle={props.subtitle}
+        leading={
+          <SymbolView
+            name="arrow.triangle.branch"
+            size={24}
+            tintColorClassName="accent-icon-muted"
+          />
+        }
+        trailing={
+          <SymbolView name="chevron.right" size={16} tintColorClassName="accent-icon-muted" />
+        }
+        onPress={props.onPress}
+      />
+    );
+  }
+  return (
+    <Pressable
+      accessibilityLabel={`${props.title}, ${props.subtitle}`}
+      accessibilityRole="button"
+      className={cn(
+        "min-h-14 flex-row items-center gap-3 bg-grouped-card px-4 py-3 active:bg-subtle",
+        !props.isLast && "border-b border-border-subtle",
+      )}
+      onPress={props.onPress}
+    >
+      <SymbolView
+        name="arrow.triangle.branch"
+        size={17}
+        tintColorClassName="accent-icon-muted"
+        type="monochrome"
+      />
+      <View className="min-w-0 flex-1 gap-0.5">
+        <Text className="text-base font-t3-medium text-foreground" numberOfLines={1}>
+          {props.title}
+        </Text>
+        <Text className="text-xs text-foreground-muted" numberOfLines={1}>
+          {props.subtitle}
+        </Text>
+      </View>
+      <SymbolView
+        name="chevron.right"
+        size={13}
+        tintColorClassName="accent-icon-muted"
+        type="monochrome"
+        weight="semibold"
+      />
+    </Pressable>
+  );
+}
+
+/**
+ * The repositories of a multi-repo workspace, each with the base its copy in a new worktree
+ * starts from. Carries the start-from-origin switch when the folder has no branch picker of its
+ * own to hold it.
+ */
+export function NewTaskRepositoriesPickerRouteScreen() {
+  const flow = useNewTaskFlow();
+  const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
+  return (
+    <View className="flex-1 bg-sheet" collapsable={false}>
+      <NativeStackScreenOptions
+        options={{
+          headerShown: Platform.OS !== "android",
+          title: "Repositories",
+        }}
+      />
+      {Platform.OS === "android" ? (
+        <AndroidScreenHeader
+          title="Repositories"
+          hideBottomBorder
+          onBack={() => navigation.goBack()}
+        />
+      ) : null}
+      <MaterialScreenContent>
+        <ScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          contentContainerStyle={{
+            paddingBottom: Math.max(insets.bottom, 16) + 16,
+            paddingHorizontal: 16,
+            paddingTop: 16,
+          }}
+          showsVerticalScrollIndicator={false}
+        >
+          {flow.folderHasBranch ? null : (
+            <View
+              className={cn(
+                "mb-3 overflow-hidden",
+                Platform.OS === "android" ? "rounded-[28px]" : "rounded-2xl",
+              )}
+            >
+              <ToggleRow
+                onValueChange={flow.setStartFromOrigin}
+                title="Start from origin"
+                value={flow.startFromOrigin}
+              />
+            </View>
+          )}
+          <PickerSurface>
+            {flow.baseRefRepositories.map((repository, index) => {
+              const pick =
+                flow.repositoryBaseRefs.find(
+                  (candidate) => candidate.relativePath === repository.relativePath,
+                )?.baseRef ?? null;
+              return (
+                <NavigationRow
+                  key={repository.relativePath}
+                  isLast={index === flow.baseRefRepositories.length - 1}
+                  onPress={() =>
+                    navigation.dispatch(
+                      StackActions.push("NewTaskRepositoryBranch", {
+                        relativePath: repository.relativePath,
+                      }),
+                    )
+                  }
+                  subtitle={
+                    pick === null
+                      ? "Default branch"
+                      : flow.startFromOrigin && !pick.startsWith("origin/")
+                        ? `origin/${pick}`
+                        : pick
+                  }
+                  title={repository.name}
+                />
+              );
+            })}
+          </PickerSurface>
+          <Text className="px-4 pt-2 text-xs text-foreground-muted">
+            Each repository gets its own copy in the new worktree, starting from its default branch
+            unless you pick another.
+          </Text>
+        </ScrollView>
+      </MaterialScreenContent>
+    </View>
+  );
+}
+
+type NewTaskRepositoryBranchPickerRouteScreenProps = StaticScreenProps<{
+  readonly relativePath: string;
+}>;
+
+/** The base one repository of a multi-repo workspace starts from in a new worktree. */
+export function NewTaskRepositoryBranchPickerRouteScreen(
+  props: NewTaskRepositoryBranchPickerRouteScreenProps,
+) {
+  const flow = useNewTaskFlow();
+  const navigation = useNavigation();
+  const { relativePath } = props.route.params;
+  const repository =
+    flow.baseRefRepositories.find((candidate) => candidate.relativePath === relativePath) ?? null;
+  const pick =
+    flow.repositoryBaseRefs.find((candidate) => candidate.relativePath === relativePath)?.baseRef ??
+    null;
+  const [query, setQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(query, 150);
+  const branches = usePaginatedBranches({
+    environmentId: flow.selectedProject?.environmentId ?? null,
+    cwd: repository?.path ?? null,
+    query: debouncedQuery,
+  });
+  const { branchNames, defaultName } = useMemo(
+    () => repositoryBaseRefChoices(branches.refs),
+    [branches.refs],
+  );
+  const visibleBranches = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return branches.refs.filter(
+      (branch) => branchNames.includes(branch.name) && branch.name.toLowerCase().includes(needle),
+    );
+  }, [branchNames, branches.refs, query]);
+  const { setRepositoryBaseRef } = flow;
+  const choose = useCallback(
+    (baseRef: string | null) => {
+      void Haptics.selectionAsync();
+      setRepositoryBaseRef(relativePath, baseRef);
+      navigation.goBack();
+    },
+    [navigation, relativePath, setRepositoryBaseRef],
+  );
+
+  return (
+    <BranchPickerScreen
+      title={repository?.name ?? "Base branch"}
+      project={flow.selectedProject}
+      branches={visibleBranches}
+      selectedBranchName={pick}
+      query={query}
+      onQueryChange={setQuery}
+      loading={
+        query.trim() !== debouncedQuery.trim() || (branches.isPending && branches.data === null)
+      }
+      error={repository ? branches.error : "This repository is no longer in the workspace."}
+      refreshing={branches.isFetchingNextPage}
+      hasMore={branches.data?.nextCursor != null}
+      onRefresh={branches.refresh}
+      onLoadMore={branches.loadNext}
+      onSelect={(branch) => choose(branch.name)}
+      defaultChoice={{
+        title: defaultName ? `Default branch (${defaultName})` : "Default branch",
+        selected: pick === null,
+        onSelect: () => choose(null),
+      }}
+    />
+  );
+}
+
 /** The searchable branch screen shared by new threads and scheduled tasks. */
 export function BranchPickerScreen(props: {
   readonly title: string;
@@ -403,15 +622,23 @@ export function BranchPickerScreen(props: {
     readonly startFromOrigin: boolean;
     readonly onChangeStartFromOrigin: (value: boolean) => void;
   };
+  /** A row above the branches that clears the pick, for a base that may follow a default. */
+  readonly defaultChoice?: {
+    readonly title: string;
+    readonly selected: boolean;
+    readonly onSelect: () => void;
+  };
 }) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const usesNativeMailSearchToolbar = useNativeMailSearchToolbar();
-  const selectedBranchName =
-    props.selectedBranchName ??
-    props.branches.find((branch) => branch.current)?.name ??
-    props.branches.find((branch) => branch.isDefault)?.name ??
-    null;
+  // With a default choice, no pick means the default row, not the checkout.
+  const selectedBranchName = props.defaultChoice
+    ? props.selectedBranchName
+    : (props.selectedBranchName ??
+      props.branches.find((branch) => branch.current)?.name ??
+      props.branches.find((branch) => branch.isDefault)?.name ??
+      null);
   const branchListContentStyle = useMemo(
     () => ({
       paddingBottom: usesNativeMailSearchToolbar
@@ -446,20 +673,42 @@ export function BranchPickerScreen(props: {
     ],
   );
 
-  const branchListHeader = props.worktree ? (
-    <View
-      className={cn(
-        "mb-3 overflow-hidden",
-        Platform.OS === "android" ? "rounded-[28px]" : "rounded-2xl",
-      )}
-    >
-      <ToggleRow
-        onValueChange={props.worktree.onChangeStartFromOrigin}
-        title="Start from origin"
-        value={props.worktree.startFromOrigin}
-      />
-    </View>
-  ) : null;
+  const branchListHeader =
+    props.worktree || props.defaultChoice ? (
+      <>
+        {props.worktree ? (
+          <View
+            className={cn(
+              "mb-3 overflow-hidden",
+              Platform.OS === "android" ? "rounded-[28px]" : "rounded-2xl",
+            )}
+          >
+            <ToggleRow
+              onValueChange={props.worktree.onChangeStartFromOrigin}
+              title="Start from origin"
+              value={props.worktree.startFromOrigin}
+            />
+          </View>
+        ) : null}
+        {props.defaultChoice ? (
+          <View
+            className={cn(
+              "mb-3 overflow-hidden",
+              Platform.OS === "android" ? "rounded-[28px]" : "rounded-2xl",
+            )}
+          >
+            <SelectionRow
+              icon="arrow.triangle.branch"
+              disabled={props.selectionDisabled ?? false}
+              isLast
+              onPress={props.defaultChoice.onSelect}
+              selected={props.defaultChoice.selected}
+              title={props.defaultChoice.title}
+            />
+          </View>
+        ) : null}
+      </>
+    ) : null;
 
   const branchContent =
     props.branches.length === 0 ? (
