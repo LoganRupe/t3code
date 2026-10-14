@@ -82,7 +82,7 @@ export class WorkspaceWorktrees extends Context.Service<
   }
 >()("t3/git/WorkspaceWorktrees") {}
 
-export const make = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;

@@ -2888,7 +2888,10 @@ const layerWsRpc = (
         [WS_METHODS.vcsListRefs]: (input) => gitWorkflow.listRefs(input),
         [WS_METHODS.vcsListRepositories]: (input) =>
           Effect.all(
-            [workspaceRepositories.describe(input.cwd), workspaceRepositories.workspaceFile(input.cwd)],
+            [
+              workspaceRepositories.describe(input.cwd),
+              workspaceRepositories.workspaceFile(input.cwd),
+            ],
             { concurrency: "unbounded" },
           ).pipe(
             Effect.map(([layout, workspaceFile]) => ({

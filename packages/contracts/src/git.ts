@@ -191,7 +191,7 @@ export function isOutsideWorkspaceRepository(repository: Pick<VcsRepository, "re
 }
 
 /** Absolute paths of the repositories outside the workspace folder, for agents' directory grants. */
-export function outsideWorkspaceRepositoryPaths(
+function outsideWorkspaceRepositoryPaths(
   repositories: ReadonlyArray<Pick<VcsRepository, "relativePath" | "path">> | undefined,
 ): ReadonlyArray<string> {
   return (repositories ?? [])
