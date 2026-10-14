@@ -1084,7 +1084,10 @@ export default function FilePreviewPanel({
   // The surface is keyed by the path the store knows, not the root-relative one.
   const notifyPendingChange = useCallback(
     (path: string, pending: boolean) =>
-      onPendingChange(rootTarget !== null && requestedPath !== null ? requestedPath : path, pending),
+      onPendingChange(
+        rootTarget !== null && requestedPath !== null ? requestedPath : path,
+        pending,
+      ),
     [onPendingChange, requestedPath, rootTarget],
   );
   // A draft's composer target is its draft id; a thread the server knows is a ref.

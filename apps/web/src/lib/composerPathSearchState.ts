@@ -26,7 +26,8 @@ export function useComposerPathSearch(
   const entries = useMemo(
     () =>
       state.entries.map((entry) => {
-        const located = roots === undefined || cwd === null ? null : fileRootFromTreePath(roots, entry.path);
+        const located =
+          roots === undefined || cwd === null ? null : fileRootFromTreePath(roots, entry.path);
         return {
           path: located === null ? entry.path : fileRootOpenPath(cwd ?? "", located),
           kind: entry.kind,

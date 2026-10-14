@@ -243,32 +243,41 @@ const projectRootsSearchAtom = Atom.family((serializedKey: string) => {
   const key = JSON.parse(serializedKey) as ProjectRootsSearchKey;
   return Atom.make((get) =>
     AsyncResult.all(key.roots.map((root) => get(rootSearchAtom(key, root)))).pipe(
-      AsyncResult.map((results): ProjectSearchEntriesResult => {
-        const entries: ProjectEntry[] = [];
-        const width = Math.max(...results.map((result) => result.entries.length), 0);
-        for (let index = 0; index < width && entries.length < key.input.limit; index++) {
-          results.forEach((result, rootIndex) => {
-            const entry = result.entries[index];
-            if (entry === undefined || entries.length >= key.input.limit) return;
-            entries.push({
-              ...entry,
-              path: fileRootTreePath(key.roots, {
-                root: key.roots[rootIndex]!,
-                relativePath: entry.path,
-              }),
-            });
-          });
-        }
-        return {
-          entries,
-          truncated:
-            results.some((result) => result.truncated) ||
-            results.reduce((total, result) => total + result.entries.length, 0) > entries.length,
-        };
-      }),
+      AsyncResult.map((results) => mergeRootSearchResults(key.roots, results, key.input.limit)),
     ),
   ).pipe(Atom.withLabel(`web:project-roots-search:${serializedKey}`));
 });
+
+/**
+ * Merges one search result per root into a single listing of tree paths. Results interleave
+ * round-robin, since ranks do not compare across indexes, and stop at `limit` so the payload
+ * stays the size of one search; anything left over marks the listing truncated.
+ */
+export function mergeRootSearchResults(
+  roots: ReadonlyArray<ProjectFileRoot>,
+  results: ReadonlyArray<ProjectSearchEntriesResult>,
+  limit: number,
+): ProjectSearchEntriesResult {
+  const entries: ProjectEntry[] = [];
+  const width = Math.max(...results.map((result) => result.entries.length), 0);
+  for (let index = 0; index < width && entries.length < limit; index++) {
+    results.forEach((result, rootIndex) => {
+      const entry = result.entries[index];
+      const root = roots[rootIndex];
+      if (entry === undefined || root === undefined || entries.length >= limit) return;
+      entries.push({
+        ...entry,
+        path: fileRootTreePath(roots, { root, relativePath: entry.path }),
+      });
+    });
+  }
+  return {
+    entries,
+    truncated:
+      results.some((result) => result.truncated) ||
+      results.reduce((total, result) => total + result.entries.length, 0) > entries.length,
+  };
+}
 
 export function areProjectPathSearchTargetsEqual(
   left: ProjectPathSearchTarget,
@@ -368,7 +377,10 @@ export function useProjectPathSearch(
 
 /** The serialized key of a search over several roots, or null for a single-root search. */
 function projectRootsSearchKey(
-  searchTarget: { readonly environmentId: EnvironmentId; readonly input: ProjectSearchEntriesInput } | null,
+  searchTarget: {
+    readonly environmentId: EnvironmentId;
+    readonly input: ProjectSearchEntriesInput;
+  } | null,
   roots: ReadonlyArray<ProjectFileRoot> | null,
 ): string | null {
   if (searchTarget === null || roots === null) return null;

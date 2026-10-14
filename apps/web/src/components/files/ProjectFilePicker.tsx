@@ -1,8 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import {
-  fileRootFromTreePath,
-  fileRootOpenPath,
-} from "@t3tools/client-runtime/project-file-roots";
+import { fileRootFromTreePath, fileRootOpenPath } from "@t3tools/client-runtime/project-file-roots";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { useActiveProjectTarget, type ActiveProjectTarget } from "~/hooks/useActiveProjectTarget";

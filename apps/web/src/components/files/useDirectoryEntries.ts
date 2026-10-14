@@ -15,7 +15,10 @@ import { projectEnvironment } from "~/state/projects";
  * The rows a tree path groups when it is above every root: the next segment of each root label
  * below it. Same-named roots carry parent segments (`team-a/docs`), so `team-a` is such a row.
  */
-function groupedRootEntries(roots: ReadonlyArray<ProjectFileRoot>, treePath: string): ProjectEntry[] {
+function groupedRootEntries(
+  roots: ReadonlyArray<ProjectFileRoot>,
+  treePath: string,
+): ProjectEntry[] {
   const prefix = treePath === "" ? "" : `${treePath}/`;
   const entries = new Map<string, ProjectEntry>();
   for (const root of roots) {

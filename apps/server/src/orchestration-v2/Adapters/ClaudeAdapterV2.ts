@@ -1062,8 +1062,7 @@ export function makeClaudeQueryOptions(input: {
           harness: "Claude Code",
           repositories: input.repositories,
           folders: input.folders,
-        }) +
-        (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
+        }) + (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
     },
     ...(Object.keys(extraArgs).length === 0 ? {} : { extraArgs }),
   };

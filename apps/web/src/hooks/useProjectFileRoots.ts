@@ -1,8 +1,5 @@
 import type { EnvironmentId, WorkspaceFolder } from "@t3tools/contracts";
-import {
-  projectFileRoots,
-  type ProjectFileRoot,
-} from "@t3tools/client-runtime/project-file-roots";
+import { projectFileRoots, type ProjectFileRoot } from "@t3tools/client-runtime/project-file-roots";
 import { useMemo } from "react";
 
 import { useEnvironmentQuery } from "../state/query";
