@@ -34,6 +34,7 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
+import { writeIsolatedRunWorkspaceFile } from "./isolatedRunWorkspaceFile.ts";
 
 export interface CreateWorkspaceWorktreeInput {
   readonly workspaceRoot: string;
@@ -277,6 +278,27 @@ export const make = Effect.gen(function* () {
           input,
         );
       }
+      // Editors open the run the way they open the project. Losing that is not worth failing.
+      const projectWorkspaceFile = yield* workspaceRepositories.workspaceFile(input.workspaceRoot);
+      if (projectWorkspaceFile !== null) {
+        yield* writeIsolatedRunWorkspaceFile({
+          projectWorkspaceFile,
+          container,
+          repositories: input.repositories.map((repository) => ({
+            source: repository.path,
+            worktree: join(container, placement(repository)),
+          })),
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.catch((cause) =>
+            Effect.logWarning("Could not write an isolated run's workspace file", {
+              container,
+              cause,
+            }),
+          ),
+        );
+      }
       return { path: container, branch };
     },
   );
@@ -391,6 +413,9 @@ export const make = Effect.gen(function* () {
       if (!(yield* exists(input.path))) {
         yield* fileSystem
           .remove(WorkspaceRepositories.isolatedRunLayoutPath(input.path), { force: true })
+          .pipe(Effect.ignore);
+        yield* fileSystem
+          .remove(WorkspaceRepositories.isolatedRunWorkspaceFilePath(input.path), { force: true })
           .pipe(Effect.ignore);
       }
     },

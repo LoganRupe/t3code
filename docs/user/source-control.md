@@ -142,7 +142,9 @@ T3 Code treats every folder directly inside it that is a Git repository as part 
 the folder contains one VS Code `.code-workspace` file, the repositories it lists count instead,
 named the way the file names them. The file can list the folder itself (`.`) and repositories
 elsewhere on disk (`../api`). When adding a project you can pick the `.code-workspace` file
-instead of its folder.
+instead of its folder, or run `t3 app path/to/team.code-workspace`. **Open** in the thread panel
+opens the file itself in VS Code and its forks (Cursor, VSCodium, Antigravity and others), so the
+editor shows the same folders as the project, including from a thread in its own worktree.
 
 Each repository gets its own Git actions in the thread panel, and turn diffs and rewinds cover all
 of them. In the diff panel, **Uncommitted** and **Changes** show one repository at a time; pick it

@@ -212,6 +212,48 @@ for (const platform of ["darwin", "linux"] as const) {
   );
 }
 
+it.effect.skipIf(windowsHost)(
+  "opens a workspace file only in editors that open workspace files",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+      for (const command of ["code", "zed"]) {
+        yield* fileSystem.writeFileString(path.join(binDir, command), "#!/bin/sh\n");
+        yield* fileSystem.chmod(path.join(binDir, command), 0o755);
+      }
+
+      const spawned: ChildProcess.StandardCommand[] = [];
+      yield* Effect.gen(function* () {
+        const launcher = yield* ExternalLauncher.ExternalLauncher;
+        for (const editor of ["vscode", "zed"] as const) {
+          yield* launcher.launchEditor({
+            editor,
+            cwd: "/workspace",
+            workspaceFile: "/workspace/team.code-workspace",
+          });
+        }
+      }).pipe(
+        Effect.provide(
+          layerTest({
+            platform: "linux",
+            env: { PATH: binDir },
+            onSpawn: (command) => spawned.push(command),
+          }),
+        ),
+      );
+
+      assert.deepEqual(
+        spawned.map((command) => ({ command: command.command, args: command.args })),
+        [
+          { command: "code", args: ["/workspace/team.code-workspace"] },
+          { command: "zed", args: ["/workspace"] },
+        ],
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("launches Cursor in classic IDE mode through the Windows command shim", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;

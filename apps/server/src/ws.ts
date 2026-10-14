@@ -2883,9 +2883,15 @@ const layerWsRpc = (
             .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.vcsListRefs]: (input) => gitWorkflow.listRefs(input),
         [WS_METHODS.vcsListRepositories]: (input) =>
-          workspaceRepositories
-            .list(input.cwd)
-            .pipe(Effect.map((repositories) => ({ repositories }))),
+          Effect.all(
+            [workspaceRepositories.list(input.cwd), workspaceRepositories.workspaceFile(input.cwd)],
+            { concurrency: "unbounded" },
+          ).pipe(
+            Effect.map(([repositories, workspaceFile]) => ({
+              repositories,
+              ...(workspaceFile === null ? {} : { workspaceFile }),
+            })),
+          ),
         [WS_METHODS.vcsCreateWorktree]: (input) =>
           gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.vcsRemoveWorktree]: (input) =>

@@ -66,6 +66,7 @@ const makeCaptureStore = Effect.fn("test.makeCaptureStore")(function* (
       list: () => Effect.succeed([]),
       describe: () => Effect.succeed({ repositories: [], listedFolders: null }),
       readIsolatedRun: () => Effect.succeed(null),
+      workspaceFile: () => Effect.succeed(null),
     }),
   );
 });

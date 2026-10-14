@@ -62,6 +62,14 @@ export function isolatedRunLayoutPath(container: string): string {
   return `${container}.t3-isolated-run.json`;
 }
 
+/**
+ * The workspace file written for an isolated run of a project that has one. Like the layout
+ * file it sits beside the container, so it never dirties a root repository's worktree.
+ */
+export function isolatedRunWorkspaceFilePath(container: string): string {
+  return `${container}${CODE_WORKSPACE_EXTENSION}`;
+}
+
 export interface WorkspaceLayout {
   readonly repositories: ReadonlyArray<VcsRepository>;
   /** Paths, relative to the workspace, of every folder the workspace file names. */
@@ -79,6 +87,11 @@ export class WorkspaceRepositories extends Context.Service<
     readonly describe: (cwd: string) => Effect.Effect<WorkspaceLayout>;
     /** The layout of an isolated run's container, or null when `cwd` is not one. */
     readonly readIsolatedRun: (cwd: string) => Effect.Effect<IsolatedRunLayout | null>;
+    /**
+     * The `.code-workspace` file an editor should open for `cwd`, or null: the one written for
+     * an isolated run, or the folder's single workspace file, the one `describe` reads.
+     */
+    readonly workspaceFile: (cwd: string) => Effect.Effect<string | null>;
   }
 >()("t3/workspace/WorkspaceRepositories") {}
 
@@ -192,6 +205,21 @@ export const make = Effect.gen(function* () {
     );
   });
 
+  const workspaceFileNames = (cwd: string) =>
+    fileSystem.readDirectory(cwd).pipe(
+      Effect.map((names) => names.filter((name) => name.endsWith(CODE_WORKSPACE_EXTENSION))),
+      Effect.orElseSucceed((): ReadonlyArray<string> => []),
+    );
+
+  const workspaceFile = Effect.fn("WorkspaceRepositories.workspaceFile")(function* (cwd: string) {
+    if ((yield* readIsolatedRun(cwd)) !== null) {
+      const generated = isolatedRunWorkspaceFilePath(cwd);
+      return (yield* exists(generated)) ? generated : null;
+    }
+    const names = yield* workspaceFileNames(cwd);
+    return names.length === 1 ? path.join(cwd, names[0]!) : null;
+  });
+
   const describe = Effect.fn("WorkspaceRepositories.describe")(function* (cwd: string) {
     const isolatedRun = yield* readIsolatedRun(cwd);
     if (isolatedRun !== null) {
@@ -224,7 +252,7 @@ export const make = Effect.gen(function* () {
 
   const list = (cwd: string) => describe(cwd).pipe(Effect.map((layout) => layout.repositories));
 
-  return WorkspaceRepositories.of({ list, describe, readIsolatedRun });
+  return WorkspaceRepositories.of({ list, describe, readIsolatedRun, workspaceFile });
 });
 
 export const layer = Layer.effect(WorkspaceRepositories, make);
