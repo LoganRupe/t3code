@@ -40,9 +40,10 @@ import { useEnvironmentQuery } from "../../../state/query";
 import { useThreadSelection } from "../../../state/use-thread-selection";
 import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
-import { useSelectedThreadWorktree } from "../../../state/use-selected-thread-worktree";
+import { useSelectedThreadGitRepository } from "../../../state/use-selected-thread-git-repository";
 import { vcsEnvironment } from "../../../state/vcs";
 import { resolveGitOverviewReviewNavigationAction } from "./git-overview-navigation";
+import { GitRepositoryPicker } from "./GitRepositoryPicker";
 import { MetaCard, SheetListRow, menuItemIconName, statusSummary } from "./gitSheetComponents";
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
@@ -77,7 +78,14 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   const environmentId = EnvironmentId.make(props.route.params.environmentId);
   const threadId = ThreadId.make(props.route.params.threadId);
   const { selectedThread, selectedEnvironmentRuntime } = useThreadSelection();
-  const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
+  const {
+    repositories,
+    repository,
+    selectRepository,
+    gitCwd: selectedThreadCwd,
+    isThreadRepository,
+    worktreePath: selectedThreadWorktreePath,
+  } = useSelectedThreadGitRepository();
   const supportsLinkedPrSnapshots =
     selectedEnvironmentRuntime?.serverConfig?.environment.capabilities.threadPullRequests === true;
   const linkedPrChains = useMemo(
@@ -103,7 +111,12 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
       : null,
   );
 
-  const currentBranchLabel = gitStatus.data?.refName ?? selectedThread?.branch ?? "Detached HEAD";
+  const branchLabel =
+    gitStatus.data?.refName ??
+    (isThreadRepository ? selectedThread?.branch : null) ??
+    "Detached HEAD";
+  const currentBranchLabel =
+    repositories.length > 1 && repository ? `${repository.name} · ${branchLabel}` : branchLabel;
   const currentStatusSummary = statusSummary(gitStatus.data);
   const currentWorktreePath = selectedThreadWorktreePath;
   const gitOperationLabel = gitState.gitOperationLabel;
@@ -285,6 +298,16 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         ) : undefined
       }
     >
+      {repositories.length > 1 ? (
+        <GitRepositoryPicker
+          environmentId={environmentId}
+          repositories={repositories}
+          selectedRelativePath={repository?.relativePath ?? null}
+          disabled={busy}
+          onSelect={selectRepository}
+        />
+      ) : null}
+
       <View
         className={`overflow-hidden bg-card android:rounded-[20px] ios:border ios:border-border ${
           isInspector ? "ios:rounded-2xl ios:px-3 ios:py-1" : "ios:rounded-[22px] ios:px-4 ios:py-1"

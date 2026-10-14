@@ -46,6 +46,13 @@ vi.mock("./use-selected-thread-worktree", () => ({
     selectedThreadWorktreePath: null,
   }),
 }));
+vi.mock("./workspace-repositories", () => ({
+  useWorkspaceRepositories: () => ({ repositories: [] }),
+}));
+vi.mock("../features/review/reviewState", () => ({
+  useReviewSelectedRepository: () => null,
+  setReviewSelectedRepository: () => {},
+}));
 vi.mock("./queries", () => ({
   useBranches: () => ({ data: { refs: [] }, refresh: () => {} }),
 }));
