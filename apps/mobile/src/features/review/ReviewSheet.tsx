@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId, VcsRepository } from "@t3tools/contracts";
 import { formatDiffCount } from "@t3tools/client-runtime/diff-count";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { AppActivityIndicator } from "../../components/AppActivityIndicator";
@@ -76,6 +76,9 @@ function ReviewHeader(
     readonly sectionMenu: ReturnType<typeof buildReviewSectionMenu>;
     readonly showSectionToolbar: boolean;
     readonly showChangedFilesToggle: boolean;
+    readonly repositories: ReadonlyArray<VcsRepository>;
+    readonly repository: VcsRepository | null;
+    readonly onSelectRepository: (relativePath: string) => void;
     readonly onSelectSection: (sectionId: string) => void;
     readonly onReturnToThread: () => void;
   },
@@ -144,6 +147,21 @@ function ReviewHeader(
                             subtitle: section.subtitle ?? undefined,
                             selected: section.id === props.selectedSection?.id,
                             onPress: () => props.onSelectSection(section.id),
+                          })),
+                        },
+                      ]
+                    : []),
+                  // A multi-repo workspace picks the repository Changes and Uncommitted compare.
+                  ...(props.repository
+                    ? [
+                        {
+                          id: "repositories",
+                          title: `Repository: ${props.repository.name}`,
+                          items: props.repositories.map((repository) => ({
+                            id: `repository:${repository.relativePath}`,
+                            title: repository.name,
+                            selected: repository.relativePath === props.repository?.relativePath,
+                            onPress: () => props.onSelectRepository(repository.relativePath),
                           })),
                         },
                       ]
@@ -481,6 +499,10 @@ export function ReviewSheet(props: ReviewSheetProps) {
     selectSection,
     isSelectedSectionPending,
     diffPreviewRevision,
+    gitDiffCwd,
+    repositories,
+    repository,
+    selectRepository,
   } = useReviewSections({
     enabled: isEnvironmentReady,
     environmentId,
@@ -502,7 +524,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
   } = useReviewDiffData({
     threadKey: reviewCache.threadKey,
     environmentId,
-    cwd: selectedThreadCwd,
+    cwd: gitDiffCwd,
     selectedSection,
     revision: diffPreviewRevision,
     draftMessage,
@@ -733,6 +755,9 @@ export function ReviewSheet(props: ReviewSheetProps) {
         selectedSection={selectedSection}
         showSectionToolbar={showSectionToolbar}
         showChangedFilesToggle={showChangedFilesToggle}
+        repositories={repositories}
+        repository={repository}
+        onSelectRepository={selectRepository}
         onRefresh={handlePullToRefresh}
         onSelectSection={selectSection}
         onReturnToThread={handleReturnToThread}

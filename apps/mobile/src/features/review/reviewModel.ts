@@ -1,15 +1,17 @@
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import type { ChangeTypes, FileDiffMetadata } from "@pierre/diffs/types";
 import type { ThreadCheckpointSummary } from "@t3tools/client-runtime/state/thread-checkpoints";
-import type { ReviewDiffPreviewSource } from "@t3tools/contracts";
+import type { ReviewDiffPreviewSource, VcsRepository } from "@t3tools/contracts";
 import * as Arr from "effect/Array";
 import { pipe } from "effect/Function";
 import * as Order from "effect/Order";
 
 export type ReviewSectionKind = "turn" | "working-tree" | "branch-range";
+/** The repository a multi-repo workspace's Uncommitted and Changes sections compare. */
+export type ReviewRepository = Pick<VcsRepository, "relativePath" | "name">;
 
-const CHANGES_SECTION_ID = "git:branch-range";
 const CHANGES_TITLE = "Changes";
+const UNCOMMITTED_TITLE = "Uncommitted";
 const UNCOMMITTED_SUBTITLE = "Staged, unstaged, and untracked files";
 
 export interface ReviewSectionItem {
@@ -410,13 +412,28 @@ export function getReadyReviewCheckpoints(
   );
 }
 
+/**
+ * Git sections of a non-root repository get their own ids, so review comments and viewed files
+ * stay with the repository they were made in. Ordinary checkouts keep `git:<kind>`.
+ */
+export function getReviewGitSectionId(
+  kind: Exclude<ReviewSectionKind, "turn">,
+  repository: ReviewRepository | null,
+): string {
+  return repository && repository.relativePath !== "."
+    ? `git:${kind}:${repository.relativePath}`
+    : `git:${kind}`;
+}
+
 export function buildReviewSectionItems(input: {
   readonly checkpoints: ReadonlyArray<ThreadCheckpointSummary>;
   readonly gitSections: ReadonlyArray<ReviewDiffPreviewSource>;
   readonly turnDiffById: Readonly<Record<string, string | undefined>>;
   readonly loadingTurnIds: Readonly<Record<string, boolean | undefined>>;
   readonly loadingGitSections: boolean;
+  readonly repository?: ReviewRepository | null;
 }): ReadonlyArray<ReviewSectionItem> {
+  const repository = input.repository ?? null;
   const turnItems = getReadyReviewCheckpoints(input.checkpoints).map<ReviewSectionItem>(
     (checkpoint) => {
       const id = getReviewSectionIdForCheckpoint(checkpoint);
@@ -432,9 +449,9 @@ export function buildReviewSectionItems(input: {
   );
 
   const gitItems = input.gitSections.map<ReviewSectionItem>((section) => ({
-    id: `git:${section.kind}`,
+    id: getReviewGitSectionId(section.kind, repository),
     kind: section.kind,
-    title: section.title,
+    title: repository ? `${section.title} · ${repository.name}` : section.title,
     subtitle: gitSubtitle(section),
     diff: section.diff,
     source: section,
@@ -442,22 +459,24 @@ export function buildReviewSectionItems(input: {
     truncated: section.truncated,
     isLoading: false,
   }));
-  // Changes is the default section, so it holds the place while git sources load.
-  const hasChangesItem = gitItems.some((item) => item.id === CHANGES_SECTION_ID);
-  const visibleGitItems =
-    input.loadingGitSections && !hasChangesItem
-      ? [
-          {
-            id: CHANGES_SECTION_ID,
-            kind: "branch-range",
-            title: CHANGES_TITLE,
-            subtitle: null,
-            diff: null,
-            isLoading: true,
-          } satisfies ReviewSectionItem,
-          ...gitItems,
-        ]
-      : gitItems;
+  // Changes is the default section, so it holds the place while git sources load. Switching
+  // repositories also holds Uncommitted, so the picked section survives the reload.
+  const placeholders = (
+    repository ? (["branch-range", "working-tree"] as const) : (["branch-range"] as const)
+  )
+    .filter((kind) => !gitItems.some((item) => item.kind === kind))
+    .map((kind): ReviewSectionItem => {
+      const title = kind === "branch-range" ? CHANGES_TITLE : UNCOMMITTED_TITLE;
+      return {
+        id: getReviewGitSectionId(kind, repository),
+        kind,
+        title: repository ? `${title} · ${repository.name}` : title,
+        subtitle: null,
+        diff: null,
+        isLoading: true,
+      };
+    });
+  const visibleGitItems = input.loadingGitSections ? [...placeholders, ...gitItems] : gitItems;
 
   return [...turnItems, ...visibleGitItems];
 }
@@ -466,7 +485,7 @@ export function buildReviewSectionItems(input: {
 export function getDefaultReviewSectionId(
   sections: ReadonlyArray<ReviewSectionItem>,
 ): string | null {
-  return (sections.find((section) => section.id === CHANGES_SECTION_ID) ?? sections[0])?.id ?? null;
+  return (sections.find((section) => section.kind === "branch-range") ?? sections[0])?.id ?? null;
 }
 
 export function buildReviewParsedDiff(

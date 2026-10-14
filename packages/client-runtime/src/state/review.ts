@@ -1,5 +1,6 @@
 import {
   type ReviewDiffPreviewInput,
+  type VcsRepository,
   VcsUnsupportedOperationError,
   WS_METHODS,
 } from "@t3tools/contracts";
@@ -15,6 +16,23 @@ import {
   createEnvironmentRpcQueryAtomFamily,
 } from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
+
+/**
+ * The repository Uncommitted and branch diffs compare in a multi-repo workspace: the one the
+ * user picked while it is still listed, else the workspace folder's own repository, else the
+ * first. Null when the thread's folder is an ordinary checkout (no repositories listed).
+ */
+export function resolveReviewRepository<Repository extends Pick<VcsRepository, "relativePath">>(
+  repositories: ReadonlyArray<Repository>,
+  selectedRelativePath: string | null | undefined,
+): Repository | null {
+  return (
+    repositories.find((repository) => repository.relativePath === selectedRelativePath) ??
+    repositories.find((repository) => repository.relativePath === ".") ??
+    repositories[0] ??
+    null
+  );
+}
 
 export function createReviewEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
