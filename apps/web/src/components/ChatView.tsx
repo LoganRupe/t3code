@@ -421,6 +421,7 @@ import { workspacePreparationRetryRunIds } from "@t3tools/client-runtime/state/t
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { useWorkspaceFile, useWorkspaceRepositories } from "../hooks/useWorkspaceRepositories";
+import { repositoryBaseRefsForSend } from "../repositoryBaseRefStore";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
 import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
@@ -9685,6 +9686,7 @@ export default function ChatView(props: ChatViewProps) {
                       baseBranch: activeThreadBranch!,
                       requireWorktree: true,
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                      ...repositoryBaseRefsForSend(activeThread, workspaceRepositories),
                     },
                     runSetupScript: true,
                   },
@@ -10028,6 +10030,7 @@ export default function ChatView(props: ChatViewProps) {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                      ...repositoryBaseRefsForSend(activeThread, workspaceRepositories),
                     },
                     runSetupScript: true,
                   }
@@ -11984,6 +11987,7 @@ export default function ChatView(props: ChatViewProps) {
                                 threadId={activeThread.id}
                                 showGitControls={hasGitSurfaces}
                                 showBranchSelector={isGitRepo}
+                                workspaceRepositories={workspaceRepositories}
                                 {...(routeKind === "draft" && draftId ? { draftId } : {})}
                                 onEnvModeChange={onEnvModeChange}
                                 startFromOrigin={startFromOrigin}

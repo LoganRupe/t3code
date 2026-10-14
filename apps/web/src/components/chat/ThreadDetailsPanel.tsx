@@ -80,6 +80,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
     showGitControls: props.isGitRepo,
     environmentId: props.environmentId,
     threadId: props.threadId,
+    workspaceRepositories: props.workspaceRepositories,
     ...(props.draftId ? { draftId: props.draftId } : {}),
     onEnvModeChange: props.onEnvModeChange,
     startFromOrigin: props.startFromOrigin,

@@ -405,3 +405,60 @@ it.effect("an isolated run of a project without a workspace file opens as its fo
     }).pipe(Effect.provide(layerTest(baseDir)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+it.effect(
+  "starts a repository from the base ref chosen for it, and refuses one that is missing",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-workspace-worktrees-",
+      });
+      yield* Effect.gen(function* () {
+        const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+        const workspaceRoot = path.join(baseDir, "project");
+        const api = path.join(workspaceRoot, "api");
+        const web = path.join(workspaceRoot, "web");
+        yield* initRepository(api);
+        yield* initRepository(web);
+        yield* git(web, ["switch", "-c", "release"]);
+        yield* git(web, ["commit", "--allow-empty", "-m", "release commit"]);
+        yield* git(web, ["switch", "main"]);
+        const repositories = [
+          { relativePath: "api", name: "api", path: api },
+          { relativePath: "web", name: "web", path: web },
+        ];
+
+        const created = yield* worktrees.create({
+          workspaceRoot,
+          repositories,
+          branch: "t3code/picked",
+          startFromOrigin: false,
+          baseRefs: [{ relativePath: "web", baseRef: "release" }],
+        });
+        assert.equal(
+          yield* git(path.join(created.path, "web"), ["rev-parse", "HEAD"]),
+          yield* git(web, ["rev-parse", "release"]),
+        );
+        // A repository without a pick keeps its default: here the only branch it has.
+        assert.equal(
+          yield* git(path.join(created.path, "api"), ["rev-parse", "HEAD"]),
+          yield* git(api, ["rev-parse", "main"]),
+        );
+
+        const missing = yield* worktrees
+          .create({
+            workspaceRoot,
+            repositories,
+            branch: "t3code/missing",
+            startFromOrigin: false,
+            baseRefs: [{ relativePath: "api", baseRef: "nope" }],
+          })
+          .pipe(Effect.flip);
+        assert.equal(missing._tag, "GitCommandError");
+        assert.include(missing.detail, '"nope"');
+        assert.include(missing.detail, "api");
+      }).pipe(Effect.provide(layerTest(baseDir)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

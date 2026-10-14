@@ -149,11 +149,20 @@ editor shows the same folders as the project, including from a thread in its own
 Each repository gets its own Git actions in the thread panel, and turn diffs and rewinds cover all
 of them. In the diff panel, **Uncommitted** and **Changes** show one repository at a time; pick it
 next to the scope. In the mobile app's review screen, pick it under **Repository** in the diff
-menu. **New worktree** gives the thread its own copy of every repository on one branch,
-each starting from that repository's default branch. The project's other top-level files and
+menu. **New worktree** gives the thread its own copy of every repository on one branch.
+Each copy starts from that repository's default branch unless you pick another one: the repositories
+menu beside the branch controls lists every repository with its own branch list, and **Default
+branch** puts a repository back. When the project folder is itself a repository, it starts from
+the branch the regular selector shows. The project's other top-level files and
 folders are linked into that copy rather than duplicated, so edits to them change the originals.
 With a `.code-workspace` file, only the folders it lists are linked, along with top-level files and
 dot-folders.
+
+The project's setup script runs once in each repository's copy, with `T3CODE_REPO_ROOT` set to the
+checkout the copy came from, so a script can copy files such as `.env` from the original. Each
+copy gets its own terminal. Lines on the setup card say which repository they came from, and the
+card names any repository whose run failed. A script that runs when the thread settles runs the
+same way.
 
 ## Create a pull request
 
