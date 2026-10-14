@@ -36,6 +36,19 @@ function dependencies(
 }
 
 describe("desktop app activation", () => {
+  it("adds the folder holding a .code-workspace file", async () => {
+    const findProject = vi.fn(() => null);
+    const deps = dependencies({ findProject });
+
+    await handleDesktopAppActivationRequest(
+      { ...request, workspaceRoot: "/workspace/project/team.code-workspace" },
+      deps,
+    );
+
+    expect(findProject).toHaveBeenCalledWith(environmentId, "/workspace/project");
+    expect(deps.createProject).toHaveBeenCalledWith(environmentId, "/workspace/project");
+  });
+
   it("waits for a created project before it opens the thread", async () => {
     const order: string[] = [];
     const deps = dependencies({

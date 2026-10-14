@@ -85,6 +85,7 @@ import {
   useAdaptiveWorkspacePaneRole,
   useRegisterWorkspaceInspector,
 } from "../layout/AdaptiveWorkspaceLayout";
+import { fileRoutePathSegments } from "../files/filePath";
 import { ThreadFileNavigatorPane } from "../files/thread-file-navigator-pane";
 import {
   ThreadInspectorContentStack,
@@ -515,7 +516,7 @@ function ThreadRouteContent(
     const params = {
       environmentId: String(selectedThread.environmentId),
       threadId: String(selectedThread.id),
-      path: path.split("/").filter((segment) => segment.length > 0),
+      path: fileRoutePathSegments(path),
     };
     if (fileInspector.supported) {
       navigation.navigate("ThreadFile", params);

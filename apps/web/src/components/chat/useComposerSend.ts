@@ -16,6 +16,7 @@ import {
   makeThreadErrorSetter,
 } from "../ChatView.logic";
 import { isUsageLimitsCommand } from "@t3tools/shared/usageLimits";
+import { repositoryBaseRefsForSend } from "../../repositoryBaseRefStore";
 import {
   AuthOrchestrationOperateScope,
   DEFAULT_MODEL,
@@ -23,6 +24,7 @@ import {
   type ModelSelection,
   type PreviewAnnotationPayload,
   type ThreadId,
+  type VcsRepository,
   ProviderInteractionMode,
   RuntimeMode,
 } from "@t3tools/contracts";
@@ -172,7 +174,7 @@ interface ComposerSendInput {
   readonly isServerThread: boolean;
   readonly isLocalDraftThread: boolean;
   readonly isGitRepo: boolean;
-  readonly hasWorkspaceRepositories: boolean;
+  readonly workspaceRepositories: ReadonlyArray<VcsRepository>;
   readonly phase: SessionPhase;
   readonly runtimeMode: RuntimeMode;
   readonly sendEnvMode: DraftThreadEnvMode;
@@ -263,7 +265,7 @@ export function useComposerSend(input: ComposerSendInput) {
     isServerThread,
     isLocalDraftThread,
     isGitRepo,
-    hasWorkspaceRepositories,
+    workspaceRepositories,
     phase,
     runtimeMode,
     sendEnvMode,
@@ -349,6 +351,7 @@ export function useComposerSend(input: ComposerSendInput) {
     promptRef,
     runtimeMode,
     startFromOrigin,
+    workspaceRepositories,
     resetLocalDispatch,
     setThreadError,
   });
@@ -785,7 +788,7 @@ export function useComposerSend(input: ComposerSendInput) {
       sendEnvMode,
       worktreePath: activeThread.worktreePath,
       activeThreadBranch,
-      hasWorkspaceRepositories,
+      hasWorkspaceRepositories: workspaceRepositories.length > 0,
       resumeCompactionTokens,
       keepFullHistory,
       phase,
@@ -1196,6 +1199,7 @@ export function useComposerSend(input: ComposerSendInput) {
                       projectCwd: activeProject.workspaceRoot,
                       baseBranch: baseBranchForWorktree,
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                      ...repositoryBaseRefsForSend(activeThread, workspaceRepositories),
                     },
                     runSetupScript: true,
                   }

@@ -1,6 +1,6 @@
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
-  outsideWorkspaceRepositoryPaths,
+  outsideWorkspacePaths,
   ProviderDriverKind,
   ProviderInstanceId,
   type OrchestrationV2ProviderCapabilities,
@@ -132,7 +132,7 @@ export function makeAntigravityAcpAdapterFlavor(
             clientFileSystem: true,
             additionalDirectories: [
               options.host.paths.attachmentsDir,
-              ...outsideWorkspaceRepositoryPaths(input.runtimePolicy.repositories),
+              ...outsideWorkspacePaths(input.runtimePolicy),
             ],
           }),
         )

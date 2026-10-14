@@ -103,15 +103,56 @@ it.layer(layerTest)("WorkspaceRepositories", (it) => {
           yield* repository(root, "services/billing", "billing"),
           yield* repository(root, "..api"),
         ]);
+        // Every listed folder that exists is a root for files, git or not; a missing one is nothing.
         const service = yield* WorkspaceRepositories.WorkspaceRepositories;
-        expect((yield* service.describe(root)).listedFolders).toEqual([
-          "app",
-          "server",
-          "shared",
-          "services/billing",
-          "..api",
-          "missing",
+        expect((yield* service.describe(root)).folders).toEqual([
+          yield* repository(root, "app", "App"),
+          yield* repository(root, "server"),
+          yield* repository(root, "shared"),
+          yield* repository(root, "services/billing", "billing"),
+          yield* repository(root, "..api"),
         ]);
+      }),
+    );
+
+    it.effect("describe has no folders without a workspace file", () =>
+      Effect.gen(function* () {
+        const root = yield* makeWorkspace({ web: "repo", shared: "dir" });
+        const service = yield* WorkspaceRepositories.WorkspaceRepositories;
+
+        expect(yield* service.describe(root)).toEqual({
+          repositories: [yield* repository(root, "web")],
+          folders: null,
+        });
+      }),
+    );
+
+    it.effect("an isolated run places its recorded folders in and beside the container", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const container = yield* makeWorkspace({ api: "worktree", shared: "dir" });
+        yield* fileSystem.writeFileString(
+          WorkspaceRepositories.isolatedRunLayoutPath(container),
+          JSON.stringify({
+            repositories: [{ relativePath: "api", name: "api", source: "/project/api" }],
+            folders: [
+              { relativePath: "api", name: "api" },
+              { relativePath: "shared", name: "shared" },
+              { relativePath: "/team/docs", name: "docs" },
+            ],
+          }),
+        );
+        const service = yield* WorkspaceRepositories.WorkspaceRepositories;
+
+        expect(yield* service.describe(container)).toEqual({
+          repositories: [yield* repository(container, "api")],
+          folders: [
+            yield* repository(container, "api"),
+            yield* repository(container, "shared"),
+            { relativePath: "/team/docs", name: "docs", path: path.resolve("/team/docs") },
+          ],
+        });
       }),
     );
 

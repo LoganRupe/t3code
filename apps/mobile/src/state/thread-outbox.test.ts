@@ -137,6 +137,22 @@ describe("thread outbox", () => {
       decodeQueuedThreadMessage(JSON.parse(JSON.stringify(encodeQueuedThreadMessage(message)))),
     ).toEqual(message);
   });
+  it("keeps a new task's per-repository base branches when it reloads from storage", () => {
+    const message: QueuedThreadMessage = {
+      ...queuedMessage({ messageId: "multi-repo-task", createdAt: "2026-10-14T09:00:00.000Z" }),
+      creation: {
+        projectId: ProjectId.make("project-1"),
+        workspaceMode: "worktree",
+        branch: null,
+        worktreePath: null,
+        repositoryBaseRefs: [{ relativePath: "../api", baseRef: "release" }],
+      },
+    };
+    expect(
+      decodeQueuedThreadMessage(JSON.parse(JSON.stringify(encodeQueuedThreadMessage(message)))),
+    ).toEqual(message);
+  });
+
   it.each(["read", "json", "schema"] as const)(
     "recovers usable messages without permitting cleanup after a record %s failure",
     async (failure) => {

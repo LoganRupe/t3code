@@ -145,6 +145,18 @@ describe("resolveRemoteOpenState", () => {
 });
 
 describe("buildRemoteOpenUrl", () => {
+  it("links the workspace file for editors that open one", () => {
+    const input = {
+      host: "sol",
+      absolutePath: "/home/theo/team",
+      workspaceFile: "/home/theo/team/team.code-workspace",
+    };
+    expect(buildRemoteOpenUrl({ ...input, editor: "vscode" })).toBe(
+      "vscode://vscode-remote/ssh-remote+sol/home/theo/team/team.code-workspace",
+    );
+    expect(buildRemoteOpenUrl({ ...input, editor: "zed" })).toBe("zed://ssh/sol/home/theo/team");
+  });
+
   it("roots Windows paths", () => {
     expect(
       buildRemoteOpenUrl({ editor: "vscode", host: "sol", absolutePath: "C:\\Users\\theo" }),

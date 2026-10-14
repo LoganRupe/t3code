@@ -16,9 +16,11 @@ import {
 } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as KnownWorkspaces from "../workspace/KnownWorkspaces.ts";
+import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 
 export class ReviewService extends Context.Service<
   ReviewService,
@@ -40,6 +42,8 @@ export const make = Effect.gen(function* () {
   const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
   const git = yield* GitVcsDriver.GitVcsDriver;
   const knownWorkspaces = yield* KnownWorkspaces.KnownWorkspaces;
+  const projectStore = yield* ProjectStore.ProjectStoreV2;
+  const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
 
   const canonicalizePath = (value: string) => {
     const resolvedPath = path.resolve(value);
@@ -73,6 +77,26 @@ export const make = Effect.gen(function* () {
       (yield* knownWorkspaces.contains(candidate))
     ) {
       return;
+    }
+
+    // A multi-repo workspace file can list repositories and folders outside the project
+    // folder (`../api`); those are as much the project's as its own folder. Unreadable or
+    // unresolvable paths grant nothing.
+    const projects = yield* projectStore.listShells().pipe(Effect.orElseSucceed(() => []));
+    for (const project of projects) {
+      const layout = yield* workspaceRepositories.describe(project.workspaceRoot);
+      const listedPaths = [
+        ...layout.repositories.map((repository) => repository.path),
+        ...(layout.folders ?? []).map((folder) => folder.path),
+      ];
+      for (const listedPath of listedPaths) {
+        const listedRoot = yield* canonicalizePath(listedPath).pipe(
+          Effect.orElseSucceed(() => null),
+        );
+        if (listedRoot !== null && KnownWorkspaces.isWithinRoot(path, candidate, listedRoot)) {
+          return;
+        }
+      }
     }
 
     return yield* new VcsRepositoryDetectionError({
@@ -137,4 +161,6 @@ export const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(ReviewService, make);
+export const layer = Layer.effect(ReviewService, make).pipe(
+  Layer.provide(WorkspaceRepositories.layer),
+);

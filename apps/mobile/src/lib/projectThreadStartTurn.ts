@@ -13,6 +13,7 @@ import {
   deriveThreadTitleSeed,
   threadTitleTextFromPrompt,
 } from "@t3tools/client-runtime/operations";
+import type { RepositoryBaseRef } from "@t3tools/client-runtime/repository-base-refs";
 
 import type { UploadedMobileAttachment } from "./attachmentUpload";
 
@@ -34,6 +35,8 @@ export interface ProjectThreadStartTurnSpec {
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly startFromOrigin: boolean;
+  /** Base branches picked per repository of a multi-repo workspace; worktree mode only. */
+  readonly repositoryBaseRefs?: ReadonlyArray<RepositoryBaseRef> | undefined;
   readonly worktreeBranchName: string;
 }
 
@@ -76,6 +79,9 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
               baseBranch: spec.branch!,
               branch: spec.worktreeBranchName,
               ...(spec.startFromOrigin ? { startFromOrigin: true } : {}),
+              ...(spec.repositoryBaseRefs && spec.repositoryBaseRefs.length > 0
+                ? { repositoryBaseRefs: spec.repositoryBaseRefs }
+                : {}),
             },
             runSetupScript: true,
           }

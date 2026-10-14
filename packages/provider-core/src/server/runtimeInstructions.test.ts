@@ -33,6 +33,44 @@ describe("buildRuntimeInstructions", () => {
     expect(instructions).not.toContain("- . (");
   });
 
+  it("asks a multi-repo session for paths the file panel can open", () => {
+    const instructions = buildRuntimeInstructions({
+      harness: "Codex",
+      repositories: [{ relativePath: "api", name: "api", path: "/work/api" }],
+    });
+    expect(instructions).toContain(
+      "give its path from your working directory, or its absolute path when it sits outside your working directory.",
+    );
+    expect(buildRuntimeInstructions({ harness: "Codex" })).not.toContain(
+      "give its path from your working directory",
+    );
+  });
+
+  it("names listed folders that are not repositories, by absolute path when outside", () => {
+    const instructions = buildRuntimeInstructions({
+      harness: "Codex",
+      folders: [
+        { relativePath: "shared", name: "shared", path: "/work/shared" },
+        { relativePath: "../team/docs", name: "Docs", path: "/team/docs" },
+      ],
+    });
+    expect(instructions).toContain("<workspace_folders>");
+    expect(instructions).toContain("which are not Git repositories");
+    expect(instructions).toContain("- shared\n- /team/docs (Docs)\n");
+    expect(instructions).toContain("shared with every other run of this project");
+    expect(instructions).toContain("give its path from your working directory");
+    expect(instructions).not.toContain("workspace_repositories");
+
+    const inside = buildRuntimeInstructions({
+      harness: "Codex",
+      folders: [{ relativePath: "shared", name: "shared", path: "/work/shared" }],
+    });
+    expect(inside).not.toContain("shared with every other run");
+    expect(buildRuntimeInstructions({ harness: "Codex", folders: [] })).not.toContain(
+      "workspace_folders",
+    );
+  });
+
   it("keeps workspace-supplied repository names inside the block", () => {
     const instructions = buildRuntimeInstructions({
       harness: "Codex",

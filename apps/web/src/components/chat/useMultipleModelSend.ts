@@ -3,6 +3,7 @@ import {
   type ModelSelection,
   type RuntimeMode,
   type ThreadId,
+  type VcsRepository,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
@@ -22,6 +23,7 @@ import { releaseDraftAttachments } from "../../lib/attachmentUploadQueue";
 import type { buildMessageContext } from "../../lib/composerContextRecords";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { environmentServerConfigsAtom } from "../../state/server";
+import { repositoryBaseRefsForSend } from "../../repositoryBaseRefStore";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
@@ -52,6 +54,7 @@ interface MultipleModelSendInput {
   readonly promptRef: { current: string };
   readonly runtimeMode: RuntimeMode;
   readonly startFromOrigin: boolean;
+  readonly workspaceRepositories: ReadonlyArray<VcsRepository>;
   readonly resetLocalDispatch: ReturnType<typeof useLocalDispatchState>["resetLocalDispatch"];
   readonly setThreadError: ReturnType<typeof makeThreadErrorSetter>;
 }
@@ -72,6 +75,7 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
     promptRef,
     runtimeMode,
     startFromOrigin,
+    workspaceRepositories,
     resetLocalDispatch,
     setThreadError,
   } = input;
@@ -196,6 +200,10 @@ export function useMultipleModelSend(input: MultipleModelSendInput) {
                       baseBranch: branch,
                       requireWorktree: true,
                       ...(startFromOrigin ? { startFromOrigin: true } : {}),
+                      ...repositoryBaseRefsForSend(
+                        { environmentId, id: threadId },
+                        workspaceRepositories,
+                      ),
                     },
                     runSetupScript: true,
                   },

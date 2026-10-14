@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { applyReviewDiffMetadata, buildReviewParsedDiff } from "./reviewModel";
+import {
+  applyReviewDiffMetadata,
+  buildReviewParsedDiff,
+  buildReviewSectionItems,
+  getDefaultReviewSectionId,
+  getReviewGitSectionId,
+} from "./reviewModel";
 
 describe("buildReviewParsedDiff", () => {
   it.each([
@@ -156,4 +162,55 @@ describe("applyReviewDiffMetadata", () => {
     expect(result.notice).toContain("Counts include all changes");
     expect(applyReviewDiffMetadata(parsed, null)).toEqual(parsed);
   });
+});
+
+describe("buildReviewSectionItems", () => {
+  it("names a multi-repo workspace's repository on its git sections", () => {
+    const api = { relativePath: "api", name: "api" };
+    const items = buildReviewSectionItems({
+      checkpoints: [],
+      gitSections: [
+        {
+          id: "branch-range",
+          kind: "branch-range",
+          title: "Changes vs main",
+          baseRef: "main",
+          headRef: "feature",
+          diff: "diff --git a/a.ts b/a.ts",
+          diffHash: "hash-base",
+          truncated: false,
+        },
+      ],
+      turnDiffById: {},
+      loadingTurnIds: {},
+      loadingGitSections: false,
+      repository: api,
+    });
+
+    expect(items).toEqual([
+      expect.objectContaining({ id: "git:branch-range:api", title: "Changes vs main · api" }),
+    ]);
+    expect(getDefaultReviewSectionId(items)).toBe("git:branch-range:api");
+    // The folder's own repository keeps the ids an ordinary checkout uses.
+    expect(getReviewGitSectionId("working-tree", { relativePath: ".", name: "work" })).toBe(
+      "git:working-tree",
+    );
+  });
+
+  it("holds both git places while a picked repository loads", () => {
+    const items = buildReviewSectionItems({
+      checkpoints: [],
+      gitSections: [],
+      turnDiffById: {},
+      loadingTurnIds: {},
+      loadingGitSections: true,
+      repository: { relativePath: "../shared", name: "shared" },
+    });
+
+    expect(items.map(({ id, title, isLoading }) => ({ id, title, isLoading }))).toEqual([
+      { id: "git:branch-range:../shared", title: "Changes · shared", isLoading: true },
+      { id: "git:working-tree:../shared", title: "Uncommitted · shared", isLoading: true },
+    ]);
+  });
+
 });

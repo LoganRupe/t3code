@@ -230,9 +230,11 @@ it.effect("with a workspace file, links files, dot-folders and listed folders on
         yield* fileSystem.makeDirectory(path.join(workspaceRoot, folder), { recursive: true });
       }
       yield* fileSystem.writeFileString(path.join(workspaceRoot, "README.md"), "shared\n");
+      const outsideDocs = path.join(baseDir, "team-docs");
+      yield* fileSystem.makeDirectory(outsideDocs);
       yield* fileSystem.writeFileString(
         path.join(workspaceRoot, "team.code-workspace"),
-        '{ "folders": [{ "path": "api" }, { "path": "shared" }] }',
+        '{ "folders": [{ "path": "api" }, { "path": "shared" }, { "path": "../team-docs", "name": "Docs" }] }',
       );
 
       const created = yield* worktrees.create({
@@ -248,6 +250,14 @@ it.effect("with a workspace file, links files, dot-folders and listed folders on
         "api",
         "shared",
         "team.code-workspace",
+      ]);
+      // The run records where each listed folder is reached: the worktree, the link, and the
+      // original folder for one outside the project.
+      const repositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+      assert.deepEqual((yield* repositories.describe(created.path)).folders, [
+        { relativePath: "api", name: "api", path: path.join(created.path, "api") },
+        { relativePath: "shared", name: "shared", path: path.join(created.path, "shared") },
+        { relativePath: outsideDocs, name: "Docs", path: outsideDocs },
       ]);
     }).pipe(Effect.provide(layerTest(baseDir)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
@@ -317,6 +327,148 @@ it.effect(
         assert.notInclude(yield* git(workspaceRoot, ["worktree", "list"]), created.path);
         assert.notInclude(yield* git(outside, ["worktree", "list"]), created.path);
         assert.equal(yield* git(outside, ["branch", "--show-current"]), "main");
+      }).pipe(Effect.provide(layerTest(baseDir)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "an isolated run opens in editors with the folders the project's workspace file lists",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-workspace-worktrees-",
+      });
+      yield* Effect.gen(function* () {
+        const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+        const repositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+        const workspaceRoot = path.join(baseDir, "context");
+        const outside = path.join(baseDir, "elsewhere", "api");
+        yield* initRepository(workspaceRoot);
+        yield* initRepository(outside);
+        yield* fileSystem.makeDirectory(path.join(workspaceRoot, "docs"));
+        const projectFile = path.join(workspaceRoot, "team.code-workspace");
+        yield* fileSystem.writeFileString(
+          projectFile,
+          `{
+          // Comments and trailing commas are fine in a workspace file.
+          "folders": [{ "path": "." }, { "path": "../elsewhere/api", "name": "API" }, { "path": "docs" },],
+          "settings": { "editor.tabSize": 2 },
+        }`,
+        );
+        assert.equal(yield* repositories.workspaceFile(workspaceRoot), projectFile);
+
+        const created = yield* worktrees.create({
+          workspaceRoot,
+          repositories: [
+            { relativePath: ".", name: "context", path: workspaceRoot },
+            { relativePath: "../elsewhere/api", name: "API", path: outside },
+          ],
+          branch: "t3code/editor",
+          startFromOrigin: false,
+        });
+
+        const runFile = yield* repositories.workspaceFile(created.path);
+        assert.equal(runFile, `${created.path}.code-workspace`);
+        assert.deepEqual(JSON.parse(yield* fileSystem.readFileString(runFile!)), {
+          folders: [
+            { path: created.path, name: "context" },
+            { path: path.join(created.path, "API"), name: "API" },
+            { path: path.join(workspaceRoot, "docs") },
+          ],
+          settings: { "editor.tabSize": 2 },
+        });
+
+        yield* worktrees.remove({ path: created.path, force: true });
+        assert.isFalse(yield* fileSystem.exists(runFile!));
+      }).pipe(Effect.provide(layerTest(baseDir)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("an isolated run of a project without a workspace file opens as its folder", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-workspace-worktrees-",
+    });
+    yield* Effect.gen(function* () {
+      const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+      const repositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+      const workspaceRoot = path.join(baseDir, "project");
+      yield* initRepository(path.join(workspaceRoot, "api"));
+      yield* initRepository(path.join(workspaceRoot, "web"));
+
+      const created = yield* worktrees.create({
+        workspaceRoot,
+        repositories: [
+          { relativePath: "api", name: "api", path: path.join(workspaceRoot, "api") },
+          { relativePath: "web", name: "web", path: path.join(workspaceRoot, "web") },
+        ],
+        branch: "t3code/plain",
+        startFromOrigin: false,
+      });
+
+      assert.isNull(yield* repositories.workspaceFile(created.path));
+      assert.isNull(yield* repositories.workspaceFile(workspaceRoot));
+    }).pipe(Effect.provide(layerTest(baseDir)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect(
+  "starts a repository from the base ref chosen for it, and refuses one that is missing",
+  () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-workspace-worktrees-",
+      });
+      yield* Effect.gen(function* () {
+        const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+        const workspaceRoot = path.join(baseDir, "project");
+        const api = path.join(workspaceRoot, "api");
+        const web = path.join(workspaceRoot, "web");
+        yield* initRepository(api);
+        yield* initRepository(web);
+        yield* git(web, ["switch", "-c", "release"]);
+        yield* git(web, ["commit", "--allow-empty", "-m", "release commit"]);
+        yield* git(web, ["switch", "main"]);
+        const repositories = [
+          { relativePath: "api", name: "api", path: api },
+          { relativePath: "web", name: "web", path: web },
+        ];
+
+        const created = yield* worktrees.create({
+          workspaceRoot,
+          repositories,
+          branch: "t3code/picked",
+          startFromOrigin: false,
+          baseRefs: [{ relativePath: "web", baseRef: "release" }],
+        });
+        assert.equal(
+          yield* git(path.join(created.path, "web"), ["rev-parse", "HEAD"]),
+          yield* git(web, ["rev-parse", "release"]),
+        );
+        // A repository without a pick keeps its default: here the only branch it has.
+        assert.equal(
+          yield* git(path.join(created.path, "api"), ["rev-parse", "HEAD"]),
+          yield* git(api, ["rev-parse", "main"]),
+        );
+
+        const missing = yield* worktrees
+          .create({
+            workspaceRoot,
+            repositories,
+            branch: "t3code/missing",
+            startFromOrigin: false,
+            baseRefs: [{ relativePath: "api", baseRef: "nope" }],
+          })
+          .pipe(Effect.flip);
+        assert.equal(missing._tag, "GitCommandError");
+        assert.include(missing.detail, '"nope"');
+        assert.include(missing.detail, "api");
       }).pipe(Effect.provide(layerTest(baseDir)));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

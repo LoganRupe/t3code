@@ -224,7 +224,7 @@ import {
 import { threadEnvironment } from "../state/threads";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
-import { useWorkspaceRepositories } from "../hooks/useWorkspaceRepositories";
+import { useWorkspaceFile, useWorkspaceRepositories } from "../hooks/useWorkspaceRepositories";
 import {
   type EnvironmentPresentation,
   useEnvironmentProviders,
@@ -1604,13 +1604,6 @@ export default function ChatView(props: ChatViewProps) {
     primaryEnvironmentId,
     remoteOpenMode: remoteOpenState.mode,
   });
-  useOpenFavoriteEditorShortcut({
-    enabled: showOpenInPicker,
-    environmentId: activeThread?.environmentId ?? environmentId,
-    keybindings,
-    availableEditors,
-    openInCwd: gitCwd,
-  });
   const manualCompactionProviderAvailable = hasAvailableCompactionProvider({
     providers: providerInstanceEntries,
     driverKind: selectedProvider,
@@ -1679,6 +1672,21 @@ export default function ChatView(props: ChatViewProps) {
   // A multi-repo workspace folder is not a repository, but its repositories get the Git
   // surfaces: worktree runs, diffs and per-repository source control.
   const hasGitSurfaces = isGitRepo || workspaceRepositories.length > 0;
+  // A project, or its isolated run, opens in editors as its `.code-workspace` file when it has
+  // one, so the editor shows the same folders, under the same names, as the project does.
+  const openInWorkspaceFile = useWorkspaceFile({
+    environmentId,
+    cwd: gitStatusCwd,
+    isRepo: liveIsGitRepo,
+  });
+  useOpenFavoriteEditorShortcut({
+    enabled: showOpenInPicker,
+    environmentId: activeThread?.environmentId ?? environmentId,
+    keybindings,
+    availableEditors,
+    openInCwd: gitCwd,
+    openInWorkspaceFile,
+  });
   // A provider-native subagent cannot take messages: a status bar replaces the
   // composer and its strips. Its approvals and questions are asked on the
   // top-level parent thread.
@@ -2884,7 +2892,7 @@ export default function ChatView(props: ChatViewProps) {
     isServerThread,
     isLocalDraftThread,
     isGitRepo,
-    hasWorkspaceRepositories: workspaceRepositories.length > 0,
+    workspaceRepositories,
     phase,
     runtimeMode,
     sendEnvMode,
@@ -3684,6 +3692,7 @@ export default function ChatView(props: ChatViewProps) {
                                 isServerThread={isServerThread}
                                 showGitControls={hasGitSurfaces}
                                 showBranchSelector={isGitRepo}
+                                workspaceRepositories={workspaceRepositories}
                                 {...(routeKind === "draft" && draftId ? { draftId } : {})}
                                 onEnvModeChange={onEnvModeChangeStable}
                                 startFromOrigin={startFromOrigin}
@@ -3779,6 +3788,7 @@ export default function ChatView(props: ChatViewProps) {
                 )
               }
               gitCwd={gitCwd}
+              openInWorkspaceFile={openInWorkspaceFile}
               isGitRepo={isGitRepo}
               workspaceRepositories={workspaceRepositories}
               envLocked={envLocked}

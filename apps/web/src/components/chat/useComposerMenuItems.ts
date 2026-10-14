@@ -15,6 +15,7 @@ import {
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 
 import type { ComposerTrigger } from "../../composer-logic";
+import { useProjectFileRoots } from "../../hooks/useProjectFileRoots";
 import { basenameOfPath } from "../../pierre-icons";
 import {
   getProviderSkillsForSlashMenu,
@@ -89,10 +90,16 @@ export function useComposerMenuItems({
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
   const environmentThreadShells = useThreadShells(isPathTrigger);
+  // A `.code-workspace` project's `@` search spans every folder the file lists.
+  const { roots: fileRoots } = useProjectFileRoots({
+    environmentId,
+    cwd: isPathTrigger ? gitCwd : null,
+  });
   const workspaceEntries = useComposerPathSearch({
     environmentId,
     cwd: isPathTrigger ? gitCwd : null,
     query: isPathTrigger ? pathTriggerQuery : null,
+    roots: fileRoots,
   });
 
   const pullRequestListTargets =

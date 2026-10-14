@@ -149,15 +149,37 @@ T3 Code treats every folder directly inside it that is a Git repository as part 
 the folder contains one VS Code `.code-workspace` file, the repositories it lists count instead,
 named the way the file names them. The file can list the folder itself (`.`) and repositories
 elsewhere on disk (`../api`). When adding a project you can pick the `.code-workspace` file
-instead of its folder.
+instead of its folder, or run `t3 app path/to/team.code-workspace`. **Open** in the thread panel
+opens the file itself in VS Code and its forks (Cursor, VSCodium, Antigravity and others), so the
+editor shows the same folders as the project, including from a thread in its own worktree.
 
 Each repository gets its own Git actions in the thread panel, and turn diffs and rewinds cover all
 of them. In the diff panel, **Uncommitted** and **Changes** show one repository at a time; pick it
-next to the scope. **New worktree** gives the thread its own copy of every repository on one branch,
-each starting from that repository's default branch. The project's other top-level files and
+next to the scope. In the mobile app's review screen, pick it under **Repository** in the diff
+menu. **New worktree** gives the thread its own copy of every repository on one branch.
+Each copy starts from that repository's default branch unless you pick another one: the repositories
+menu beside the branch controls lists every repository with its own branch list, and **Default
+branch** puts a repository back. In the mobile app, the repositories control sits beside the branch
+when starting a new task. When the project folder is itself a repository, it starts from
+the branch the regular selector shows. The project's other top-level files and
 folders are linked into that copy rather than duplicated, so edits to them change the originals.
 With a `.code-workspace` file, only the folders it lists are linked, along with top-level files and
 dot-folders.
+
+With a `.code-workspace` file, the files panel and `@` search span every folder the file lists,
+whether or not it is a Git repository, under the names the file gives them. Two folders with the
+same name are told apart by their parent folder. Files in a listed folder outside the project
+folder open, edit and preview like any other; chat links to them use absolute paths, and agents
+are told about every listed folder, including the ones that are not repositories. In a new
+worktree, listed folders that are not repositories stay the original folders, shared with the
+project's other threads. Folders the file does not list, and files the project folder holds
+beside the listed folders, are not shown; add the folder to the workspace file to include it.
+
+The project's setup script runs once in each repository's copy, with `T3CODE_REPO_ROOT` set to the
+checkout the copy came from, so a script can copy files such as `.env` from the original. Each
+copy gets its own terminal. Lines on the setup card say which repository they came from, and the
+card names any repository whose run failed. A script that runs when the thread settles runs the
+same way.
 
 ## Create a pull request
 

@@ -13,6 +13,7 @@ import type {
   ProviderOptionSelection,
   RuntimeMode,
   ServerProvider,
+  VcsRepository,
 } from "@t3tools/contracts";
 import {
   CommandId,
@@ -82,6 +83,7 @@ import {
 } from "../../state/use-model-option-memory";
 import { useBranches, useDebouncedValue, usePaginatedBranches } from "../../state/queries";
 import { vcsEnvironment } from "../../state/vcs";
+import { useWorkspaceRepositories } from "../../state/workspace-repositories";
 import {
   flattenQueuedThreadMessages,
   threadOutboxManager,
@@ -105,6 +107,13 @@ import {
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { type VcsRef } from "@t3tools/client-runtime/state/vcs";
+import {
+  folderHasOwnBranch,
+  repositoriesWithOwnBaseRef,
+  repositoryBaseRefsFor,
+  withRepositoryBaseRef,
+  type RepositoryBaseRef,
+} from "@t3tools/client-runtime/repository-base-refs";
 import {
   buildHomeProjectScopes,
   sortHomeProjectScopes,
@@ -178,6 +187,15 @@ type NewTaskFlowContextValue = {
   readonly selectedBranchName: string | null;
   readonly selectedWorktreePath: string | null;
   readonly startFromOrigin: boolean;
+  /** Repositories of a multi-repo workspace that can start from a base branch of their own. */
+  readonly baseRefRepositories: ReadonlyArray<VcsRepository>;
+  /** The base branches picked for `baseRefRepositories`; the rest use their default branch. */
+  readonly repositoryBaseRefs: ReadonlyArray<RepositoryBaseRef>;
+  /**
+   * False for a multi-repo workspace folder that is no repository itself: it has no branch to
+   * pick, and each repository starts from its own base.
+   */
+  readonly folderHasBranch: boolean;
   readonly pullRequestReference: string | undefined;
   readonly draftKey: string | null;
   readonly editingPendingTask: QueuedThreadMessage | null;
@@ -225,6 +243,8 @@ type NewTaskFlowContextValue = {
   readonly setWorkspaceMode: (mode: WorkspaceMode) => void;
   readonly selectBranch: (branch: VcsRef) => void;
   readonly setStartFromOrigin: (value: boolean) => void;
+  /** A null `baseRef` returns the repository to its default branch. */
+  readonly setRepositoryBaseRef: (relativePath: string, baseRef: string | null) => void;
   readonly beginEditingPendingTask: (messageId: string) => boolean;
   readonly finishEditingPendingTask: () => void;
   readonly cancelEditingPendingTask: () => void;
@@ -481,8 +501,15 @@ export function NewTaskFlowProvider(
     environmentId: selectedProject?.environmentId ?? null,
     cwd: selectedProject?.workspaceRoot || null,
   });
+  // A multi-repo workspace lists its repositories; an ordinary checkout lists none.
+  const { repositories: workspaceRepositories } = useWorkspaceRepositories({
+    environmentId: selectedProject?.environmentId ?? null,
+    cwd: selectedProject?.workspaceRoot || null,
+  });
   const knownIsGitRepo = projectGitStatus.data?.isRepo ?? projectBranches.data?.isRepo ?? null;
-  const isGitRepo = knownIsGitRepo ?? true;
+  // A multi-repo workspace folder is not a repository, but its repositories still get
+  // worktree runs.
+  const isGitRepo = (knownIsGitRepo ?? true) || workspaceRepositories.length > 0;
   const fileAccessSession = useEnvironmentQuery(
     selectedProject !== null && selectedProject.workspaceRoot !== ""
       ? environmentSession.sessionStateAtom(selectedProject.environmentId)
@@ -559,6 +586,7 @@ export function NewTaskFlowProvider(
   const draftStartFromOrigin = selectedProjectDraft.workspaceSelection?.startFromOrigin;
   const startFromOrigin =
     isGitRepo && (draftStartFromOrigin ?? projectSettings.settings.newWorktreesStartFromOrigin);
+  const draftRepositoryBaseRefs = selectedProjectDraft.workspaceSelection?.repositoryBaseRefs;
   const defaultRuntimeMode = editingPendingTask
     ? (editingPendingTask.runtimeMode ?? DEFAULT_RUNTIME_MODE)
     : projectSettings.settings.defaultRuntimeMode;
@@ -702,6 +730,13 @@ export function NewTaskFlowProvider(
     query: debouncedBranchQuery,
   };
   const branchState = usePaginatedBranches(branchTarget);
+  // Every repository but the folder's own can start a new worktree from a branch of its own.
+  const baseRefRepositories = repositoriesWithOwnBaseRef(workspaceRepositories);
+  const folderHasBranch = folderHasOwnBranch(workspaceRepositories);
+  const repositoryBaseRefs = repositoryBaseRefsFor(
+    draftRepositoryBaseRefs ?? [],
+    baseRefRepositories,
+  );
   const branchSearchIsDebouncing = branchSearchQuery !== debouncedBranchQuery;
   const branchesLoading =
     branchSearchIsDebouncing || (branchState.isPending && branchState.data === null);
@@ -824,6 +859,7 @@ export function NewTaskFlowProvider(
         branch: mode === "local" ? localSelection.branch : selectedBranchName,
         worktreePath: mode === "local" ? localSelection.worktreePath : selectedWorktreePath,
         ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
+        ...(draftRepositoryBaseRefs ? { repositoryBaseRefs: draftRepositoryBaseRefs } : {}),
       },
     });
   };
@@ -852,10 +888,12 @@ export function NewTaskFlowProvider(
         branch: localSelection.branch,
         worktreePath: localSelection.worktreePath,
         ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
+        ...(draftRepositoryBaseRefs ? { repositoryBaseRefs: draftRepositoryBaseRefs } : {}),
       },
     });
   }, [
     availableBranches,
+    draftRepositoryBaseRefs,
     draftStartFromOrigin,
     selectedProject,
     selectedProjectDraftKey,
@@ -877,6 +915,7 @@ export function NewTaskFlowProvider(
           branchWorktreePath: branch.worktreePath,
         }),
         ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
+        ...(draftRepositoryBaseRefs ? { repositoryBaseRefs: draftRepositoryBaseRefs } : {}),
       },
     });
   };
@@ -891,6 +930,27 @@ export function NewTaskFlowProvider(
         branch: selectedBranchName,
         worktreePath: selectedWorktreePath,
         startFromOrigin: value,
+        ...(draftRepositoryBaseRefs ? { repositoryBaseRefs: draftRepositoryBaseRefs } : {}),
+      },
+    });
+  };
+
+  const setRepositoryBaseRef = (relativePath: string, baseRef: string | null) => {
+    if (!selectedProjectDraftKey) {
+      return;
+    }
+    // Read the live draft: a branch or mode written in this same commit must survive.
+    const live = getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection;
+    const { repositoryBaseRefs: picks = [], ...selection } = live ?? {
+      mode: workspaceMode,
+      branch: selectedBranchName,
+      worktreePath: selectedWorktreePath,
+    };
+    const next = withRepositoryBaseRef(picks, relativePath, baseRef);
+    updateComposerDraftSettings(selectedProjectDraftKey, {
+      workspaceSelection: {
+        ...selection,
+        ...(next.length > 0 ? { repositoryBaseRefs: next } : {}),
       },
     });
   };
@@ -973,6 +1033,9 @@ export function NewTaskFlowProvider(
           worktreePath: message.creation.worktreePath,
           startFromOrigin: message.creation.startFromOrigin ?? false,
           pullRequestReference: message.creation.pullRequestReference,
+          ...(message.creation.repositoryBaseRefs
+            ? { repositoryBaseRefs: message.creation.repositoryBaseRefs }
+            : {}),
         },
       });
     }
@@ -1024,6 +1087,11 @@ export function NewTaskFlowProvider(
     // stand-in's placeholder title/workspaceRoot must never be written back
     // as if they were real project metadata.
     const usingPendingSnapshot = selectedProject === editingPendingProject;
+    // Picks for repositories the workspace no longer lists are dropped. Before the list has
+    // loaded every pick goes, and the server ignores any it does not list.
+    const picks = workspaceSelection?.repositoryBaseRefs ?? [];
+    const repositoryBaseRefsToSend =
+      baseRefRepositories.length > 0 ? repositoryBaseRefsFor(picks, baseRefRepositories) : picks;
     const projectTitle = usingPendingSnapshot
       ? editingPendingTask?.creation?.projectTitle
       : selectedProject.title;
@@ -1061,14 +1129,20 @@ export function NewTaskFlowProvider(
         // records the current checkout: a queued local task drains days
         // later against whatever is checked out then, so a queue-time
         // guess would pin a stale label to a thread that ran somewhere else.
+        // A multi-repo workspace folder that is no repository has no branch of its own:
+        // HEAD stands in as its base, which the server does not read, and each repository
+        // starts from its own default or pick.
         branch: resolveProjectThreadCreationBranch({
           workspaceMode: mode,
           selectedBranch: workspaceSelection?.branch ?? null,
           currentCheckoutBranch: options?.currentCheckoutBranch ?? null,
-        }),
+        }) ?? (mode === "worktree" && !folderHasBranch ? "HEAD" : null),
         worktreePath: mode === "worktree" ? null : (workspaceSelection?.worktreePath ?? null),
         ...((workspaceSelection?.startFromOrigin ?? startFromOrigin)
           ? { startFromOrigin: true }
+          : {}),
+        ...(mode === "worktree" && repositoryBaseRefsToSend.length > 0
+          ? { repositoryBaseRefs: repositoryBaseRefsToSend }
           : {}),
       },
       createdAt: metadata.createdAt,
@@ -1184,6 +1258,9 @@ export function NewTaskFlowProvider(
     selectedBranchName,
     selectedWorktreePath,
     startFromOrigin,
+    baseRefRepositories,
+    repositoryBaseRefs,
+    folderHasBranch,
     draftKey: selectedProjectDraftKey,
     pullRequestReference: selectedProjectDraft.workspaceSelection?.pullRequestReference,
     editingPendingTask,
@@ -1220,6 +1297,7 @@ export function NewTaskFlowProvider(
     setWorkspaceMode,
     selectBranch,
     setStartFromOrigin,
+    setRepositoryBaseRef,
     beginEditingPendingTask,
     finishEditingPendingTask,
     cancelEditingPendingTask,

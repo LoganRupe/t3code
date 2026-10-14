@@ -69,4 +69,46 @@ describe("project thread title", () => {
     expect(relaunched.message.text).toBe(wire.text);
     expect(relaunched.message.attachments).toEqual(uploadedAttachments);
   });
+  it("starts a multi-repo worktree with the picked base of each repository", () => {
+    const spec = {
+      projectId: ProjectId.make("project"),
+      projectCwd: "/workspace",
+      threadId: "multi-repo-thread",
+      commandId: "multi-repo-command",
+      messageId: "multi-repo-message",
+      createdAt: "2026-10-14T00:00:00Z",
+      text: "Wire the API into the web app",
+      uploadedAttachments: [],
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+      runtimeMode: "full-access" as const,
+      interactionMode: "default" as const,
+      workspaceMode: "worktree" as const,
+      worktreePath: null,
+      startFromOrigin: false,
+      worktreeBranchName: "t3code/abc123",
+    };
+    const input = buildProjectThreadStartTurnInput({
+      ...spec,
+      branch: "HEAD",
+      repositoryBaseRefs: [{ relativePath: "../api", baseRef: "release" }],
+    });
+    expect(input.bootstrap.prepareWorktree).toEqual({
+      projectCwd: "/workspace",
+      baseBranch: "HEAD",
+      branch: "t3code/abc123",
+      repositoryBaseRefs: [{ relativePath: "../api", baseRef: "release" }],
+    });
+
+    const withoutPicks = buildProjectThreadStartTurnInput({
+      ...spec,
+      branch: "main",
+      repositoryBaseRefs: [],
+    });
+    expect(withoutPicks.bootstrap.prepareWorktree).toEqual({
+      projectCwd: "/workspace",
+      baseBranch: "main",
+      branch: "t3code/abc123",
+    });
+  });
+
 });

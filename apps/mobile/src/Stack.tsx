@@ -76,6 +76,8 @@ import { AddProjectSourceRoute } from "./features/projects/AddProjectSourceRoute
 import {
   NewTaskBranchPickerRouteScreen,
   NewTaskEnvironmentPickerRouteScreen,
+  NewTaskRepositoriesPickerRouteScreen,
+  NewTaskRepositoryBranchPickerRouteScreen,
 } from "./features/threads/NewTaskContextPickerScreens";
 import {
   ExistingThreadSettingsRouteProvider,
@@ -473,6 +475,8 @@ const WORKSPACE_OVERLAY_ROUTES = new Set([
   "AddProjectNew",
   "NewTaskEnvironment",
   "NewTaskBranch",
+  "NewTaskRepositories",
+  "NewTaskRepositoryBranch",
   "SettingsLegal",
   "SettingsSheet",
   "ThreadAgents",
@@ -723,6 +727,16 @@ const RootStackConfig = createWorkspaceStackNavigator({
       linking: "new/draft/branch",
       screen: NewTaskBranchPickerRouteScreen,
       options: { ...GLASS_HEADER_OPTIONS, title: "Branch" },
+    }),
+    NewTaskRepositories: createNativeStackScreen({
+      linking: "new/draft/repositories",
+      screen: NewTaskRepositoriesPickerRouteScreen,
+      options: { ...GLASS_HEADER_OPTIONS, title: "Repositories" },
+    }),
+    NewTaskRepositoryBranch: createNativeStackScreen({
+      linking: "new/draft/repositories/branch",
+      screen: NewTaskRepositoryBranchPickerRouteScreen,
+      options: { ...GLASS_HEADER_OPTIONS, title: "Base branch" },
     }),
     AddProject: createNativeStackScreen({
       linking: "new/add-project",

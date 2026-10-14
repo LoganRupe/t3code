@@ -1,6 +1,7 @@
 import { resolveFilesystemReadAccess } from "@t3tools/client-runtime/state/filesystem";
 import { environmentSession } from "../../state/session";
 import type { EnvironmentId } from "@t3tools/contracts";
+import { projectFileRootsKey } from "@t3tools/client-runtime/project-file-roots";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import { useCallback, useMemo, useState, type ComponentProps } from "react";
@@ -23,6 +24,7 @@ import { useAppearancePreferences } from "../settings/appearance/AppearancePrefe
 import { FileTreeBrowser } from "./FileTreeBrowser";
 import { NativeInspectorContent } from "../../native/NativeInspectorContent";
 import { useFileTreeEntries } from "./useFileTreeEntries";
+import { useProjectFileRoots } from "./useProjectFileRoots";
 import { preloadWorkspaceFileContents } from "./preload-workspace-file";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 
@@ -52,21 +54,33 @@ export function ThreadFileNavigatorPane(props: {
     sessionError: fileAccessSession.error,
   });
   const { canReadFiles } = fileAccess;
+  const fileRoots = useProjectFileRoots({
+    environmentId: props.environmentId,
+    cwd: props.cwd,
+    projectName: props.projectName,
+  });
   const entriesQuery = useFileTreeEntries({
     environmentId: props.environmentId,
     cwd: canReadFiles ? props.cwd : null,
     searchQuery,
+    fileRoots,
   });
+  const { openPath } = entriesQuery;
+  const { onSelectFile } = props;
   const handlePreviewFile = useCallback(
-    (relativePath: string) => {
+    (treePath: string) => {
       preloadWorkspaceFileContents({
         cwd: props.cwd,
         environmentId: props.environmentId,
-        relativePath,
+        relativePath: openPath(treePath),
         theme: highlightTheme,
       });
     },
-    [highlightTheme, props.cwd, props.environmentId],
+    [highlightTheme, openPath, props.cwd, props.environmentId],
+  );
+  const handleSelectFile = useCallback(
+    (treePath: string) => onSelectFile(openPath(treePath)),
+    [onSelectFile, openPath],
   );
   const nativeHeaderRightBarButtonItems = useMemo(
     () =>
@@ -86,7 +100,7 @@ export function ThreadFileNavigatorPane(props: {
 
   const fileTree = (
     <FileTreeBrowser
-      key={JSON.stringify([props.environmentId, props.cwd])}
+      key={JSON.stringify([props.environmentId, props.cwd, projectFileRootsKey(fileRoots.roots)])}
       entries={entriesQuery.entries}
       loadingDirectories={entriesQuery.loadingDirectories}
       onLoadDirectory={entriesQuery.loadDirectory}
@@ -102,10 +116,10 @@ export function ThreadFileNavigatorPane(props: {
       searchQuery={searchQuery}
       searchResultPaths={entriesQuery.searchResultPaths}
       searchTruncated={entriesQuery.searchTruncated}
-      selectedPath={props.selectedPath}
+      selectedPath={entriesQuery.treePath(props.selectedPath)}
       onPreviewFile={handlePreviewFile}
       onRefresh={entriesQuery.refresh}
-      onSelectFile={props.onSelectFile}
+      onSelectFile={handleSelectFile}
     />
   );
 

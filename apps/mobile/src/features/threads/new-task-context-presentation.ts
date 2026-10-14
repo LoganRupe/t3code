@@ -94,6 +94,15 @@ export function resolveNewTaskBranchLabel(input: {
   return input.startFromOrigin ? `From ${input.branchName} (remote)` : `From ${input.branchName}`;
 }
 
+/** The control naming a multi-repo workspace's repositories and how many have their own base. */
+export function resolveRepositoryBaseRefsLabel(input: {
+  readonly repositoryCount: number;
+  readonly pickCount: number;
+}): string {
+  const repositories = `${input.repositoryCount} ${input.repositoryCount === 1 ? "repo" : "repos"}`;
+  return input.pickCount > 0 ? `${repositories}, ${input.pickCount} picked` : repositories;
+}
+
 export function shouldCheckoutNewTaskBranch(input: {
   readonly branchIsCurrent: boolean;
   readonly branchWorktreePath: string | null | undefined;

@@ -512,6 +512,18 @@ export const OrchestrationV2RunBackgroundWorkCancelled = Schema.Struct({
 export type OrchestrationV2RunBackgroundWorkCancelled =
   typeof OrchestrationV2RunBackgroundWorkCancelled.Type;
 
+/**
+ * In a multi-repo workspace, the ref one repository's worktree starts from. The repository is
+ * named by the `relativePath` that `listRepositories` reports for the project folder. A
+ * repository without an entry starts from its default branch; the workspace folder's own
+ * repository (`.`) falls back to the strategy's `baseRef`.
+ */
+export const OrchestrationV2RepositoryBaseRef = Schema.Struct({
+  relativePath: TrimmedNonEmptyString,
+  baseRef: TrimmedNonEmptyString,
+});
+export type OrchestrationV2RepositoryBaseRef = typeof OrchestrationV2RepositoryBaseRef.Type;
+
 export const OrchestrationV2ThreadLaunchWorkspaceStrategy = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("root"),
@@ -527,6 +539,7 @@ export const OrchestrationV2ThreadLaunchWorkspaceStrategy = Schema.Union([
     baseRef: TrimmedNonEmptyString,
     branch: Schema.optional(TrimmedNonEmptyString),
     startFromOrigin: Schema.optional(Schema.Boolean),
+    repositoryBaseRefs: Schema.optional(Schema.Array(OrchestrationV2RepositoryBaseRef)),
   }),
 ]);
 export type OrchestrationV2ThreadLaunchWorkspaceStrategy =

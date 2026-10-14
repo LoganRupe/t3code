@@ -2236,3 +2236,180 @@ it.effect("replays an accepted send after the project disables the instance", ()
     }
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerFiles)));
 });
+it.effect("names the repositories whose setup failed in a multi-repo isolated run", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness({
+      repositories: [
+        { relativePath: "api", name: "api", path: "/repo/api" },
+        { relativePath: "web", name: "web", path: "/repo/web" },
+      ],
+      runSetup: () =>
+        Effect.succeed({
+          status: "started" as const,
+          async: true,
+          scriptId: "setup",
+          scriptName: "Setup",
+          scriptCommand: "vp install",
+          terminalId: "setup-setup-api",
+          cwd: "/repo-worktrees/workspace/api",
+          repositories: [
+            { name: "api", cwd: "/repo-worktrees/workspace/api", terminalId: "setup-setup-api" },
+            { name: "web", cwd: "/repo-worktrees/workspace/web", terminalId: "setup-setup-web" },
+          ],
+          completion: Effect.succeed({
+            exitCode: 1,
+            durationMs: 1,
+            repositories: [
+              { name: "api", exitCode: 0 },
+              { name: "web", exitCode: 1 },
+            ],
+          }),
+        }),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:launch:multi-repo-setup-failure",
+          thread: "thread:launch:multi-repo-setup-failure",
+          message: "Build the feature",
+          workspace: { type: "worktree", baseRef: "main", branch: "t3/abcd1234" },
+        }),
+      );
+      yield* tracker.stream(launched.threadId).pipe(
+        Stream.filter((snapshot) => snapshot?.phase === "done"),
+        Stream.runHead,
+      );
+      const stage = (yield* tracker.get(launched.threadId))?.stages.find(
+        (candidate) => candidate.id === "setup-script",
+      );
+      assert.equal(stage?.status, "failed");
+      assert.equal(stage?.detail, "web: exited with 1");
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("cancelling a multi-repo setup closes every repository's setup terminal", () =>
+  Effect.gen(function* () {
+    const entered = yield* Deferred.make<void>();
+    const harness = makeHarness({
+      repositories: [
+        { relativePath: "api", name: "api", path: "/repo/api" },
+        { relativePath: "web", name: "web", path: "/repo/web" },
+      ],
+      runSetup: () =>
+        Effect.succeed({
+          status: "started" as const,
+          async: false,
+          scriptId: "setup",
+          scriptName: "Setup",
+          scriptCommand: "vp install",
+          terminalId: "setup-setup-api",
+          cwd: "/repo-worktrees/workspace/api",
+          repositories: [
+            { name: "api", cwd: "/repo-worktrees/workspace/api", terminalId: "setup-setup-api" },
+            { name: "web", cwd: "/repo-worktrees/workspace/web", terminalId: "setup-setup-web" },
+          ],
+          completion: Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+        }),
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:launch:multi-repo-cancel",
+          thread: "thread:launch:multi-repo-cancel",
+          message: "Build the feature",
+          workspace: { type: "worktree", baseRef: "main", branch: "t3/abcd1234" },
+        }),
+      );
+      yield* Deferred.await(entered);
+      assert.isTrue(yield* tracker.cancel(launched.threadId));
+      assert.deepEqual(
+        harness.closeTerminal.mock.calls.map(([input]) => input.terminalId),
+        ["setup-setup-api", "setup-setup-web"],
+      );
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("passes each repository's chosen base to the multi-repo worktree builder", () =>
+  Effect.gen(function* () {
+    const repositories = [
+      { relativePath: ".", name: "workspace", path: "/repo" },
+      { relativePath: "api", name: "api", path: "/repo/api" },
+      { relativePath: "../shared", name: "shared", path: "/shared" },
+    ];
+    const harness = makeHarness({ repositories });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:launch:multi-repo-bases",
+          thread: "thread:launch:multi-repo-bases",
+          message: "Build the feature",
+          workspace: {
+            type: "worktree",
+            baseRef: "develop",
+            branch: "feature/bases",
+            repositoryBaseRefs: [{ relativePath: "../shared", baseRef: "release" }],
+          },
+        }),
+      );
+      yield* waitUntil(() =>
+        threads
+          .getThreadProjection(launched.threadId)
+          .pipe(Effect.map((projection) => projection.thread.worktreePath !== null)),
+      );
+      // The root repository takes the strategy's base ref, the branch picker's choice for the
+      // folder; a repository without a pick is left to its default branch.
+      assert.deepEqual(harness.createWorkspaceWorktree.mock.calls[0]?.[0].baseRefs, [
+        { relativePath: ".", baseRef: "develop" },
+        { relativePath: "../shared", baseRef: "release" },
+      ]);
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("checks each chosen base in its own repository of a multi-repo workspace", () =>
+  Effect.gen(function* () {
+    const harness = makeHarness({
+      repositories: [
+        { relativePath: "api", name: "api", path: "/repo/api" },
+        { relativePath: "web", name: "web", path: "/repo/web" },
+      ],
+      hasCommit: ({ cwd, refName }) =>
+        Effect.succeed(refName === "HEAD" || (cwd === "/repo/web" && refName === "release")),
+      git: { hasRefNamed: () => Effect.succeed(false) },
+    });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      // The project folder is no checkout, so the strategy's own base ref is not asked of it.
+      yield* launches.checkWorktreeBase({
+        projectId,
+        workspaceStrategy: {
+          type: "worktree",
+          baseRef: "HEAD",
+          repositoryBaseRefs: [{ relativePath: "web", baseRef: "release" }],
+        },
+      });
+      const error = yield* launches
+        .checkWorktreeBase({
+          projectId,
+          workspaceStrategy: {
+            type: "worktree",
+            baseRef: "HEAD",
+            repositoryBaseRefs: [{ relativePath: "api", baseRef: "release" }],
+          },
+        })
+        .pipe(Effect.flip);
+      assert.equal(error._tag, "ThreadLaunchBaseRefError");
+      assert.equal(error.repositoryName, "api");
+      assert.equal(error.baseRef, "release");
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
