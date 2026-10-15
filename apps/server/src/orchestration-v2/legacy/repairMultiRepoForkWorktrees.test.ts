@@ -208,6 +208,8 @@ const makeForkThread = Effect.fn("makeForkThread")(function* (input: {
   readonly threadId: string;
   readonly projectRoot: string;
   readonly container: string;
+  /** How many worktrees the fork recorded for the thread; 2 unless set. */
+  readonly forkWorktrees?: number;
 }) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -245,6 +247,14 @@ const makeForkThread = Effect.fn("makeForkThread")(function* (input: {
     INSERT INTO projection_projects (project_id, workspace_root)
     VALUES (${input.threadId}, ${input.projectRoot})
   `;
+  const forkWorktrees = ["api", "web"].slice(0, input.forkWorktrees ?? 2).map((name) => ({
+    repoRoot: path.join(input.projectRoot, name),
+    worktreePath: path.join(input.container, name),
+  }));
+  yield* sql`
+    INSERT INTO projection_threads (thread_id, worktrees_json)
+    VALUES (${input.threadId}, ${JSON.stringify(forkWorktrees)})
+  `;
 });
 
 const createWorkspaceFileTables = Effect.gen(function* () {
@@ -258,6 +268,12 @@ const createWorkspaceFileTables = Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE TABLE projection_projects (project_id TEXT PRIMARY KEY, workspace_root TEXT)`;
+  yield* sql`
+    CREATE TABLE projection_threads (
+      thread_id TEXT PRIMARY KEY,
+      worktrees_json TEXT NOT NULL DEFAULT '[]'
+    )
+  `;
 });
 
 it.effect("writes V2's workspace file for fork threads and keeps the fork's copy", () =>
@@ -309,6 +325,25 @@ it.effect("leaves V2 isolated runs that link the project's workspace file alone"
       path.join(projectRoot, "team.code-workspace"),
       path.join(container, "team.code-workspace"),
     );
+
+    assert.strictEqual(yield* writeMultiRepoForkWorkspaceFiles(), 0);
+    assert.isFalse(
+      yield* fileSystem.exists(WorkspaceRepositories.isolatedRunWorkspaceFilePath(container)),
+    );
+  }).pipe(Effect.provide(workspaceFileLayer)),
+);
+
+it.effect("leaves threads the fork gave a single worktree alone", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-fork-workspace-" });
+    const projectRoot = path.join(baseDir, "team");
+    const container = path.join(baseDir, "worktrees", "project-1", "thread-1");
+    yield* createWorkspaceFileTables;
+    yield* makeForkThread({ threadId: "thread-1", projectRoot, container, forkWorktrees: 1 });
+    // A real file in the container, as a root repository that commits one would leave.
+    yield* fileSystem.writeFileString(path.join(container, "team.code-workspace"), forkWorkspace);
 
     assert.strictEqual(yield* writeMultiRepoForkWorkspaceFiles(), 0);
     assert.isFalse(

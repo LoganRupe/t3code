@@ -125,6 +125,11 @@ export const writeMultiRepoForkWorkspaceFiles = Effect.fn("writeMultiRepoForkWor
     const path = yield* Path.Path;
     const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
 
+    const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(projection_threads)`;
+    if (!columns.some((column) => column.name === "worktrees_json")) return 0;
+
+    // Only threads the fork gave several worktrees can hold its copy, so a database that
+    // never ran the fork touches no files.
     const rows = yield* sql<{
       readonly thread_id: string;
       readonly worktree_path: string;
@@ -136,8 +141,11 @@ export const writeMultiRepoForkWorkspaceFiles = Effect.fn("writeMultiRepoForkWor
         project.workspace_root
       FROM orchestration_v2_projection_threads AS thread
       INNER JOIN projection_projects AS project ON project.project_id = thread.project_id
+      INNER JOIN projection_threads AS fork ON fork.thread_id = thread.thread_id
       WHERE thread.deleted_at IS NULL
         AND json_extract(thread.payload_json, '$.worktreePath') IS NOT NULL
+        AND CASE WHEN json_valid(fork.worktrees_json)
+          THEN json_array_length(fork.worktrees_json) ELSE 0 END > 1
     `;
 
     // Only the fork left a real workspace file in a container; V2 links the project's in.

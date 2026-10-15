@@ -9,6 +9,7 @@
  *
  * @module isolatedRunWorkspaceFile
  */
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { fromJsonStringPretty, fromLenientJson } from "@t3tools/shared/schemaJson";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -62,7 +63,8 @@ export const writeIsolatedRunWorkspaceFile = Effect.fn("writeIsolatedRunWorkspac
     );
     const target = WorkspaceRepositories.isolatedRunWorkspaceFilePath(input.container);
     const contents = yield* encodeDocument({ ...document, folders });
-    yield* fileSystem.writeFileString(target, `${contents}\n`);
+    // Atomic, so a file that exists is a complete one and callers can skip it.
+    yield* writeFileStringAtomically({ filePath: target, contents: `${contents}\n` });
     return target;
   },
 );
