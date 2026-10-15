@@ -214,6 +214,76 @@ it.effect("keeps a container that holds anything besides its worktrees and links
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+it.effect("removes a pre-V2 fork run whose own workspace file is all that is left", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-workspace-worktrees-",
+    });
+    yield* Effect.gen(function* () {
+      const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+      const workspaceRoot = path.join(baseDir, "project");
+      yield* initRepository(path.join(workspaceRoot, "api"));
+      yield* initRepository(path.join(workspaceRoot, "web"));
+      const created = yield* worktrees.create({
+        workspaceRoot,
+        repositories: ["api", "web"].map((name) => ({
+          relativePath: name,
+          name,
+          path: path.join(workspaceRoot, name),
+        })),
+        branch: "fork-run",
+        startFromOrigin: false,
+      });
+      // The fork's copy, and V2's file the startup step wrote beside the container.
+      yield* fileSystem.writeFileString(
+        path.join(created.path, "project.code-workspace"),
+        `{ "folders": [{ "path": "./api" }, { "path": "./web" }] }`,
+      );
+      const besideFile = WorkspaceRepositories.isolatedRunWorkspaceFilePath(created.path);
+      yield* fileSystem.writeFileString(besideFile, "{}");
+
+      yield* worktrees.remove({ path: created.path, force: false });
+
+      assert.isFalse(yield* fileSystem.exists(created.path));
+      assert.isFalse(yield* fileSystem.exists(besideFile));
+      assert.isFalse(
+        yield* fileSystem.exists(WorkspaceRepositories.isolatedRunLayoutPath(created.path)),
+      );
+    }).pipe(Effect.provide(layerTest(baseDir)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("keeps a pre-V2 fork run that holds another file besides its workspace file", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-workspace-worktrees-",
+    });
+    yield* Effect.gen(function* () {
+      const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+      const workspaceRoot = path.join(baseDir, "project");
+      yield* initRepository(path.join(workspaceRoot, "api"));
+      const created = yield* worktrees.create({
+        workspaceRoot,
+        repositories: [{ relativePath: "api", name: "api", path: path.join(workspaceRoot, "api") }],
+        branch: "fork-notes",
+        startFromOrigin: false,
+      });
+      const forkCopy = path.join(created.path, "project.code-workspace");
+      yield* fileSystem.writeFileString(forkCopy, `{ "folders": [{ "path": "./api" }] }`);
+      yield* fileSystem.writeFileString(path.join(created.path, "notes.md"), "mine\n");
+
+      yield* worktrees.remove({ path: created.path, force: false });
+
+      assert.isTrue(yield* fileSystem.exists(forkCopy));
+      assert.equal(yield* fileSystem.readFileString(path.join(created.path, "notes.md")), "mine\n");
+    }).pipe(Effect.provide(layerTest(baseDir)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect("with a workspace file, links files, dot-folders and listed folders only", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;

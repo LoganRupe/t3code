@@ -434,7 +434,19 @@ const make = Effect.gen(function* () {
         });
       }
       if (root === undefined && (yield* exists(input.path))) {
-        yield* removeLeftovers(input.path).pipe(
+        yield* Effect.gen(function* () {
+          if (yield* removeLeftovers(input.path)) return;
+          // The pre-V2 multi-repo fork wrote its workspace file as a real file in the container,
+          // so a run it made still holds that file once everything else is gone.
+          const names = yield* fileSystem.readDirectory(input.path);
+          if (
+            names.length === 1 &&
+            names[0]!.endsWith(WorkspaceRepositories.CODE_WORKSPACE_EXTENSION) &&
+            (yield* fileSystem.stat(path.join(input.path, names[0]!))).type === "File"
+          ) {
+            yield* fileSystem.remove(input.path, { recursive: true });
+          }
+        }).pipe(
           Effect.mapError((cause) =>
             fail(operation, input.path, "Could not remove the isolated run folder.", cause),
           ),
