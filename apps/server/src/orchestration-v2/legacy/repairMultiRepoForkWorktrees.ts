@@ -19,6 +19,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ServerConfig from "../../config.ts";
+import { writeIsolatedRunWorkspaceFile } from "../../git/isolatedRunWorkspaceFile.ts";
 import * as WorkspaceRepositories from "../../workspace/WorkspaceRepositories.ts";
 import * as ThreadManagement from "../ThreadManagementService.ts";
 
@@ -108,3 +109,92 @@ export const repairMultiRepoForkWorktrees = Effect.fn("repairMultiRepoForkWorktr
   }
   return repaired;
 });
+
+/**
+ * Gives repaired fork threads the workspace file V2 writes beside a new isolated run.
+ *
+ * The fork kept its copy inside the container, so V2's "Open in" fell back to the bare folder.
+ * This writes V2's own file from the project's workspace file. The fork's copy stays, because
+ * the pre-V2 build opens it and a database can still go back to that build. Threads that
+ * already have the file are skipped, so this runs once per thread.
+ */
+export const writeMultiRepoForkWorkspaceFiles = Effect.fn("writeMultiRepoForkWorkspaceFiles")(
+  function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+
+    const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(projection_threads)`;
+    if (!columns.some((column) => column.name === "worktrees_json")) return 0;
+
+    // Only threads the fork gave several worktrees can hold its copy, so a database that
+    // never ran the fork touches no files.
+    const rows = yield* sql<{
+      readonly thread_id: string;
+      readonly worktree_path: string;
+      readonly workspace_root: string;
+    }>`
+      SELECT
+        thread.thread_id,
+        json_extract(thread.payload_json, '$.worktreePath') AS worktree_path,
+        project.workspace_root
+      FROM orchestration_v2_projection_threads AS thread
+      INNER JOIN projection_projects AS project ON project.project_id = thread.project_id
+      INNER JOIN projection_threads AS fork ON fork.thread_id = thread.thread_id
+      WHERE thread.deleted_at IS NULL
+        AND json_extract(thread.payload_json, '$.worktreePath') IS NOT NULL
+        AND CASE WHEN json_valid(fork.worktrees_json)
+          THEN json_array_length(fork.worktrees_json) ELSE 0 END > 1
+    `;
+
+    // Only the fork left a real workspace file in a container; V2 links the project's in.
+    const holdsForkCopy = (container: string) =>
+      fileSystem.readDirectory(container).pipe(
+        Effect.flatMap((names) => {
+          const held = names.filter((name) =>
+            name.endsWith(WorkspaceRepositories.CODE_WORKSPACE_EXTENSION),
+          );
+          if (held.length !== 1) return Effect.succeed(false);
+          return fileSystem.readLink(path.join(container, held[0]!)).pipe(
+            Effect.as(false),
+            Effect.orElseSucceed(() => true),
+          );
+        }),
+        Effect.orElseSucceed(() => false),
+      );
+
+    let written = 0;
+    for (const row of rows) {
+      const container = row.worktree_path;
+      const target = WorkspaceRepositories.isolatedRunWorkspaceFilePath(container);
+      if (yield* fileSystem.exists(target).pipe(Effect.orElseSucceed(() => true))) continue;
+      const layout = yield* workspaceRepositories.readIsolatedRun(container);
+      if (layout === null || !(yield* holdsForkCopy(container))) continue;
+      const projectWorkspaceFile = yield* workspaceRepositories.workspaceFile(row.workspace_root);
+      if (projectWorkspaceFile === null) continue;
+
+      yield* writeIsolatedRunWorkspaceFile({
+        projectWorkspaceFile,
+        container,
+        repositories: layout.repositories.map((repository) => ({
+          source: repository.source,
+          worktree: path.resolve(container, repository.relativePath),
+        })),
+      }).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            written += 1;
+          }),
+        ),
+        Effect.catch((cause) =>
+          Effect.logWarning("Could not write a multi-repo fork thread's workspace file", {
+            threadId: row.thread_id,
+            cause,
+          }),
+        ),
+      );
+    }
+    return written;
+  },
+);
