@@ -14,7 +14,10 @@ import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import * as WorkspaceRepositories from "../../workspace/WorkspaceRepositories.ts";
 import * as ThreadManagement from "../ThreadManagementService.ts";
-import { repairMultiRepoForkWorktrees } from "./repairMultiRepoForkWorktrees.ts";
+import {
+  repairMultiRepoForkWorktrees,
+  writeMultiRepoForkWorkspaceFiles,
+} from "./repairMultiRepoForkWorktrees.ts";
 
 const git = (cwd: string, args: ReadonlyArray<string>) =>
   Effect.flatMap(VcsProcess.VcsProcess, (process) =>
@@ -186,4 +189,165 @@ it.effect("does nothing on databases that never ran the fork", () =>
       ),
     );
   }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+const workspaceFileLayer = NodeSqliteClient.layer({ filename: ":memory:" }).pipe(
+  Layer.merge(WorkspaceRepositories.layer),
+  Layer.provideMerge(NodeServices.layer),
+);
+
+const forkWorkspace = JSON.stringify({
+  folders: [
+    { path: "./api", name: "api" },
+    { path: "./web", name: "web" },
+  ],
+});
+
+/** A project with `api` and `web`, and a thread's container recorded in V2 at `container`. */
+const makeForkThread = Effect.fn("makeForkThread")(function* (input: {
+  readonly threadId: string;
+  readonly projectRoot: string;
+  readonly container: string;
+  /** How many worktrees the fork recorded for the thread; 2 unless set. */
+  readonly forkWorktrees?: number;
+}) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const sql = yield* SqlClient.SqlClient;
+  for (const name of ["api", "web"]) {
+    yield* fileSystem.makeDirectory(path.join(input.projectRoot, name, ".git"), {
+      recursive: true,
+    });
+    yield* fileSystem.makeDirectory(path.join(input.container, name), { recursive: true });
+  }
+  yield* fileSystem.writeFileString(
+    path.join(input.projectRoot, "team.code-workspace"),
+    forkWorkspace,
+  );
+  yield* fileSystem.writeFileString(
+    WorkspaceRepositories.isolatedRunLayoutPath(input.container),
+    JSON.stringify({
+      repositories: ["api", "web"].map((name) => ({
+        relativePath: name,
+        name,
+        source: path.join(input.projectRoot, name),
+      })),
+    }),
+  );
+  yield* sql`
+    INSERT INTO orchestration_v2_projection_threads (thread_id, project_id, deleted_at, payload_json)
+    VALUES (
+      ${input.threadId},
+      ${input.threadId},
+      NULL,
+      ${JSON.stringify({ worktreePath: input.container })}
+    )
+  `;
+  yield* sql`
+    INSERT INTO projection_projects (project_id, workspace_root)
+    VALUES (${input.threadId}, ${input.projectRoot})
+  `;
+  const forkWorktrees = ["api", "web"].slice(0, input.forkWorktrees ?? 2).map((name) => ({
+    repoRoot: path.join(input.projectRoot, name),
+    worktreePath: path.join(input.container, name),
+  }));
+  yield* sql`
+    INSERT INTO projection_threads (thread_id, worktrees_json)
+    VALUES (${input.threadId}, ${JSON.stringify(forkWorktrees)})
+  `;
+});
+
+const createWorkspaceFileTables = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
+    CREATE TABLE orchestration_v2_projection_threads (
+      thread_id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      deleted_at TEXT,
+      payload_json TEXT NOT NULL
+    )
+  `;
+  yield* sql`CREATE TABLE projection_projects (project_id TEXT PRIMARY KEY, workspace_root TEXT)`;
+  yield* sql`
+    CREATE TABLE projection_threads (
+      thread_id TEXT PRIMARY KEY,
+      worktrees_json TEXT NOT NULL DEFAULT '[]'
+    )
+  `;
+});
+
+it.effect("writes V2's workspace file for fork threads and keeps the fork's copy", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-fork-workspace-" });
+    const projectRoot = path.join(baseDir, "team");
+    const container = path.join(baseDir, "worktrees", "project-1", "thread-1");
+    yield* createWorkspaceFileTables;
+    yield* makeForkThread({ threadId: "thread-1", projectRoot, container });
+    // The fork's copy inside the container, pointed at the worktrees.
+    const forkCopy = path.join(container, "team.code-workspace");
+    yield* fileSystem.writeFileString(forkCopy, forkWorkspace);
+
+    assert.strictEqual(yield* writeMultiRepoForkWorkspaceFiles(), 1);
+
+    const written = JSON.parse(
+      yield* fileSystem.readFileString(
+        WorkspaceRepositories.isolatedRunWorkspaceFilePath(container),
+      ),
+    );
+    assert.deepStrictEqual(written.folders, [
+      { path: path.join(container, "api"), name: "api" },
+      { path: path.join(container, "web"), name: "web" },
+    ]);
+    // The pre-V2 build opens the fork's copy, so it stays as it was.
+    assert.strictEqual(yield* fileSystem.readFileString(forkCopy), forkWorkspace);
+    const service = yield* WorkspaceRepositories.WorkspaceRepositories;
+    assert.strictEqual(
+      yield* service.workspaceFile(container),
+      WorkspaceRepositories.isolatedRunWorkspaceFilePath(container),
+    );
+
+    assert.strictEqual(yield* writeMultiRepoForkWorkspaceFiles(), 0);
+  }).pipe(Effect.provide(workspaceFileLayer)),
+);
+
+it.effect("leaves V2 isolated runs that link the project's workspace file alone", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-fork-workspace-" });
+    const projectRoot = path.join(baseDir, "team");
+    const container = path.join(baseDir, "worktrees", "project-1", "thread-1");
+    yield* createWorkspaceFileTables;
+    yield* makeForkThread({ threadId: "thread-1", projectRoot, container });
+    yield* fileSystem.symlink(
+      path.join(projectRoot, "team.code-workspace"),
+      path.join(container, "team.code-workspace"),
+    );
+
+    assert.strictEqual(yield* writeMultiRepoForkWorkspaceFiles(), 0);
+    assert.isFalse(
+      yield* fileSystem.exists(WorkspaceRepositories.isolatedRunWorkspaceFilePath(container)),
+    );
+  }).pipe(Effect.provide(workspaceFileLayer)),
+);
+
+it.effect("leaves threads the fork gave a single worktree alone", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-fork-workspace-" });
+    const projectRoot = path.join(baseDir, "team");
+    const container = path.join(baseDir, "worktrees", "project-1", "thread-1");
+    yield* createWorkspaceFileTables;
+    yield* makeForkThread({ threadId: "thread-1", projectRoot, container, forkWorktrees: 1 });
+    // A real file in the container, as a root repository that commits one would leave.
+    yield* fileSystem.writeFileString(path.join(container, "team.code-workspace"), forkWorkspace);
+
+    assert.strictEqual(yield* writeMultiRepoForkWorkspaceFiles(), 0);
+    assert.isFalse(
+      yield* fileSystem.exists(WorkspaceRepositories.isolatedRunWorkspaceFilePath(container)),
+    );
+  }).pipe(Effect.provide(workspaceFileLayer)),
 );

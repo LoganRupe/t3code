@@ -32,7 +32,10 @@ import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as EffectWorker from "./orchestration-v2/EffectWorker.ts";
 import * as LegacyV1ThreadImporter from "./orchestration-v2/legacy/LegacyV1ThreadImporter.ts";
-import { repairMultiRepoForkWorktrees } from "./orchestration-v2/legacy/repairMultiRepoForkWorktrees.ts";
+import {
+  repairMultiRepoForkWorktrees,
+  writeMultiRepoForkWorkspaceFiles,
+} from "./orchestration-v2/legacy/repairMultiRepoForkWorktrees.ts";
 import * as Orchestrator from "./orchestration-v2/Orchestrator.ts";
 import * as ProviderRuntimeRecovery from "./orchestration-v2/ProviderRuntimeRecoveryService.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
@@ -550,6 +553,19 @@ const make = (options?: StartupOptions) =>
           ),
           Effect.catch((cause) =>
             Effect.logWarning("Failed to repair multi-repo fork thread worktrees", { cause }),
+          ),
+        ),
+      );
+      yield* runStartupPhase(
+        "orchestration-v2.legacy-v1.multi-repo-fork-workspace-files",
+        writeMultiRepoForkWorkspaceFiles().pipe(
+          Effect.tap((written) =>
+            written === 0
+              ? Effect.void
+              : Effect.logInfo("Wrote workspace files for multi-repo fork threads", { written }),
+          ),
+          Effect.catch((cause) =>
+            Effect.logWarning("Failed to write multi-repo fork thread workspace files", { cause }),
           ),
         ),
       );
