@@ -372,18 +372,17 @@ const main = Command.make(
             true,
           );
         } else {
+          // Expo resolves emulators by AVD name, not by adb serial.
+          const avd = (yield* command("adb", ["-s", device, "emu", "avd", "name"]))
+            .split(/\r?\n/)[0]
+            ?.trim();
+          if (!avd)
+            return yield* new NativeClientError({
+              message: "Could not read the emulator AVD name.",
+            });
           yield* command(
             "vp",
-            [
-              "exec",
-              "expo",
-              "run:android",
-              "--device",
-              device,
-              "--no-bundler",
-              "--variant",
-              "debug",
-            ],
+            ["exec", "expo", "run:android", "--device", avd, "--no-bundler", "--variant", "debug"],
             true,
           );
         }
