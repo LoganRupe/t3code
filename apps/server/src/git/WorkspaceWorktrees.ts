@@ -402,14 +402,16 @@ const make = Effect.gen(function* () {
     );
   };
 
-  const readRun = (operation: string, container: string) =>
-    Effect.gen(function* () {
-      const layout = isInsideWorktreesDir(container)
-        ? yield* workspaceRepositories.readIsolatedRun(container)
-        : null;
-      if (layout === null) return yield* fail(operation, container, "Not an isolated run folder.");
-      return layout;
-    });
+  const readRun = Effect.fn("WorkspaceWorktrees.readRun")(function* (
+    operation: string,
+    container: string,
+  ) {
+    const layout = isInsideWorktreesDir(container)
+      ? yield* workspaceRepositories.readIsolatedRun(container)
+      : null;
+    if (layout === null) return yield* fail(operation, container, "Not an isolated run folder.");
+    return layout;
+  });
 
   const currentBranch = (operation: string, cwd: string) =>
     git
@@ -618,22 +620,23 @@ const make = Effect.gen(function* () {
       : Effect.succeed(false);
 
   // Removes links and the folders nested repositories needed, bottom-up, keeping real files.
-  const removeLeftovers = (
+  const removeLeftovers: (
     directory: string,
-  ): Effect.Effect<boolean, PlatformError.PlatformError> =>
-    Effect.gen(function* () {
-      for (const name of yield* fileSystem.readDirectory(directory)) {
-        const entry = path.join(directory, name);
-        if (yield* isLink(entry)) {
-          yield* fileSystem.remove(entry);
-        } else if ((yield* fileSystem.stat(entry)).type === "Directory") {
-          yield* removeLeftovers(entry);
-        }
+  ) => Effect.Effect<boolean, PlatformError.PlatformError> = Effect.fn(
+    "WorkspaceWorktrees.removeLeftovers",
+  )(function* (directory: string) {
+    for (const name of yield* fileSystem.readDirectory(directory)) {
+      const entry = path.join(directory, name);
+      if (yield* isLink(entry)) {
+        yield* fileSystem.remove(entry);
+      } else if ((yield* fileSystem.stat(entry)).type === "Directory") {
+        yield* removeLeftovers(entry);
       }
-      if ((yield* fileSystem.readDirectory(directory)).length > 0) return false;
-      yield* fileSystem.remove(directory, { recursive: true });
-      return true;
-    });
+    }
+    if ((yield* fileSystem.readDirectory(directory)).length > 0) return false;
+    yield* fileSystem.remove(directory, { recursive: true });
+    return true;
+  });
 
   const remove: WorkspaceWorktrees["Service"]["remove"] = Effect.fn("WorkspaceWorktrees.remove")(
     function* (input) {

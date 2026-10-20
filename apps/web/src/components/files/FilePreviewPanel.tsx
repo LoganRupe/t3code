@@ -1036,7 +1036,9 @@ export default function FilePreviewPanel({
         : resolveFilePreviewPath(requestedPath, cwd);
   // Root-relative paths open through their root, so the rest of the app names them unambiguously.
   const fromRoot = (path: string) =>
-    rootTarget === null ? path : fileRootOpenPath(cwd, { root: rootTarget.root, relativePath: path });
+    rootTarget === null
+      ? path
+      : fileRootOpenPath(cwd, { root: rootTarget.root, relativePath: path });
   const openFromRoot = (path: string) => onOpenFile(fromRoot(path));
   // The surface is keyed by the path the store knows, not the root-relative one.
   const notifyPendingChange = (path: string, pending: boolean) =>

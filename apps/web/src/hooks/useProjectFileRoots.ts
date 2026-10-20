@@ -1,6 +1,5 @@
 import type { EnvironmentId, WorkspaceFolder } from "@t3tools/contracts";
 import { projectFileRoots, type ProjectFileRoot } from "@t3tools/client-runtime/project-file-roots";
-import { useMemo } from "react";
 
 import { useEnvironmentQuery } from "../state/query";
 import { vcsEnvironment } from "../state/vcs";
@@ -33,15 +32,11 @@ export function useProjectFileRoots(input: {
   const foldersKey = JSON.stringify(query.data?.folders ?? null);
   const cwd = input.cwd ?? "";
   const projectName = input.projectName;
-  const roots = useMemo(
-    () =>
-      projectFileRoots({
-        cwd,
-        projectName,
-        folders: (JSON.parse(foldersKey) as ReadonlyArray<WorkspaceFolder> | null) ?? undefined,
-      }),
-    [cwd, foldersKey, projectName],
-  );
+  const roots = projectFileRoots({
+    cwd,
+    projectName,
+    folders: (JSON.parse(foldersKey) as ReadonlyArray<WorkspaceFolder> | null) ?? undefined,
+  });
   return {
     roots,
     ready: input.cwd === null || query.data !== null || query.error !== null,

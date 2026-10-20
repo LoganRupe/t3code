@@ -1190,11 +1190,12 @@ export function NewTaskFlowProvider(
         // A multi-repo workspace folder that is no repository has no branch of its own:
         // HEAD stands in as its base, which the server does not read, and each repository
         // starts from its own default or pick.
-        branch: resolveProjectThreadCreationBranch({
-          workspaceMode: mode,
-          selectedBranch: workspaceSelection?.branch ?? null,
-          currentCheckoutBranch: options?.currentCheckoutBranch ?? null,
-        }) ?? (mode === "worktree" && !folderHasBranch ? "HEAD" : null),
+        branch:
+          resolveProjectThreadCreationBranch({
+            workspaceMode: mode,
+            selectedBranch: workspaceSelection?.branch ?? null,
+            currentCheckoutBranch: options?.currentCheckoutBranch ?? null,
+          }) ?? (mode === "worktree" && !folderHasBranch ? "HEAD" : null),
         worktreePath: mode === "worktree" ? null : (workspaceSelection?.worktreePath ?? null),
         ...((workspaceSelection?.startFromOrigin ?? startFromOrigin)
           ? { startFromOrigin: true }

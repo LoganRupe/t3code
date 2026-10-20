@@ -11,6 +11,7 @@ import { draftThreadShell } from "./draft-thread-shell";
 import { connectionTone } from "../connection/connectionTone";
 import { AppBar } from "../../components/ui/AppBar";
 import { ThreadId } from "@t3tools/contracts";
+import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
@@ -1145,7 +1146,7 @@ export function NewTaskDraftScreen(props: {
           accessibilityLabel={`Repositories: ${repositoryBaseRefsLabel}`}
           chevronDirection="right"
           disabled={isComposerInteractionLocked}
-          icon="square.3.layers.3d"
+          icon={PullRequestGlyph.stack}
           label={repositoryBaseRefsLabel}
           maxWidth={150}
           onPress={() => openContextPicker("NewTaskRepositories")}

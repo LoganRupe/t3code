@@ -10483,8 +10483,10 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                   messages: Stream.fromQueue(sdkMessages),
                   offer: (message: SDKUserMessage) => Effect.sync(() => void offered.push(message)),
                   setModel: () => Effect.void,
+                  applyFlagSettings: () => Effect.void,
                   setPermissionMode: () => Effect.void,
                   stopTask: () => Effect.void,
+                  backgroundTasks: () => Effect.succeed(false),
                   interrupt: Effect.void,
                   close: Queue.shutdown(sdkMessages),
                 };

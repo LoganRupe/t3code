@@ -4104,6 +4104,11 @@ it.layer(layerGitManagerTest)("GitManager", (it) => {
               ...Context.get(registry, VcsDriverRegistry.VcsDriverRegistry),
               resolve: ({ cwd }) => Effect.succeed(cwd === repoDir ? handle : resolvedHandle),
             }),
+            Effect.provide(
+              Layer.mock(WorkspaceWorktrees.WorkspaceWorktrees)({
+                isContainer: () => Effect.succeed(false),
+              }),
+            ),
             Effect.provideService(GitVcsDriver.GitVcsDriver, {
               ...git,
               switchRef: (input) =>

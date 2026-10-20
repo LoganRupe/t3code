@@ -4,6 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Electron from "electron";
 
 export class ElectronDialogPickFolderError extends Schema.TaggedError<ElectronDialogPickFolderError>()(
@@ -115,7 +116,7 @@ export const make = ElectronDialog.of({
     // Only macOS lets one dialog pick a folder or a file, so only there can a VS Code workspace
     // file stand in for the folder holding it.
     const openDialogOptions: Electron.OpenDialogOptions =
-      process.platform === "darwin"
+      (yield* HostProcess.Platform) === "darwin"
         ? {
             properties: ["openDirectory", "openFile", "createDirectory"],
             filters: [{ name: "VS Code workspace", extensions: ["code-workspace"] }],

@@ -30,7 +30,7 @@ import * as Cause from "effect/Cause";
 import { turnItemDetailRevision } from "@t3tools/client-runtime/work-log/item-detail";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { appAtomRegistry } from "./atom-registry";
 import { orchestrationEnvironment } from "./orchestration";
@@ -120,12 +120,16 @@ export function useStableFileRoots(
   roots: ReadonlyArray<ProjectFileRoot> | null | undefined,
 ): ReadonlyArray<ProjectFileRoot> | null {
   const key = roots && roots.length > 0 ? projectFileRootsKey(roots) : "";
-  return key === ""
-    ? null
-    : key.split("\0\0").map((pair) => {
-        const [label = "", path = ""] = pair.split("\0");
-        return { label, path };
-      });
+  return useMemo(
+    () =>
+      key === ""
+        ? null
+        : key.split("\0\0").map((pair) => {
+            const [label = "", path = ""] = pair.split("\0");
+            return { label, path };
+          }),
+    [key],
+  );
 }
 
 export function useDebouncedValue<A>(value: A, delayMs: number): A {

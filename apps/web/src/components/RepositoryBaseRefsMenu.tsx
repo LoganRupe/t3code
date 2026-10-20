@@ -166,12 +166,9 @@ function RepositoryBaseRefSub({
     (store) => store.byThread[threadKey]?.[repository.relativePath] ?? null,
   );
   const setBaseRef = useRepositoryBaseRefStore((store) => store.setBaseRef);
-  const refTarget = useMemo(
-    () => ({ environmentId, cwd: repository.path, query: null }),
-    [environmentId, repository.path],
-  );
+  const refTarget = { environmentId, cwd: repository.path, query: null };
   const { refs } = usePaginatedBranches(refTarget);
-  const { branchNames, defaultName } = useMemo(() => repositoryBaseRefChoices(refs), [refs]);
+  const { branchNames, defaultName } = repositoryBaseRefChoices(refs);
   const selected = pick ?? defaultName;
   const selectedLabel =
     selected && startFromOrigin && !selected.startsWith("origin/")

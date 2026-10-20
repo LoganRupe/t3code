@@ -19,7 +19,6 @@ const rowNode = (path: string) => ({
 describe("createFileTreeDragMentionController with a mention path host", () => {
   it("mentions rows by the path the host names, and cancels drags that name none", () => {
     const controller = createFileTreeDragMentionController({
-      deselect: () => {},
       mentionPath: (treePath) =>
         treePath === "team-a" ? null : treePath.replace(/^team-a\/docs/, "/work/team-a/docs"),
     });
@@ -33,7 +32,7 @@ describe("createFileTreeDragMentionController with a mention path host", () => {
     expect(transfer.getData(COMPOSER_MENTION_DRAG_TYPE)).toBe(
       "[guide.md](/work/team-a/docs/guide.md)",
     );
-    controller.handleDragEnd();
+    controller.handleDragEnd(() => {});
 
     let cancelled = 0;
     controller.handleDragStart({

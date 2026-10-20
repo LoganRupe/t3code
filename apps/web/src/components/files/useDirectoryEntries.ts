@@ -108,41 +108,40 @@ export function useDirectoryEntries(
       if (next) next();
       else running.current--;
       return result;
-    })()
-      .then((result) => {
-        if (!active.current || !result) return;
-        if (result._tag === "Success") {
-          setDirectories((previous) =>
-            new Map(previous).set(
-              directoryPath,
-              result.value.entries
-                .filter(
-                  (entry) =>
-                    entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) ===
-                    target.relativePath,
-                )
-                .map((entry) => ({
-                  ...entry,
-                  path: fileRootTreePath(roots, { root: target.root, relativePath: entry.path }),
-                })),
-            ),
-          );
-          setErrors((previous) => {
-            const next = new Map(previous);
-            next.delete(directoryPath);
-            return next;
-          });
-        } else {
-          loaded.current.delete(directoryPath);
-          const cause = Cause.squash(result.cause);
-          setErrors((previous) =>
-            new Map(previous).set(
-              directoryPath,
-              cause instanceof Error ? cause.message : "Unable to load folder.",
-            ),
-          );
-        }
-      });
+    })().then((result) => {
+      if (!active.current || !result) return;
+      if (result._tag === "Success") {
+        setDirectories((previous) =>
+          new Map(previous).set(
+            directoryPath,
+            result.value.entries
+              .filter(
+                (entry) =>
+                  entry.path.slice(0, Math.max(0, entry.path.lastIndexOf("/"))) ===
+                  target.relativePath,
+              )
+              .map((entry) => ({
+                ...entry,
+                path: fileRootTreePath(roots, { root: target.root, relativePath: entry.path }),
+              })),
+          ),
+        );
+        setErrors((previous) => {
+          const next = new Map(previous);
+          next.delete(directoryPath);
+          return next;
+        });
+      } else {
+        loaded.current.delete(directoryPath);
+        const cause = Cause.squash(result.cause);
+        setErrors((previous) =>
+          new Map(previous).set(
+            directoryPath,
+            cause instanceof Error ? cause.message : "Unable to load folder.",
+          ),
+        );
+      }
+    });
   };
 
   const load = function loadDirectory(directoryPath: string, refresh = false): Promise<void> {

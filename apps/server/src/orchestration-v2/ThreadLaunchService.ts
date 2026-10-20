@@ -315,8 +315,8 @@ const make = Effect.gen(function* () {
     // Whether `baseRef` fails to resolve in the checkout at `cwd`. Anything
     // this cannot establish is left for the launch to report: a folder that
     // is not a repository, a failing Git.
-    const isUnresolved = (cwd: string, baseRef: string) =>
-      Effect.gen(function* () {
+    const isUnresolved = Effect.fn("ThreadLaunchService.isUnresolved")(
+      function* (cwd: string, baseRef: string) {
         // `:/text` is a commit search, which cannot be asked for a commit type.
         if (baseRef.startsWith(":")) return false;
         // `git worktree add` reads `-` as the previous checkout.
@@ -333,7 +333,9 @@ const make = Effect.gen(function* () {
         // name; any ref carrying it is reason enough to let Git decide.
         if (yield* git.hasRefNamed({ cwd, refName: baseRef })) return false;
         return yield* git.hasCommit({ cwd, refName: "HEAD" });
-      }).pipe(Effect.orElseSucceed(() => false));
+      },
+      (effect) => effect.pipe(Effect.orElseSucceed(() => false)),
+    );
     const project = Option.getOrUndefined(
       yield* projects.getById(input.projectId).pipe(Effect.orElseSucceed(() => Option.none())),
     );
