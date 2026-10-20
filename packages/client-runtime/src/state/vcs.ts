@@ -276,6 +276,26 @@ export function createVcsEnvironmentAtoms<R, E>(
       cwd: target.input.cwd,
     });
 
+  const listRepositories = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:vcs:list-repositories",
+    tag: WS_METHODS.vcsListRepositories,
+    staleTimeMs: 30_000,
+    idleTtlMs: 5 * 60_000,
+  });
+  // Adding or removing a repository changes what an isolated run holds, and which refs it shows.
+  const refreshRunRepositories = (
+    target: { readonly environmentId: EnvironmentId; readonly input: { readonly cwd: string } },
+    registry: AtomRegistry.AtomRegistry,
+  ) =>
+    Effect.sync(() =>
+      registry.refresh(
+        listRepositories({
+          environmentId: target.environmentId,
+          input: { cwd: target.input.cwd },
+        }),
+      ),
+    ).pipe(Effect.andThen(invalidateRefs(target, registry)));
+
   return {
     listRefs,
     // An uncached read for decisions that must match the repository now, not
@@ -284,11 +304,20 @@ export function createVcsEnvironmentAtoms<R, E>(
       label: "environment-data:vcs:read-refs",
       tag: WS_METHODS.vcsListRefs,
     }),
-    listRepositories: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:vcs:list-repositories",
-      tag: WS_METHODS.vcsListRepositories,
-      staleTimeMs: 30_000,
-      idleTtlMs: 5 * 60_000,
+    listRepositories,
+    addRunRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:add-run-repository",
+      tag: WS_METHODS.vcsAddRunRepository,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: refreshRunRepositories,
+    }),
+    removeRunRepository: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:vcs:remove-run-repository",
+      tag: WS_METHODS.vcsRemoveRunRepository,
+      scheduler: vcsCommandScheduler,
+      concurrency: vcsCommandConcurrency,
+      onSettled: refreshRunRepositories,
     }),
     status: createEnvironmentSubscriptionAtomFamily(runtime, {
       label: "environment-data:vcs:status",

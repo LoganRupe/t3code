@@ -3822,6 +3822,83 @@ it.effect("passes each repository's chosen base to the multi-repo worktree build
   }),
 );
 
+it.effect("gives only the chosen repositories a worktree and the rest a reference", () =>
+  Effect.gen(function* () {
+    const repositories = [
+      { relativePath: ".", name: "workspace", path: "/repo" },
+      { relativePath: "game", name: "game", path: "/repo/game" },
+      { relativePath: "assets", name: "assets", path: "/repo/assets" },
+    ];
+    const harness = makeHarness({ repositories });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:launch:multi-repo-subset",
+          thread: "thread:launch:multi-repo-subset",
+          message: "Build the level",
+          workspace: {
+            type: "worktree",
+            baseRef: "main",
+            branch: "feature/level",
+            repositories: ["game"],
+          },
+        }),
+      );
+      yield* waitUntil(() =>
+        threads
+          .getThreadProjection(launched.threadId)
+          .pipe(Effect.map((projection) => projection.thread.worktreePath !== null)),
+      );
+      // The folder's own repository always gets one, even when the pick leaves it out.
+      const input = harness.createWorkspaceWorktree.mock.calls[0]?.[0];
+      assert.deepEqual(
+        input?.repositories.map((repository) => repository.relativePath),
+        [".", "game"],
+      );
+      assert.deepEqual(input?.references, [repositories[2]!]);
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("gives a large polyrepo no worktrees beyond its folder's own unless it names them", () =>
+  Effect.gen(function* () {
+    const repositories = [
+      { relativePath: ".", name: "workspace", path: "/repo" },
+      ...Array.from({ length: 9 }, (_, index) => ({
+        relativePath: `service-${index}`,
+        name: `service-${index}`,
+        path: `/repo/service-${index}`,
+      })),
+    ];
+    const harness = makeHarness({ repositories });
+    yield* Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const launched = yield* launches.launch(
+        launchInput({
+          command: "command:launch:polyrepo-default",
+          thread: "thread:launch:polyrepo-default",
+          message: "Look around",
+          workspace: { type: "worktree", baseRef: "main", branch: "feature/look" },
+        }),
+      );
+      yield* waitUntil(() =>
+        threads
+          .getThreadProjection(launched.threadId)
+          .pipe(Effect.map((projection) => projection.thread.worktreePath !== null)),
+      );
+      const input = harness.createWorkspaceWorktree.mock.calls[0]?.[0];
+      assert.deepEqual(
+        input?.repositories.map((repository) => repository.relativePath),
+        ["."],
+      );
+      assert.equal(input?.references?.length, 9);
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
 it.effect("checks each chosen base in its own repository of a multi-repo workspace", () =>
   Effect.gen(function* () {
     const harness = makeHarness({

@@ -112,7 +112,9 @@ interface CheckpointTarget {
   readonly excludePaths: ReadonlyArray<string>;
 }
 
-const MULTI_REPO_CONCURRENCY = 4;
+// Each repository's capture is a handful of short Git processes, so the limit is spawn
+// overhead, not CPU: 70 small repositories took 2.2s at 4, 1.5s at 8, and no less at 16.
+const MULTI_REPO_CONCURRENCY = 8;
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {

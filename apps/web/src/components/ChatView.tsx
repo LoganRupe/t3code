@@ -84,6 +84,7 @@ import {
 } from "@t3tools/contracts";
 import { type EnvironmentConnectionPresentation } from "@t3tools/client-runtime/connection";
 import { deriveThreadTitleSeed } from "@t3tools/client-runtime/operations";
+import { hasWorktreeRepository } from "@t3tools/client-runtime/repository-base-refs";
 import {
   wasBootstrapThreadDeleted,
   wasBootstrapThreadNotCreated,
@@ -375,7 +376,7 @@ import { threadEnvironment } from "../state/threads";
 import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
 import { vcsEnvironment } from "../state/vcs";
 import { useWorkspaceFile, useWorkspaceRepositories } from "../hooks/useWorkspaceRepositories";
-import { repositoryBaseRefsForSend } from "../repositoryBaseRefStore";
+import { repositoryBaseRefsForSend, worktreeRepositoryPicks } from "../repositoryBaseRefStore";
 import { sourceControlEnvironment } from "../state/sourceControl";
 import { useProjectClone } from "../state/projectClones";
 import { projectCloneDisplayName, projectCloneProgressSummary } from "@t3tools/contracts";
@@ -6577,6 +6578,13 @@ export default function ChatView(props: ChatViewProps) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
       return;
     }
+    if (
+      shouldCreateWorktree &&
+      !hasWorktreeRepository(worktreeRepositoryPicks(activeThread), workspaceRepositories)
+    ) {
+      setThreadError(threadIdForSend, "Pick at least one repository to give a worktree.");
+      return;
+    }
 
     const composerImagesSnapshot = [...composerImages];
     const composerFilesSnapshot = [...composerFiles];
@@ -8705,6 +8713,7 @@ export default function ChatView(props: ChatViewProps) {
               forceNewWorktree={multipleModelSelections !== null}
               environmentId={activeThread.environmentId}
               threadId={activeThread.id}
+              runWorktreePath={multipleModelSelections !== null ? null : activeThread.worktreePath}
               projectId={activeThread.projectId}
               worktreePath={activeThread.worktreePath}
               isServerThread={isServerThread}

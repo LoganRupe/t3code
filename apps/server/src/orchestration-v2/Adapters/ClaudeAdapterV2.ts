@@ -160,7 +160,12 @@ import {
 import type { ManagedServerProvider } from "@t3tools/provider-core/server/snapshot";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
-import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildReferenceRepositoriesInstructions,
+  buildRuntimeInstructions,
+  buildWorkspaceFoldersInstructions,
+  buildWorkspaceRepositoriesInstructions,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 import {
   mcpToolPresentation,
   normalizeMcpText,
@@ -1251,6 +1256,7 @@ export function makeClaudeQueryOptions(input: {
   readonly cwd: string | null;
   readonly repositories?: ReadonlyArray<VcsRepository> | undefined;
   readonly folders?: ReadonlyArray<WorkspaceFolder> | undefined;
+  readonly references?: ReadonlyArray<VcsRepository> | undefined;
   readonly attachmentsDir?: string;
   readonly settings?: ClaudeSettings;
   readonly sdkSettings?: string | ClaudeSdkSettings;
@@ -1361,6 +1367,7 @@ export function makeClaudeQueryOptions(input: {
           harness: "Claude Code",
           repositories: input.repositories,
           folders: input.folders,
+          references: input.references,
         }) + (input.mcpServers === undefined ? "" : T3_CODE_ORCHESTRATION_INSTRUCTIONS),
         ...launchAppendSystemPrompt,
       ].join("\n\n"),
@@ -1415,6 +1422,50 @@ const readClaudeAppendSystemPromptFile = Effect.fnUntraced(function* (input: {
 });
 
 export const CLAUDE_T3_MCP_TOOL_WILDCARD = "mcp__t3-code__*";
+
+/**
+ * The workspace blocks for the first prompt of a resumed Claude process, or null for a workspace
+ * without any. Claude Code restores a resumed session's original system prompt and ignores the
+ * one it is given, so a run that gained or lost a worktree since would otherwise keep the old list.
+ */
+export function claudeWorkspaceUpdate(
+  policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+): string | null {
+  const blocks = [
+    buildWorkspaceRepositoriesInstructions(policy.repositories),
+    buildWorkspaceFoldersInstructions(policy.folders),
+    buildReferenceRepositoriesInstructions(policy.references),
+  ].filter((block) => block.length > 0);
+  if (blocks.length === 0) return null;
+  return `<workspace_update>
+The project's repositories in this thread may have changed since this conversation began. These blocks are current and replace any earlier ones.
+${blocks.join("\n\n")}
+</workspace_update>`;
+}
+
+// Its own block ahead of the user's text: Claude Code reads a slash command or skill only from
+// the last text block, so the user's prompt must stay last.
+function withLeadingClaudeText(message: SDKUserMessage, text: string): SDKUserMessage {
+  const content = message.message.content;
+  return {
+    ...message,
+    message: {
+      ...message.message,
+      content: [
+        { type: "text" as const, text },
+        ...(typeof content === "string" ? [{ type: "text" as const, text: content }] : content),
+      ],
+    },
+  };
+}
+
+/** The workspace layout a Claude process was opened with: its repositories and references. */
+function claudeWorkspaceKey(policy: ProviderAdapter.ProviderAdapterV2RuntimePolicy): string {
+  return JSON.stringify([
+    (policy.repositories ?? []).map((repository) => repository.path),
+    (policy.references ?? []).map((repository) => repository.path),
+  ]);
+}
 
 // Must stay in sync with the Tool.Readonly annotations on OrchestratorToolkit;
 // ClaudeAdapterV2.test.ts cross-checks this list against the toolkit.
@@ -3405,6 +3456,9 @@ interface ClaudeLiveQueryContext {
   readonly nativeThreadId: string;
   readonly query: ClaudeAgentSdkQuerySession;
   readonly queryPolicyKey: string;
+  // A resumed process keeps the system prompt its session started with, so its
+  // first prompt carries the workspace as it is now; see claudeWorkspaceUpdate.
+  workspaceUpdatePending: boolean;
   selection: CompiledClaudeModelSelection;
   readonly closed: Deferred.Deferred<void, never>;
   lastTurn: ActiveClaudeTurnContext | null;
@@ -9051,7 +9105,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ? {}
               : { allowedTools: queryPolicy.allowedTools }),
           });
-          const queryPolicyKey = claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides);
+          // The process fixes its system prompt and directory grants when it opens, so a run
+          // that gains or loses a worktree reopens it, resumed, on the next turn.
+          const queryPolicyKey = `${claudeEffectiveQueryPolicyKey(queryPolicy, mcpOverrides)}|${claudeWorkspaceKey(turnInput.runtimePolicy)}`;
           const compiledSelection = compileClaudeModelSelection(turnInput.modelSelection);
           const resumeSessionAt = yield* getNativeConversationHeadId(turnInput.providerThread);
           const existing = yield* Ref.get(queryContext);
@@ -9159,6 +9215,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             cwd: turnInput.runtimePolicy.cwd,
             repositories: turnInput.runtimePolicy.repositories,
             folders: turnInput.runtimePolicy.folders,
+            references: turnInput.runtimePolicy.references,
             attachmentsDir,
             settings: adapterOptions.settings,
             environment: adapterOptions.environment,
@@ -9218,6 +9275,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             nativeThreadId,
             query: querySession,
             queryPolicyKey,
+            workspaceUpdatePending: shouldResume,
             selection: compiledSelection,
             closed,
             lastTurn: null,
@@ -9336,7 +9394,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             if (!goalsByNativeThread.has(nativeThreadId)) {
               goalsByNativeThread.set(nativeThreadId, turnInput.providerThread.goal ?? null);
             }
-            const userMessage =
+            const builtMessage =
               promptUuid === null
                 ? null
                 : yield* makeClaudeUserMessageWithAttachments({
@@ -9397,6 +9455,15 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               gatedFramesBeforeEcho: 0,
               heldRootFrames: [],
             };
+            const workspaceUpdate =
+              builtMessage !== null && querySession.workspaceUpdatePending
+                ? claudeWorkspaceUpdate(turnInput.runtimePolicy)
+                : null;
+            if (builtMessage !== null) querySession.workspaceUpdatePending = false;
+            const userMessage =
+              builtMessage === null || workspaceUpdate === null
+                ? builtMessage
+                : withLeadingClaudeText(builtMessage, workspaceUpdate);
             const attachTurn = Effect.gen(function* () {
               querySession.lastTurn = context;
               yield* Ref.set(activeTurn, context);

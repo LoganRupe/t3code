@@ -121,6 +121,17 @@ describe("project thread title", () => {
       repositoryBaseRefs: [{ relativePath: "../api", baseRef: "release" }],
     });
 
+    // Only the picked repositories get a worktree.
+    expect(
+      buildProjectThreadStartTurnInput({ ...spec, branch: "HEAD", repositories: ["web"] }).bootstrap
+        .prepareWorktree,
+    ).toEqual({
+      projectCwd: "/workspace",
+      baseBranch: "HEAD",
+      branch: "t3code/abc123",
+      repositories: ["web"],
+    });
+
     const withoutPicks = buildProjectThreadStartTurnInput({
       ...spec,
       branch: "main",

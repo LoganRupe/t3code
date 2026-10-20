@@ -64,6 +64,21 @@ export const IsolatedRunLayout = Schema.Struct({
       }),
     ),
   ),
+  /**
+   * The project's repositories left without a worktree, so the run reaches the project's own
+   * checkout instead. `relativePath` is where a worktree goes if one is added; `linked` says a
+   * link to the checkout sits there meanwhile, which a run whose root is a worktree cannot hold.
+   */
+  references: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        relativePath: Schema.String,
+        name: Schema.String,
+        source: Schema.String,
+        linked: Schema.Boolean,
+      }),
+    ),
+  ),
 });
 export type IsolatedRunLayout = typeof IsolatedRunLayout.Type;
 const decodeIsolatedRunLayout = Schema.decodeUnknownEffect(
@@ -91,6 +106,12 @@ export interface WorkspaceLayout {
    * the only root.
    */
   readonly folders: ReadonlyArray<WorkspaceFolder> | null;
+  /**
+   * In an isolated run, the project's repositories without a worktree: `relativePath` where a
+   * worktree would go, `path` the project's checkout, and whether a link to it sits there.
+   * Absent elsewhere.
+   */
+  readonly references?: ReadonlyArray<VcsRepository & { readonly linked: boolean }>;
 }
 
 const NOT_A_WORKSPACE: WorkspaceLayout = { repositories: [], folders: null };
@@ -247,9 +268,16 @@ const make = Effect.gen(function* () {
         name: entry.name,
         path: path.resolve(cwd, entry.relativePath),
       });
+      const references = (isolatedRun.references ?? []).map((reference) => ({
+        relativePath: reference.relativePath,
+        name: reference.name,
+        path: reference.source,
+        linked: reference.linked,
+      }));
       return {
         repositories: isolatedRun.repositories.map(place),
         folders: isolatedRun.folders === undefined ? null : isolatedRun.folders.map(place),
+        ...(references.length === 0 ? {} : { references }),
       } satisfies WorkspaceLayout;
     }
     const names = (yield* fileSystem

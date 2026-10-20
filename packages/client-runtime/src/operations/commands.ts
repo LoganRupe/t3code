@@ -159,6 +159,8 @@ interface StartThreadBootstrap {
       readonly relativePath: string;
       readonly baseRef: string;
     }>;
+    /** Repositories that get a worktree in a multi-repo workspace; absent means all. */
+    readonly repositories?: ReadonlyArray<string>;
   };
   readonly runSetupScript?: boolean;
 }
@@ -655,6 +657,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
             prepareWorktree.repositoryBaseRefs.length === 0
               ? {}
               : { repositoryBaseRefs: prepareWorktree.repositoryBaseRefs }),
+            ...(prepareWorktree.repositories === undefined
+              ? {}
+              : { repositories: prepareWorktree.repositories }),
           }
         : bootstrap?.worktreePath
           ? {

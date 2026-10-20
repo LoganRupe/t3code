@@ -170,6 +170,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.vcsListRepositories]: "vcs",
   [WS_METHODS.vcsCreateWorktree]: "vcs",
   [WS_METHODS.vcsRemoveWorktree]: "vcs",
+  [WS_METHODS.vcsAddRunRepository]: "vcs",
+  [WS_METHODS.vcsRemoveRunRepository]: "vcs",
   [WS_METHODS.vcsCreateRef]: "vcs",
   [WS_METHODS.vcsSwitchRef]: "vcs",
   [WS_METHODS.vcsInit]: "vcs",

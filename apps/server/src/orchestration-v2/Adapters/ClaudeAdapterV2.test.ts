@@ -13243,6 +13243,127 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     ),
   );
 
+  it.effect("reopens the CLI process, resumed, when the run's repositories change", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const attachmentsDir = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-claude-v2-workspace-reopen-",
+        });
+        const processQueues: Array<Queue.Queue<SDKMessage>> = [];
+        const opened: Array<{ readonly resume?: unknown; readonly systemPrompt?: unknown }> = [];
+        const offered: Array<SDKUserMessage> = [];
+        const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
+        const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
+          instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
+          settings: DEFAULT_CLAUDE_SETTINGS,
+          environment: {},
+          attachmentsDir,
+          fileSystem,
+          path: yield* Path.Path,
+          crypto: yield* Crypto.Crypto,
+          idAllocator: yield* IdAllocator.IdAllocatorV2,
+          continuationRequests: { offer: () => Effect.void },
+          queryRunner: {
+            allocateSessionId: Effect.succeed(WAKE_NATIVE_SESSION),
+            open: (input) =>
+              Effect.gen(function* () {
+                const sdkMessages = yield* Queue.unbounded<SDKMessage>();
+                processQueues.push(sdkMessages);
+                opened.push(input.options);
+                return {
+                  messages: Stream.fromQueue(sdkMessages),
+                  offer: (message: SDKUserMessage) => Effect.sync(() => void offered.push(message)),
+                  setModel: () => Effect.void,
+                  setPermissionMode: () => Effect.void,
+                  stopTask: () => Effect.void,
+                  interrupt: Effect.void,
+                  close: Queue.shutdown(sdkMessages),
+                };
+              }),
+            forkSession: () => Effect.die("unused forkSession"),
+            subagentLaunchToolUseId: () => Effect.succeed(null),
+            assertComplete: Effect.void,
+          },
+        });
+        const threadId = ThreadId.make("thread-claude-workspace-reopen");
+        const runtime = yield* adapter.openSession({
+          threadId,
+          providerSessionId: ProviderSessionId.make("provider-session-claude-workspace-reopen"),
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        const providerThread = yield* runtime.ensureThread({
+          threadId,
+          modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+          runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
+        });
+        yield* runtime.events.pipe(
+          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Effect.forkScoped,
+        );
+        const now = yield* DateTime.now;
+        const turn = (
+          ordinal: number,
+          runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
+        ) =>
+          Effect.gen(function* () {
+            yield* runtime.startTurn(
+              makeClaudeTestTurnInput({
+                threadId,
+                providerThread: { ...providerThread, status: "active" as const },
+                now,
+                attemptId: RunAttemptId.make(`attempt-claude-workspace-reopen-${ordinal}`),
+                text: `Turn ${ordinal}`,
+                attachments: [],
+                providerTurnOrdinal: ordinal,
+                runtimePolicy,
+              }),
+            );
+            yield* Queue.offer(
+              processQueues.at(-1)!,
+              makeResultFrame({
+                uuid: `00000000-0000-4000-8000-00000000090${ordinal}`,
+                result: `Turn ${ordinal} done.`,
+              }),
+            );
+            yield* awaitUntil(
+              () => events.filter((event) => event.type === "turn.terminal").length === ordinal,
+              `turn ${ordinal} terminal`,
+            );
+          });
+
+        yield* turn(1, CLAUDE_TEST_RUNTIME_POLICY);
+        yield* turn(2, CLAUDE_TEST_RUNTIME_POLICY);
+        assert.equal(processQueues.length, 1);
+
+        yield* turn(
+          3,
+          ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+            ...CLAUDE_TEST_RUNTIME_POLICY,
+            references: [{ relativePath: "assets", name: "assets", path: "/project/assets" }],
+          }),
+        );
+        assert.equal(processQueues.length, 2);
+        assert.isTrue(opened[1]?.resume !== undefined);
+        // A resumed CLI keeps its session's first system prompt, so the reopened process hears
+        // about the change in its first prompt, ahead of the user's own text.
+        assert.notInclude(JSON.stringify(offered.slice(0, 2)), "workspace_update");
+        const reopenedPrompt = offered[2]?.message.content;
+        assert.isTrue(Array.isArray(reopenedPrompt));
+        assert.include(JSON.stringify(reopenedPrompt), "<workspace_update>");
+        assert.include(JSON.stringify(reopenedPrompt), "reference_repositories");
+        const last = Array.isArray(reopenedPrompt) ? reopenedPrompt.at(-1) : undefined;
+        assert.include(last?.type === "text" ? last.text : "", "Turn 3");
+        assert.notInclude(last?.type === "text" ? last.text : "", "workspace_update");
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+      ),
+    ),
+  );
+
   it.effect("resets Waiting roster and wake eligibility when the CLI process is replaced", () =>
     Effect.scoped(
       Effect.gen(function* () {

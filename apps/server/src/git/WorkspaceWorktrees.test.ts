@@ -542,3 +542,144 @@ it.effect(
       }).pipe(Effect.provide(layerTest(baseDir)));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
+
+it.effect("links left-out repositories, then adds and removes their worktrees", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-workspace-worktrees-",
+    });
+    yield* Effect.gen(function* () {
+      const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+      const repositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+      const workspaceRoot = path.join(baseDir, "project");
+      const game = { relativePath: "game", name: "game", path: path.join(workspaceRoot, "game") };
+      const assets = {
+        relativePath: "assets",
+        name: "assets",
+        path: path.join(workspaceRoot, "assets"),
+      };
+      yield* initRepository(game.path);
+      yield* initRepository(assets.path);
+
+      const created = yield* worktrees.create({
+        workspaceRoot,
+        repositories: [game],
+        references: [assets],
+        branch: "feature/level",
+        startFromOrigin: false,
+      });
+      const assetsInRun = path.join(created.path, "assets");
+      assert.equal(yield* fileSystem.readLink(assetsInRun), assets.path);
+      assert.notInclude(yield* git(assets.path, ["worktree", "list"]), created.path);
+      const layout = yield* repositories.describe(created.path);
+      assert.deepEqual(
+        layout.repositories.map((repository) => repository.relativePath),
+        ["game"],
+      );
+      assert.deepEqual(layout.references, [{ ...assets, linked: true }]);
+
+      // Added: a worktree on the run's branch replaces the link.
+      yield* worktrees.addRepository({ path: created.path, relativePath: "assets" });
+      assert.equal(yield* git(assetsInRun, ["branch", "--show-current"]), "feature/level");
+      assert.equal((yield* fileSystem.stat(assetsInRun)).type, "Directory");
+      const added = yield* repositories.describe(created.path);
+      assert.deepEqual(
+        added.repositories.map((repository) => repository.relativePath),
+        ["game", "assets"],
+      );
+      assert.isUndefined(added.references);
+
+      // A worktree with uncommitted changes stays.
+      yield* fileSystem.writeFileString(path.join(assetsInRun, "sprite.txt"), "new\n");
+      const refused = yield* worktrees
+        .removeRepository({ path: created.path, relativePath: "assets" })
+        .pipe(Effect.flip);
+      assert.include(refused.detail, "uncommitted changes");
+      yield* git(assetsInRun, ["add", "."]);
+      yield* git(assetsInRun, ["commit", "-m", "sprite"]);
+
+      // Removed: the branch keeps the commit and the link comes back.
+      yield* worktrees.removeRepository({ path: created.path, relativePath: "assets" });
+      assert.equal(yield* fileSystem.readLink(assetsInRun), assets.path);
+      assert.equal(
+        yield* git(assets.path, ["log", "-1", "--format=%s", "feature/level"]),
+        "sprite",
+      );
+      assert.deepEqual((yield* repositories.describe(created.path)).references, [
+        { ...assets, linked: true },
+      ]);
+
+      // Added again: the existing branch is checked out rather than recreated.
+      yield* worktrees.addRepository({ path: created.path, relativePath: "assets" });
+      assert.equal(yield* git(assetsInRun, ["log", "-1", "--format=%s"]), "sprite");
+
+      const last = yield* worktrees
+        .removeRepository({ path: created.path, relativePath: "game" })
+        .pipe(
+          Effect.andThen(
+            worktrees
+              .removeRepository({ path: created.path, relativePath: "assets" })
+              .pipe(Effect.flip),
+          ),
+        );
+      assert.include(last.detail, "at least one repository");
+
+      yield* worktrees.remove({ path: created.path, force: false });
+      assert.isFalse(yield* fileSystem.exists(created.path));
+      assert.isTrue(yield* fileSystem.exists(path.join(assets.path, "README.md")));
+    }).pipe(Effect.provide(layerTest(baseDir)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("a run whose root is a worktree reaches left-out repositories where they are", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-workspace-worktrees-",
+    });
+    yield* Effect.gen(function* () {
+      const worktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
+      const repositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+      const workspaceRoot = path.join(baseDir, "project");
+      yield* initRepository(workspaceRoot);
+      const assets = {
+        relativePath: "assets",
+        name: "assets",
+        path: path.join(workspaceRoot, "assets"),
+      };
+      yield* initRepository(assets.path);
+
+      const created = yield* worktrees.create({
+        workspaceRoot,
+        repositories: [{ relativePath: ".", name: "project", path: workspaceRoot }],
+        references: [assets],
+        branch: "feature/level",
+        startFromOrigin: false,
+      });
+      // No link, so the root worktree has no stray change.
+      assert.isFalse(yield* fileSystem.exists(path.join(created.path, "assets")));
+      assert.equal(yield* git(created.path, ["status", "--porcelain"]), "");
+      assert.deepEqual((yield* repositories.describe(created.path)).references, [
+        { ...assets, linked: false },
+      ]);
+
+      yield* worktrees.addRepository({ path: created.path, relativePath: "assets" });
+      assert.equal(
+        yield* git(path.join(created.path, "assets"), ["branch", "--show-current"]),
+        "feature/level",
+      );
+      yield* worktrees.removeRepository({ path: created.path, relativePath: "assets" });
+      assert.isFalse(yield* fileSystem.exists(path.join(created.path, "assets")));
+      const root = yield* worktrees
+        .removeRepository({ path: created.path, relativePath: "." })
+        .pipe(Effect.flip);
+      assert.include(root.detail, "own repository");
+
+      yield* worktrees.remove({ path: created.path, force: false });
+      assert.isFalse(yield* fileSystem.exists(created.path));
+    }).pipe(Effect.provide(layerTest(baseDir)));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);

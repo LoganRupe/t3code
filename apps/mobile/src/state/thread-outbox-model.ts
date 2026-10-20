@@ -45,6 +45,7 @@ const QueuedThreadCreationSchema = Schema.Struct({
   startFromOrigin: Schema.optional(Schema.Boolean),
   pullRequestReference: Schema.optional(Schema.String),
   repositoryBaseRefs: Schema.optional(Schema.Array(RepositoryBaseRefSchema)),
+  worktreeRepositories: Schema.optional(Schema.Array(Schema.String)),
 });
 
 export const QueuedThreadMessageSchema = Schema.Struct({
@@ -78,6 +79,8 @@ export interface QueuedThreadCreation {
   readonly pullRequestReference?: string;
   /** Base branches picked per repository of a multi-repo workspace. */
   readonly repositoryBaseRefs?: ReadonlyArray<RepositoryBaseRef>;
+  /** Repositories of a multi-repo workspace that get a worktree; absent means all. */
+  readonly worktreeRepositories?: ReadonlyArray<string>;
 }
 
 export interface QueuedThreadMessage {

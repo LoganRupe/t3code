@@ -5,6 +5,7 @@ import {
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskBranchLabel,
   resolveNewTaskLocalWorkspaceSelection,
+  resolveRepositoryBaseRefsLabel,
 } from "./new-task-context-presentation";
 
 describe("resolveNewTaskLocalWorkspaceSelection", () => {
@@ -158,5 +159,19 @@ describe("filterNewTaskBranches", () => {
 
   it("matches a typed space against the dash a branch name uses", () => {
     expect(search("  login page ")).toEqual(["Feature/Login-Page"]);
+  });
+});
+
+describe("resolveRepositoryBaseRefsLabel", () => {
+  it("counts repositories, and how many get a worktree when not all do", () => {
+    expect(
+      resolveRepositoryBaseRefsLabel({ repositoryCount: 3, worktreeCount: 3, pickCount: 0 }),
+    ).toBe("3 repos");
+    expect(
+      resolveRepositoryBaseRefsLabel({ repositoryCount: 3, worktreeCount: 1, pickCount: 1 }),
+    ).toBe("1 of 3 repos, 1 picked");
+    expect(
+      resolveRepositoryBaseRefsLabel({ repositoryCount: 1, worktreeCount: 0, pickCount: 0 }),
+    ).toBe("0 of 1 repo");
   });
 });

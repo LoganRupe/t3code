@@ -17,6 +17,8 @@ export function useWorkspaceRepositories(input: {
 }): {
   readonly repositories: ReadonlyArray<VcsRepository>;
   readonly folders: ReadonlyArray<WorkspaceFolder> | undefined;
+  /** In an isolated run, the project's repositories it reaches as their checkouts. */
+  readonly referenceRepositories: ReadonlyArray<VcsRepository>;
   readonly settled: boolean;
   readonly error: string | null;
   readonly refresh: () => void;
@@ -29,6 +31,7 @@ export function useWorkspaceRepositories(input: {
   return {
     repositories: query.data?.repositories ?? NO_REPOSITORIES,
     folders: query.data?.folders,
+    referenceRepositories: query.data?.referenceRepositories ?? NO_REPOSITORIES,
     settled: !listing || query.data !== null || query.error !== null,
     error: query.error,
     refresh: query.refresh,
