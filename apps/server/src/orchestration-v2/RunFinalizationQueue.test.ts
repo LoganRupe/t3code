@@ -21,6 +21,7 @@ import * as RunFinalization from "./RunFinalizationService.ts";
 import * as RuntimeRequests from "./RuntimeRequestService.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 import * as ThreadTitles from "./ThreadTitleRegenerationService.ts";
+import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 
 it.effect.each([
   ["starts the next turn after a post-capture Git status failure", false],
@@ -49,6 +50,7 @@ it.effect.each([
       Layer.mergeAll(
         projections,
         Layer.mock(WorkspaceEntries.WorkspaceEntries)({ refresh: () => Effect.void }),
+        Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({ list: () => Effect.succeed([]) }),
         Layer.mock(PullRequestService.PullRequestService)({ refreshAfterTurn: () => Effect.void }),
         Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
           refreshLocalStatus: () =>

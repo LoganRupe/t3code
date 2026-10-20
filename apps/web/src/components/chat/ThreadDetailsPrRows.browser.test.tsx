@@ -237,6 +237,9 @@ it("keeps workspace controls after expanding and collapsing 70 linked pull reque
         {...threadRef}
         projectId={ProjectId.make("project")}
         worktreePath={null}
+        runWorktreePath={null}
+        openInWorkspaceFile={null}
+        workspaceRepositories={[]}
         isServerThread
         anchor={{ current: null }}
         handle={PopoverCreateHandle()}

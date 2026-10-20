@@ -1,6 +1,7 @@
 import { AndroidScreenHeader } from "../../components/ui/AndroidScreenHeader";
 import { SheetHeader } from "../../components/ui/SheetHeader";
 import { Button } from "../../components/ui/Button";
+import { PullRequestGlyph } from "../pull-requests/pullRequestGlyphs";
 import * as Dialog from "../../components/ui/Dialog";
 import { useAtomValue } from "@effect/atom-react";
 import * as Cause from "effect/Cause";
@@ -1608,7 +1609,7 @@ export function NewTaskDraftScreen(props: {
           accessibilityLabel={`Repositories: ${repositoryBaseRefsLabel}`}
           chevronDirection="right"
           disabled={isComposerInteractionLocked}
-          icon="square.3.layers.3d"
+          icon={PullRequestGlyph.stack}
           label={repositoryBaseRefsLabel}
           maxWidth={150}
           onPress={() => openContextPicker("NewTaskRepositories")}

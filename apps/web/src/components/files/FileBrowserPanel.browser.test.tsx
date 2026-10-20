@@ -59,6 +59,8 @@ describe("Files panel", () => {
     environmentId: EnvironmentId.make("test-environment"),
     cwd: "/workspace",
     projectName: "Test project",
+    roots: [{ label: "Test project", path: "/workspace" }],
+    rootsReady: true,
     selectedPath: null,
     selectedPathRevealId: 0,
     onOpenFile: vi.fn(),

@@ -153,6 +153,7 @@ function FavoriteEditorFallback() {
     keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
     availableEditors: editors,
     openInCwd: "/work/project",
+    openInWorkspaceFile: null,
   });
   return null;
 }

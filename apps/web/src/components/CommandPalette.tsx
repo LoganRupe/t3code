@@ -2200,7 +2200,9 @@ function OpenCommandPaletteDialog(props: {
       return;
     }
 
-    const cwd = projectFolderForPath(resolveProjectPathForDispatch(rawCwd, input.currentProjectCwd));
+    const cwd = projectFolderForPath(
+      resolveProjectPathForDispatch(rawCwd, input.currentProjectCwd),
+    );
     if (cwd.length === 0) return;
 
     const existing = findProjectByPath(

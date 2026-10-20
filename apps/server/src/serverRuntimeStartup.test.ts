@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   DEFAULT_SERVER_SETTINGS,
   DEFAULT_MODEL,
@@ -45,6 +46,8 @@ import { ServerActivation } from "./serverActivation.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
+import * as SqlitePersistence from "./persistence/Sqlite.ts";
+import * as WorkspaceRepositories from "./workspace/WorkspaceRepositories.ts";
 
 it("uses the canonical Codex model for auto-bootstrap", () => {
   assert.deepEqual(ServerRuntimeStartup.getAutoBootstrapThreadModelSelection(), {
@@ -216,6 +219,9 @@ it.effect.each([
         }),
         Layer.mock(GitVcsDriver.GitVcsDriver)({}),
         Layer.mock(AnalyticsService.AnalyticsService)({}),
+        Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({}),
+        SqlitePersistence.layerMemory,
+        NodeServices.layer,
         Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
         Layer.mock(ExternalLauncher.ExternalLauncher)({}),
         Layer.mock(HttpServer.HttpServer)({
