@@ -82,6 +82,8 @@ export interface ProjectSetupScriptRunnerInput {
   readonly worktreePath: string;
   readonly preferredTerminalId?: string;
   readonly trigger?: "setup" | "settle";
+  /** In an isolated run, run only in this repository's worktree, by its `relativePath`. */
+  readonly onlyRepository?: string;
   readonly project?: {
     readonly id: ProjectId;
     readonly workspaceRoot: string;
@@ -420,6 +422,11 @@ export const make = Effect.gen(function* () {
       isolatedRun === null || isolatedRun.repositories.length === 0
         ? [{ cwd: input.worktreePath, terminalId, name: null, repoRoot: null }]
         : isolatedRun.repositories
+            .filter(
+              (repository) =>
+                input.onlyRepository === undefined ||
+                repository.relativePath === input.onlyRepository,
+            )
             .toSorted((left, right) =>
               left.relativePath === "." ? -1 : right.relativePath === "." ? 1 : 0,
             )
@@ -432,6 +439,7 @@ export const make = Effect.gen(function* () {
               name: repository.name,
               repoRoot: repository.source,
             }));
+    if (targets.length === 0) return { status: "no-script" } as const;
 
     const launch = Effect.fn("ProjectSetupScriptRunner.launch")(function* (target: ScriptTarget) {
       const env = {

@@ -2,6 +2,7 @@ import type { ProviderInteractionMode, VcsRepository, WorkspaceFolder } from "@t
 import type { V2TurnStartParams__AdditionalContextEntry } from "effect-codex-app-server/schema";
 import {
   buildRuntimeInstructions,
+  buildReferenceRepositoriesInstructions,
   buildWorkspaceFoldersInstructions,
   buildWorkspaceRepositoriesInstructions,
 } from "@t3tools/provider-core/server/runtimeInstructions";
@@ -197,6 +198,7 @@ export interface CodexRuntimeInfo {
   readonly reasoningEffort?: string | undefined;
   readonly repositories?: ReadonlyArray<VcsRepository> | undefined;
   readonly folders?: ReadonlyArray<WorkspaceFolder> | undefined;
+  readonly references?: ReadonlyArray<VcsRepository> | undefined;
 }
 
 export function buildCodexDeveloperInstructions(interactionMode: ProviderInteractionMode): string {
@@ -232,14 +234,16 @@ export function buildCodexAdditionalContext(
   };
 }
 
-/** The workspace's repository and folder lists alone, for turns that run without the `t3-code` MCP server. */
+/** The workspace's repository, folder and reference lists alone, for turns that run without the `t3-code` MCP server. */
 export function buildCodexRepositoriesContext(
   repositories: ReadonlyArray<VcsRepository> | undefined,
   folders?: ReadonlyArray<WorkspaceFolder> | undefined,
+  references?: ReadonlyArray<VcsRepository> | undefined,
 ): Record<string, V2TurnStartParams__AdditionalContextEntry> | undefined {
   const value = [
     buildWorkspaceRepositoriesInstructions(repositories),
     buildWorkspaceFoldersInstructions(folders),
+    buildReferenceRepositoriesInstructions(references),
   ]
     .filter((section) => section.length > 0)
     .join("\n\n");

@@ -166,6 +166,17 @@ folders are linked into that copy rather than duplicated, so edits to them chang
 With a `.code-workspace` file, only the folders it lists are linked, along with top-level files and
 dot-folders.
 
+You don't have to copy every repository. The same repositories menu has a checkbox per
+repository: a checked one gets its own copy, and an unchecked one stays the project's original
+checkout, which the agent can read but asks before changing. A big assets repository, or a
+polyrepo where a task only touches two of its repositories, doesn't get copied. With more than 8
+repositories, none is checked until you pick, and the folder's own repository is always copied.
+Once the thread is running, the repositories menu beside the branch controls (and in the thread
+panel) lists every repository of the thread's copy: check one to add it, which copies it onto
+the thread's branch and runs the setup script in it, or uncheck one to remove its copy. Removing
+keeps the branch and its commits, and refuses while the copy has uncommitted changes. A thread
+can't rewind to a turn from before a repository was added.
+
 With a `.code-workspace` file, the files panel and `@` search span every folder the file lists,
 whether or not it is a Git repository, under the names the file gives them. Two folders with the
 same name are told apart by their parent folder. Files in a listed folder outside the project

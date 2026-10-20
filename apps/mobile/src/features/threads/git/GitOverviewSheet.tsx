@@ -89,6 +89,8 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
   });
   const {
     repositories,
+    references,
+    runCwd,
     repository,
     selectRepository,
     gitCwd: selectedThreadCwd,
@@ -261,10 +263,13 @@ function GitOverviewSheetContent(props: GitOverviewSheetProps) {
         ) : undefined
       }
     >
-      {repositories.length > 1 ? (
+      {repositories.length > 1 || references.length > 0 ? (
         <GitRepositoryPicker
           environmentId={environmentId}
+          threadId={threadId}
           repositories={repositories}
+          references={references}
+          runCwd={runCwd}
           selectedRelativePath={repository?.relativePath ?? null}
           disabled={busy}
           onSelect={selectRepository}

@@ -109,9 +109,12 @@ import { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { type VcsRef } from "@t3tools/client-runtime/state/vcs";
 import {
   folderHasOwnBranch,
+  hasWorktreeRepository,
   repositoriesWithOwnBaseRef,
   repositoryBaseRefsFor,
   withRepositoryBaseRef,
+  withWorktreeRepository,
+  worktreeRepositoriesFor,
   type RepositoryBaseRef,
 } from "@t3tools/client-runtime/repository-base-refs";
 import {
@@ -191,6 +194,10 @@ type NewTaskFlowContextValue = {
   readonly baseRefRepositories: ReadonlyArray<VcsRepository>;
   /** The base branches picked for `baseRefRepositories`; the rest use their default branch. */
   readonly repositoryBaseRefs: ReadonlyArray<RepositoryBaseRef>;
+  /** The `baseRefRepositories` that get a worktree in a new isolated run, by `relativePath`. */
+  readonly worktreeRepositories: ReadonlyArray<string>;
+  /** False when a new isolated run would give no repository a worktree, so it cannot start. */
+  readonly hasWorktreeRepository: boolean;
   /**
    * False for a multi-repo workspace folder that is no repository itself: it has no branch to
    * pick, and each repository starts from its own base.
@@ -245,6 +252,8 @@ type NewTaskFlowContextValue = {
   readonly setStartFromOrigin: (value: boolean) => void;
   /** A null `baseRef` returns the repository to its default branch. */
   readonly setRepositoryBaseRef: (relativePath: string, baseRef: string | null) => void;
+  /** Gives one repository a worktree in the new run, or leaves it as the project's checkout. */
+  readonly setWorktreeRepository: (relativePath: string, included: boolean) => void;
   readonly beginEditingPendingTask: (messageId: string) => boolean;
   readonly finishEditingPendingTask: () => void;
   readonly cancelEditingPendingTask: () => void;
@@ -587,6 +596,7 @@ export function NewTaskFlowProvider(
   const startFromOrigin =
     isGitRepo && (draftStartFromOrigin ?? projectSettings.settings.newWorktreesStartFromOrigin);
   const draftRepositoryBaseRefs = selectedProjectDraft.workspaceSelection?.repositoryBaseRefs;
+  const draftWorktreeRepositories = selectedProjectDraft.workspaceSelection?.worktreeRepositories;
   const defaultRuntimeMode = editingPendingTask
     ? (editingPendingTask.runtimeMode ?? DEFAULT_RUNTIME_MODE)
     : projectSettings.settings.defaultRuntimeMode;
@@ -737,6 +747,11 @@ export function NewTaskFlowProvider(
     draftRepositoryBaseRefs ?? [],
     baseRefRepositories,
   );
+  const worktreeRepositories = worktreeRepositoriesFor(
+    draftWorktreeRepositories,
+    workspaceRepositories,
+  );
+  const canStartWorktree = hasWorktreeRepository(draftWorktreeRepositories, workspaceRepositories);
   const branchSearchIsDebouncing = branchSearchQuery !== debouncedBranchQuery;
   const branchesLoading =
     branchSearchIsDebouncing || (branchState.isPending && branchState.data === null);
@@ -860,6 +875,7 @@ export function NewTaskFlowProvider(
         worktreePath: mode === "local" ? localSelection.worktreePath : selectedWorktreePath,
         ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
         ...(draftRepositoryBaseRefs ? { repositoryBaseRefs: draftRepositoryBaseRefs } : {}),
+        ...(draftWorktreeRepositories ? { worktreeRepositories: draftWorktreeRepositories } : {}),
       },
     });
   };
@@ -889,11 +905,13 @@ export function NewTaskFlowProvider(
         worktreePath: localSelection.worktreePath,
         ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
         ...(draftRepositoryBaseRefs ? { repositoryBaseRefs: draftRepositoryBaseRefs } : {}),
+        ...(draftWorktreeRepositories ? { worktreeRepositories: draftWorktreeRepositories } : {}),
       },
     });
   }, [
     availableBranches,
     draftRepositoryBaseRefs,
+    draftWorktreeRepositories,
     draftStartFromOrigin,
     selectedProject,
     selectedProjectDraftKey,
@@ -916,6 +934,7 @@ export function NewTaskFlowProvider(
         }),
         ...(draftStartFromOrigin !== undefined ? { startFromOrigin: draftStartFromOrigin } : {}),
         ...(draftRepositoryBaseRefs ? { repositoryBaseRefs: draftRepositoryBaseRefs } : {}),
+        ...(draftWorktreeRepositories ? { worktreeRepositories: draftWorktreeRepositories } : {}),
       },
     });
   };
@@ -931,6 +950,7 @@ export function NewTaskFlowProvider(
         worktreePath: selectedWorktreePath,
         startFromOrigin: value,
         ...(draftRepositoryBaseRefs ? { repositoryBaseRefs: draftRepositoryBaseRefs } : {}),
+        ...(draftWorktreeRepositories ? { worktreeRepositories: draftWorktreeRepositories } : {}),
       },
     });
   };
@@ -951,6 +971,26 @@ export function NewTaskFlowProvider(
       workspaceSelection: {
         ...selection,
         ...(next.length > 0 ? { repositoryBaseRefs: next } : {}),
+      },
+    });
+  };
+
+  const setWorktreeRepository = (relativePath: string, included: boolean) => {
+    if (!selectedProjectDraftKey) {
+      return;
+    }
+    const live = getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection;
+    const { worktreeRepositories: picks, ...selection } = live ?? {
+      mode: workspaceMode,
+      branch: selectedBranchName,
+      worktreePath: selectedWorktreePath,
+    };
+    // Start from what the composer shows, so the first toggle keeps the default set's others.
+    const current = worktreeRepositoriesFor(picks, workspaceRepositories);
+    updateComposerDraftSettings(selectedProjectDraftKey, {
+      workspaceSelection: {
+        ...selection,
+        worktreeRepositories: withWorktreeRepository(current, relativePath, included),
       },
     });
   };
@@ -1036,6 +1076,9 @@ export function NewTaskFlowProvider(
           ...(message.creation.repositoryBaseRefs
             ? { repositoryBaseRefs: message.creation.repositoryBaseRefs }
             : {}),
+          ...(message.creation.worktreeRepositories
+            ? { worktreeRepositories: message.creation.worktreeRepositories }
+            : {}),
         },
       });
     }
@@ -1090,8 +1133,23 @@ export function NewTaskFlowProvider(
     // Picks for repositories the workspace no longer lists are dropped. Before the list has
     // loaded every pick goes, and the server ignores any it does not list.
     const picks = workspaceSelection?.repositoryBaseRefs ?? [];
+    // Only repositories that get a worktree have a base to start from. The selection is sent
+    // as listed, so a queued task keeps it even if the workspace changes before it drains;
+    // before the list has loaded nothing is sent and every repository gets one.
+    const selectedRepositories =
+      workspaceRepositories.length > 0
+        ? worktreeRepositoriesFor(workspaceSelection?.worktreeRepositories, workspaceRepositories)
+        : undefined;
+    const worktreeBaseRefRepositories =
+      selectedRepositories === undefined
+        ? baseRefRepositories
+        : baseRefRepositories.filter((repository) =>
+            selectedRepositories.includes(repository.relativePath),
+          );
     const repositoryBaseRefsToSend =
-      baseRefRepositories.length > 0 ? repositoryBaseRefsFor(picks, baseRefRepositories) : picks;
+      baseRefRepositories.length > 0
+        ? repositoryBaseRefsFor(picks, worktreeBaseRefRepositories)
+        : picks;
     const projectTitle = usingPendingSnapshot
       ? editingPendingTask?.creation?.projectTitle
       : selectedProject.title;
@@ -1143,6 +1201,9 @@ export function NewTaskFlowProvider(
           : {}),
         ...(mode === "worktree" && repositoryBaseRefsToSend.length > 0
           ? { repositoryBaseRefs: repositoryBaseRefsToSend }
+          : {}),
+        ...(mode === "worktree" && selectedRepositories !== undefined
+          ? { worktreeRepositories: selectedRepositories }
           : {}),
       },
       createdAt: metadata.createdAt,
@@ -1260,6 +1321,8 @@ export function NewTaskFlowProvider(
     startFromOrigin,
     baseRefRepositories,
     repositoryBaseRefs,
+    worktreeRepositories,
+    hasWorktreeRepository: canStartWorktree,
     folderHasBranch,
     draftKey: selectedProjectDraftKey,
     pullRequestReference: selectedProjectDraft.workspaceSelection?.pullRequestReference,
@@ -1298,6 +1361,7 @@ export function NewTaskFlowProvider(
     selectBranch,
     setStartFromOrigin,
     setRepositoryBaseRef,
+    setWorktreeRepository,
     beginEditingPendingTask,
     finishEditingPendingTask,
     cancelEditingPendingTask,

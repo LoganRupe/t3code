@@ -2048,6 +2048,7 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                       reasoningEffort: effort,
                       repositories: turnInput.runtimePolicy.repositories,
                       folders: turnInput.runtimePolicy.folders,
+                      references: turnInput.runtimePolicy.references,
                     }),
                   },
                   ...parts,

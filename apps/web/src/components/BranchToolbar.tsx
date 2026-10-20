@@ -50,6 +50,7 @@ import { type AddProjectTarget, useAddProjectTargets } from "../hooks/useAddProj
 import { BranchToolbarEnvModeSelector } from "./BranchToolbarEnvModeSelector";
 import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import { RepositoryBaseRefsMenu } from "./RepositoryBaseRefsMenu";
+import { RunRepositoriesMenu } from "./RunRepositoriesMenu";
 import { ThreadDetailsControl } from "./chat/ThreadDetailsControl";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
@@ -871,6 +872,13 @@ export const BranchToolbar = memo(function BranchToolbar({
           repositories={otherRepositories}
           startFromOrigin={startFromOrigin}
           {...(showBranchSelector ? {} : { onStartFromOriginChange })}
+        />
+      ) : null}
+      {showGitControls && activeWorktreePath ? (
+        <RunRepositoriesMenu
+          environmentId={environmentId}
+          threadId={threadId}
+          cwd={activeWorktreePath}
         />
       ) : null}
       {showBranchSelector ? (

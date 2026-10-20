@@ -199,15 +199,18 @@ function outsideWorkspaceRepositoryPaths(
 
 /**
  * Absolute paths of everything the workspace lists outside its folder, repositories and plain
- * folders alike, for agents' directory grants.
+ * folders alike, plus an isolated run's reference checkouts, for agents' directory grants.
  */
 export function outsideWorkspacePaths(workspace: {
   readonly repositories?: ReadonlyArray<VcsRepository> | undefined;
   readonly folders?: ReadonlyArray<WorkspaceFolder> | undefined;
+  /** Checkouts an isolated run reaches without a worktree; each sits outside it, even if linked. */
+  readonly references?: ReadonlyArray<VcsRepository> | undefined;
 }): ReadonlyArray<string> {
   return [
     ...outsideWorkspaceRepositoryPaths(workspace.repositories),
     ...outsideWorkspaceRepositoryPaths(workspace.folders),
+    ...(workspace.references ?? []).map((repository) => repository.path),
   ];
 }
 
@@ -236,8 +239,25 @@ export const VcsListRepositoriesResult = Schema.Struct({
    * file, when the cwd itself is the only root.
    */
   folders: Schema.optional(Schema.Array(WorkspaceFolder)),
+  /**
+   * In an isolated run, the project's repositories that have no worktree in it, which the run
+   * reaches as the project's own checkouts. `relativePath` is where a worktree would go in the
+   * run, and `path` is the project's checkout. Absent outside an isolated run, or when every
+   * repository has a worktree.
+   */
+  referenceRepositories: Schema.optional(Schema.Array(VcsRepository)),
 });
 export type VcsListRepositoriesResult = typeof VcsListRepositoriesResult.Type;
+
+/** Adds or removes one repository's worktree in an isolated run, by its `relativePath` there. */
+export const VcsRunRepositoryInput = Schema.Struct({
+  /** The isolated run's folder. */
+  cwd: TrimmedNonEmptyStringSchema,
+  relativePath: TrimmedNonEmptyStringSchema,
+  /** The thread that runs there. An added repository runs its project's setup script in it. */
+  threadId: Schema.optional(ThreadId),
+});
+export type VcsRunRepositoryInput = typeof VcsRunRepositoryInput.Type;
 
 export const VcsCreateWorktreeInput = Schema.Struct({
   cwd: TrimmedNonEmptyStringSchema,

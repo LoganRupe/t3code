@@ -804,6 +804,7 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
               reasoningEffort: effort ?? undefined,
               repositories: input.runtimePolicy.repositories,
               folders: input.runtimePolicy.folders,
+              references: input.runtimePolicy.references,
             },
             {
               browser: input.browserToolsAvailable ?? true,
@@ -813,6 +814,7 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
         : buildCodexRepositoriesContext(
             input.runtimePolicy.repositories,
             input.runtimePolicy.folders,
+            input.runtimePolicy.references,
           );
     const additionalContext =
       t3Context === undefined && Object.keys(appContext).length === 0

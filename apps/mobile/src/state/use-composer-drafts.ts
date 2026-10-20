@@ -366,6 +366,8 @@ export interface ComposerDraftWorkspaceSelection {
   readonly pullRequestReference?: string;
   /** Base branches picked per repository of a multi-repo workspace; others use their default. */
   readonly repositoryBaseRefs?: ReadonlyArray<RepositoryBaseRef>;
+  /** Repositories picked for a worktree in a multi-repo workspace; absent means the default set. */
+  readonly worktreeRepositories?: ReadonlyArray<string>;
 }
 
 export type ComposerDraftSettingsUpdate = Pick<
@@ -380,6 +382,7 @@ const ComposerDraftWorkspaceSelectionSchema = Schema.Struct({
   startFromOrigin: Schema.optional(Schema.Boolean),
   pullRequestReference: Schema.optional(Schema.String),
   repositoryBaseRefs: Schema.optional(Schema.Array(RepositoryBaseRefSchema)),
+  worktreeRepositories: Schema.optional(Schema.Array(Schema.String)),
 });
 
 const ComposerDraftProjectSchema = Schema.Struct({
@@ -1169,7 +1172,9 @@ export async function removeDeliveredCloudQueuedMessage(
             (editor.workspaceSelection.startFromOrigin ?? false) !==
               (message.creation?.startFromOrigin ?? false) ||
             JSON.stringify(editor.workspaceSelection.repositoryBaseRefs ?? []) !==
-              JSON.stringify(message.creation?.repositoryBaseRefs ?? []))))
+              JSON.stringify(message.creation?.repositoryBaseRefs ?? []) ||
+            JSON.stringify(editor.workspaceSelection.worktreeRepositories ?? null) !==
+              JSON.stringify(message.creation?.worktreeRepositories ?? null))))
     )
       continue;
     const drafts = { ...saved.drafts };

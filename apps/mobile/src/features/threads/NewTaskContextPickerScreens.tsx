@@ -19,7 +19,11 @@ import {
 } from "@t3tools/client-runtime/state/runtime";
 import * as Haptics from "expo-haptics";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { repositoryBaseRefChoices } from "@t3tools/client-runtime/repository-base-refs";
+import {
+  filterRepositories,
+  REPOSITORY_FILTER_THRESHOLD,
+  repositoryBaseRefChoices,
+} from "@t3tools/client-runtime/repository-base-refs";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Platform, Pressable, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -43,6 +47,7 @@ import {
 import { useNativeMailSearchToolbar } from "../../native/use-native-mail-search-toolbar";
 import { branchBadgeLabel, useNewTaskFlow } from "./new-task-flow-provider";
 import { checkoutNewTaskBranch } from "./checkout-new-task-branch";
+import { RepositoryFilterField } from "./RepositoryFilterField";
 
 import { useEnvironmentPresentation } from "../../state/presentation";
 import { useRemoteConnections } from "../../state/use-remote-environment-registry";
@@ -529,14 +534,19 @@ function RepositoryRow(props: {
 }
 
 /**
- * The repositories of a multi-repo workspace, each with the base its copy in a new worktree
- * starts from. Carries the start-from-origin switch when the folder has no branch picker of its
- * own to hold it.
+ * The repositories of a multi-repo workspace: which get a copy in a new worktree, and the base
+ * each copy starts from. Carries the start-from-origin switch when the folder has no branch
+ * picker of its own to hold it.
  */
 export function NewTaskRepositoriesPickerRouteScreen() {
   const flow = useNewTaskFlow();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const [query, setQuery] = useState("");
+  const shown = filterRepositories(flow.baseRefRepositories, query);
+  const withWorktree = flow.baseRefRepositories.filter((repository) =>
+    flow.worktreeRepositories.includes(repository.relativePath),
+  );
   return (
     <View className="flex-1 bg-sheet" collapsable={false}>
       <NativeStackScreenOptions
@@ -576,39 +586,66 @@ export function NewTaskRepositoriesPickerRouteScreen() {
               />
             </View>
           )}
+          {flow.baseRefRepositories.length > REPOSITORY_FILTER_THRESHOLD ? (
+            <RepositoryFilterField value={query} onChange={setQuery} />
+          ) : null}
           <PickerSurface>
-            {flow.baseRefRepositories.map((repository, index) => {
-              const pick =
-                flow.repositoryBaseRefs.find(
-                  (candidate) => candidate.relativePath === repository.relativePath,
-                )?.baseRef ?? null;
-              return (
-                <RepositoryRow
-                  key={repository.relativePath}
-                  isLast={index === flow.baseRefRepositories.length - 1}
-                  onPress={() =>
-                    navigation.dispatch(
-                      StackActions.push("NewTaskRepositoryBranch", {
-                        relativePath: repository.relativePath,
-                      }),
-                    )
-                  }
-                  subtitle={
-                    pick === null
-                      ? "Default branch"
-                      : flow.startFromOrigin && !pick.startsWith("origin/")
-                        ? `origin/${pick}`
-                        : pick
-                  }
-                  title={repository.name}
-                />
-              );
-            })}
+            {shown.length === 0 ? (
+              <Text className="px-4 py-3 text-sm text-foreground-muted">
+                No matching repositories
+              </Text>
+            ) : null}
+            {shown.map((repository) => (
+              <ToggleRow
+                key={repository.relativePath}
+                onValueChange={(included) =>
+                  flow.setWorktreeRepository(repository.relativePath, included)
+                }
+                title={repository.name}
+                value={flow.worktreeRepositories.includes(repository.relativePath)}
+              />
+            ))}
           </PickerSurface>
           <Text className="px-4 pt-2 text-xs text-foreground-muted">
-            Each repository gets its own copy in the new worktree, starting from its default branch
-            unless you pick another.
+            Switched-on repositories get their own copy in the new worktree. The others stay
+            reachable as the project's checkout, and you can add them to the thread later.
           </Text>
+          {withWorktree.length > 0 ? (
+            <View className="mt-6">
+              <PickerSurface>
+                {withWorktree.map((repository, index) => {
+                  const pick =
+                    flow.repositoryBaseRefs.find(
+                      (candidate) => candidate.relativePath === repository.relativePath,
+                    )?.baseRef ?? null;
+                  return (
+                    <RepositoryRow
+                      key={repository.relativePath}
+                      isLast={index === withWorktree.length - 1}
+                      onPress={() =>
+                        navigation.dispatch(
+                          StackActions.push("NewTaskRepositoryBranch", {
+                            relativePath: repository.relativePath,
+                          }),
+                        )
+                      }
+                      subtitle={
+                        pick === null
+                          ? "Default branch"
+                          : flow.startFromOrigin && !pick.startsWith("origin/")
+                            ? `origin/${pick}`
+                            : pick
+                      }
+                      title={repository.name}
+                    />
+                  );
+                })}
+              </PickerSurface>
+              <Text className="px-4 pt-2 text-xs text-foreground-muted">
+                Each starts from its default branch unless you pick another.
+              </Text>
+            </View>
+          ) : null}
         </ScrollView>
       </ScreenContent>
     </View>

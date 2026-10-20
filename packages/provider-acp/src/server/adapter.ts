@@ -7226,6 +7226,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 model: turnInput.modelSelection.model,
                 repositories: turnInput.runtimePolicy.repositories,
                 folders: turnInput.runtimePolicy.folders,
+                references: turnInput.runtimePolicy.references,
               }),
             });
           }

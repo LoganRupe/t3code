@@ -805,14 +805,18 @@ export function NewTaskDraftScreen(props: {
   });
   const showBranchLoading =
     environmentConnected && flow.branchesLoading && flow.availableBranches.length === 0;
-  // A new worktree of a multi-repo workspace gives every repository its own copy; those other
-  // than the folder's own can each start from a branch the user picks.
+  // A new worktree of a multi-repo workspace gives the repositories the user picks their own
+  // copy; those other than the folder's own can each start from a branch the user picks.
   const showsRepositoryBaseRefs =
     flow.workspaceMode === "worktree" && flow.baseRefRepositories.length > 0;
   const repositoryBaseRefsLabel = resolveRepositoryBaseRefsLabel({
     repositoryCount: flow.baseRefRepositories.length,
-    pickCount: flow.repositoryBaseRefs.length,
+    worktreeCount: flow.worktreeRepositories.length,
+    pickCount: flow.repositoryBaseRefs.filter((pick) =>
+      flow.worktreeRepositories.includes(pick.relativePath),
+    ).length,
   });
+  const needsWorktreeRepository = flow.workspaceMode === "worktree" && !flow.hasWorktreeRepository;
 
   const {
     onPickDraftMedia: handlePickMedia,
@@ -987,7 +991,9 @@ export function NewTaskDraftScreen(props: {
           : flow.workspaceMode === "worktree" &&
               (!flow.isGitRepoKnown || (flow.folderHasBranch && !flow.selectedBranchName))
             ? "Choose a base branch before creating a worktree."
-            : null
+            : needsWorktreeRepository
+              ? "Pick a repository for the worktree."
+              : null
       : "Wait for shared content to finish importing.";
   const chooseProject = () => {
     if (isComposerInteractionLocked) {
@@ -1136,7 +1142,7 @@ export function NewTaskDraftScreen(props: {
       {showsRepositoryBaseRefs ? (
         <ComposerInlineControl
           accessibilityHint="Picks a base branch for each repository"
-          accessibilityLabel={`Base branches: ${repositoryBaseRefsLabel}`}
+          accessibilityLabel={`Repositories: ${repositoryBaseRefsLabel}`}
           chevronDirection="right"
           disabled={isComposerInteractionLocked}
           icon="square.3.layers.3d"

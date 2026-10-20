@@ -16,7 +16,11 @@ import {
   makeThreadErrorSetter,
 } from "../ChatView.logic";
 import { isUsageLimitsCommand } from "@t3tools/shared/usageLimits";
-import { repositoryBaseRefsForSend } from "../../repositoryBaseRefStore";
+import { hasWorktreeRepository } from "@t3tools/client-runtime/repository-base-refs";
+import {
+  repositoryBaseRefsForSend,
+  worktreeRepositoryPicks,
+} from "../../repositoryBaseRefStore";
 import {
   AuthOrchestrationOperateScope,
   DEFAULT_MODEL,
@@ -796,6 +800,13 @@ export function useComposerSend(input: ComposerSendInput) {
     });
     if (missingWorktreeBaseBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
+      return;
+    }
+    if (
+      baseBranchForWorktree &&
+      !hasWorktreeRepository(worktreeRepositoryPicks(activeThread), workspaceRepositories)
+    ) {
+      setThreadError(threadIdForSend, "Pick at least one repository to give a worktree.");
       return;
     }
     // Records bind attachments by the id each side knows: the local id for the optimistic

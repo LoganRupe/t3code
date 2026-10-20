@@ -3768,6 +3768,7 @@ export default function ChatView(props: ChatViewProps) {
               forceNewWorktree={multipleModelSelections !== null}
               environmentId={activeThread.environmentId}
               threadId={activeThread.id}
+              runWorktreePath={multipleModelSelections !== null ? null : activeThread.worktreePath}
               projectId={activeThread.projectId}
               worktreePath={activeThread.worktreePath}
               isServerThread={isServerThread}

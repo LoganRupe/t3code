@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  filterRepositories,
   folderHasOwnBranch,
+  hasWorktreeRepository,
   repositoriesWithOwnBaseRef,
   repositoryBaseRefChoices,
   repositoryBaseRefsFor,
   withRepositoryBaseRef,
+  worktreeRepositoriesFor,
+  worktreeRepositoriesForSend,
 } from "./repositoryBaseRefs.ts";
 
 const ref = (
@@ -95,5 +99,47 @@ describe("folderHasOwnBranch", () => {
 
   it("is false for a workspace folder that only holds repositories", () => {
     expect(folderHasOwnBranch([{ relativePath: "api" }, { relativePath: "../web" }])).toBe(false);
+  });
+});
+
+describe("worktree repositories", () => {
+  const workspace = (count: number, withRoot = false) => [
+    ...(withRoot ? [{ relativePath: "." }] : []),
+    ...Array.from({ length: count }, (_, index) => ({ relativePath: `repo-${index}` })),
+  ];
+
+  it("gives every repository a worktree in a small workspace and none in a large one", () => {
+    expect(worktreeRepositoriesFor(undefined, workspace(2, true))).toEqual(["repo-0", "repo-1"]);
+    expect(worktreeRepositoriesFor(undefined, workspace(70))).toEqual([]);
+  });
+
+  it("keeps only picks the workspace still lists", () => {
+    expect(worktreeRepositoriesFor(["repo-1", "gone"], workspace(3))).toEqual(["repo-1"]);
+  });
+
+  it("sends nothing when every repository gets a worktree, so older servers behave the same", () => {
+    expect(worktreeRepositoriesForSend(undefined, workspace(2))).toBeUndefined();
+    expect(worktreeRepositoriesForSend(["repo-0"], workspace(2))).toEqual(["repo-0"]);
+    expect(worktreeRepositoriesForSend(undefined, [])).toBeUndefined();
+  });
+
+  it("needs a pick only when the folder is no repository of its own", () => {
+    expect(hasWorktreeRepository([], workspace(2))).toBe(false);
+    expect(hasWorktreeRepository([], workspace(2, true))).toBe(true);
+    expect(hasWorktreeRepository(undefined, workspace(70))).toBe(false);
+    expect(hasWorktreeRepository(undefined, [])).toBe(true);
+  });
+});
+
+describe("filterRepositories", () => {
+  const repositories = [
+    { relativePath: "services/billing", name: "billing" },
+    { relativePath: "services/auth", name: "Auth API" },
+  ];
+
+  it("matches name or path, ignoring case and surrounding space", () => {
+    expect(filterRepositories(repositories, " AUTH ")).toEqual([repositories[1]]);
+    expect(filterRepositories(repositories, "services/bill")).toEqual([repositories[0]]);
+    expect(filterRepositories(repositories, "")).toBe(repositories);
   });
 });

@@ -35,3 +35,27 @@ export function useWorkspaceRepositories(
 export function useWorkspaceFile(input: WorkspaceRepositoriesInput): string | null {
   return useListRepositories(input).data?.workspaceFile ?? null;
 }
+
+const NO_RUN_REPOSITORIES = {
+  repositories: NO_REPOSITORIES,
+  references: NO_REPOSITORIES,
+};
+
+/**
+ * An isolated run's repositories with a worktree and the project's others it reaches as their
+ * checkouts. Both empty for a folder that is not a multi-repo isolated run.
+ */
+export function useRunRepositories(input: {
+  readonly environmentId: EnvironmentId | null;
+  readonly cwd: string | null;
+}): {
+  readonly repositories: ReadonlyArray<VcsRepository>;
+  readonly references: ReadonlyArray<VcsRepository>;
+} {
+  const data = useListRepositories({ ...input, isRepo: true }).data;
+  if (data == null) return NO_RUN_REPOSITORIES;
+  return {
+    repositories: data.repositories,
+    references: data.referenceRepositories ?? NO_REPOSITORIES,
+  };
+}
