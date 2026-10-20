@@ -1,6 +1,7 @@
 /**
  * KnownWorkspaces - the folders a client-named cwd may act in: a T3-managed
- * worktree folder, a registered project, or a thread's worktree. Clients send
+ * worktree folder, a registered project, a thread's worktree, or a folder a
+ * project's .code-workspace lists. Clients send
  * the thread's worktree, else the project root. A client also sets a thread's
  * worktree path, so one counts only under a managed folder or when git lists
  * it as a worktree of the thread's project.
@@ -21,6 +22,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isFilesystemRoot, managedWorktreesDirectories } from "../worktreesDirectory.ts";
+import * as WorkspaceRepositories from "./WorkspaceRepositories.ts";
 
 export class UnknownWorkspaceError extends Schema.TaggedError<UnknownWorkspaceError>()(
   "UnknownWorkspaceError",
@@ -62,6 +64,7 @@ export const make = Effect.gen(function* () {
   const projectStore = yield* ProjectStore.ProjectStoreV2;
   const sql = yield* SqlClient.SqlClient;
   const git = yield* GitVcsDriver.GitVcsDriver;
+  const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
 
   // A root that does not exist yet keeps its lexical path. One that cannot be
   // resolved for another reason, or resolves to a filesystem root, grants nothing.
@@ -136,6 +139,19 @@ export const make = Effect.gen(function* () {
         }
         if (yield* isProjectWorktree(projectId, worktreePath)) return true;
       }
+
+      // A project's .code-workspace can list folders outside it (`../api`). Checked last: it
+      // reads each project's workspace file.
+      for (const project of projects) {
+        const layout = yield* workspaceRepositories.describe(project.workspaceRoot);
+        const listedPaths = [
+          ...layout.repositories.map((repository) => repository.path),
+          ...(layout.folders ?? []).map((folder) => folder.path),
+        ];
+        for (const listedPath of listedPaths) {
+          if (within(yield* resolveRoot(listedPath))) return true;
+        }
+      }
       return false;
     },
   );
@@ -153,4 +169,6 @@ export const make = Effect.gen(function* () {
   return KnownWorkspaces.of({ contains, assertContains });
 });
 
-export const layer = Layer.effect(KnownWorkspaces, make);
+export const layer = Layer.effect(KnownWorkspaces, make).pipe(
+  Layer.provide(WorkspaceRepositories.layer),
+);

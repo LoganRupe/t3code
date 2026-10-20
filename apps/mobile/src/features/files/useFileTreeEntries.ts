@@ -8,7 +8,7 @@ import {
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { appAtomRegistry } from "../../state/atom-registry";
 import { projectEnvironment } from "../../state/projects";
@@ -41,7 +41,10 @@ export function useFileTreeEntries(input: {
   const cwd = input.fileRoots && !input.fileRoots.ready ? null : input.cwd;
   const refreshRoots = input.fileRoots?.refresh;
   const listedRoots = useStableFileRoots(input.fileRoots?.roots);
-  const roots = cwd === null ? null : (listedRoots ?? [{ label: "", path: cwd }]);
+  const roots = useMemo(
+    () => (cwd === null ? null : (listedRoots ?? [{ label: "", path: cwd }])),
+    [cwd, listedRoots],
+  );
   const singleRoot = roots !== null && !hasSeveralFileRoots(roots) ? (roots[0] ?? null) : null;
   const searching = input.searchQuery.trim().length > 0;
   const query = input.searchQuery.trim().slice(0, 256);
@@ -62,14 +65,18 @@ export function useFileTreeEntries(input: {
   const [, render] = useReducer((value: number) => value + 1, 0);
   const [entriesRevision, entriesChanged] = useReducer((value: number) => value + 1, 0);
   const refreshVersion = useRef(0);
-  const directories = {
-    roots,
-    environmentId,
-    entries: new Map<string, ReadonlyArray<ProjectEntry>>(),
-    requested: new Set<string>(),
-    pending: new Map<string, AbortController>(),
-    errors: new Map<string, string>(),
-  };
+  // The loads below fill this cache in place, so it must outlive renders until the roots change.
+  const directories = useMemo(
+    () => ({
+      roots,
+      environmentId,
+      entries: new Map<string, ReadonlyArray<ProjectEntry>>(),
+      requested: new Set<string>(),
+      pending: new Map<string, AbortController>(),
+      errors: new Map<string, string>(),
+    }),
+    [roots, environmentId],
+  );
   const [refreshingDirectories, setRefreshingDirectories] = useState<typeof directories | null>(
     null,
   );
