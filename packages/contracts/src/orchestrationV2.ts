@@ -529,6 +529,13 @@ export const OrchestrationV2RepositoryBaseRef = Schema.Struct({
 });
 export type OrchestrationV2RepositoryBaseRef = typeof OrchestrationV2RepositoryBaseRef.Type;
 
+/**
+ * Above this many repositories besides the workspace folder's own, an isolated run gives none of
+ * them a worktree unless the launch names them, so a large polyrepo never copies every checkout
+ * by accident.
+ */
+export const WORKTREE_ALL_REPOSITORIES_LIMIT = 8;
+
 export const OrchestrationV2ThreadLaunchWorkspaceStrategy = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("root"),
@@ -545,6 +552,13 @@ export const OrchestrationV2ThreadLaunchWorkspaceStrategy = Schema.Union([
     branch: Schema.optional(TrimmedNonEmptyString),
     startFromOrigin: Schema.optional(Schema.Boolean),
     repositoryBaseRefs: Schema.optional(Schema.Array(OrchestrationV2RepositoryBaseRef)),
+    /**
+     * In a multi-repo workspace, the `relativePath`s of the repositories that get a worktree.
+     * The others stay reachable as the project's own checkouts, and can be added to the run
+     * later. The workspace folder's own repository (`.`) always gets one. Absent means all, up to
+     * `WORKTREE_ALL_REPOSITORIES_LIMIT` others, and none beyond it.
+     */
+    repositories: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
   }),
 ]);
 export type OrchestrationV2ThreadLaunchWorkspaceStrategy =

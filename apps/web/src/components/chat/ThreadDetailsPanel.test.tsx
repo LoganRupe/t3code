@@ -65,6 +65,7 @@ describe("ThreadDetailsPanel", () => {
       availableEditors: [],
       showOpenInPicker: false,
       gitCwd,
+      runWorktreePath: null,
       openInWorkspaceFile: null,
       isGitRepo: false,
       workspaceRepositories: [],

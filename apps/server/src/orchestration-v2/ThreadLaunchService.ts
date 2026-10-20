@@ -18,6 +18,7 @@ import {
   type RuntimeMode,
   type ScheduledTaskId,
   ThreadId,
+  WORKTREE_ALL_REPOSITORIES_LIMIT,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -68,6 +69,8 @@ export type ThreadLaunchWorkspaceStrategy =
       readonly repositoryBaseRefs?:
         | ReadonlyArray<{ readonly relativePath: string; readonly baseRef: string }>
         | undefined;
+      /** Repositories that get a worktree in a multi-repo workspace; absent means all. */
+      readonly repositories?: ReadonlyArray<string> | undefined;
     };
 
 export interface ThreadLaunchInitialMessage {
@@ -220,6 +223,29 @@ function repositoryBaseRefFor(
   return relativePath === "." ? strategy.baseRef : null;
 }
 
+/**
+ * Splits a multi-repo workspace into the repositories that get a worktree and the ones the run
+ * reaches as they are. The workspace folder's own repository always gets one; without a pick, so
+ * do the others unless there are more than the limit.
+ */
+function selectRunRepositories<R extends { readonly relativePath: string }>(
+  strategy: Extract<ThreadLaunchWorkspaceStrategy, { type: "worktree" }>,
+  repositories: ReadonlyArray<R>,
+): { readonly selected: ReadonlyArray<R>; readonly references: ReadonlyArray<R> } {
+  const others = repositories.filter((repository) => repository.relativePath !== ".");
+  const picked =
+    strategy.repositories ??
+    (others.length <= WORKTREE_ALL_REPOSITORIES_LIMIT
+      ? others.map((repository) => repository.relativePath)
+      : []);
+  const isSelected = (repository: R) =>
+    repository.relativePath === "." || picked.includes(repository.relativePath);
+  return {
+    selected: repositories.filter(isSelected),
+    references: repositories.filter((repository) => !isSelected(repository)),
+  };
+}
+
 function failureDetail(error: unknown): string {
   if (isThreadLaunchError(error)) {
     const cause = error.cause;
@@ -326,7 +352,7 @@ const make = Effect.gen(function* () {
     const checks =
       repositories.length === 0
         ? [{ cwd: project.workspaceRoot, baseRef: strategy.baseRef, repositoryName: undefined }]
-        : repositories.flatMap((repository) => {
+        : selectRunRepositories(strategy, repositories).selected.flatMap((repository) => {
             const baseRef = repositoryBaseRefFor(strategy, repository.relativePath);
             return baseRef === null
               ? []
@@ -457,7 +483,17 @@ const make = Effect.gen(function* () {
         // A repository starts from the base chosen for it, else its own default branch.
         const strategy = input.workspaceStrategy;
         const startFromOrigin = strategy.startFromOrigin === true;
-        const baseRefs = repositories.flatMap((repository) => {
+        const { selected, references } = selectRunRepositories(strategy, repositories);
+        if (selected.length === 0) {
+          return yield* mapError(
+            input,
+            "provision-worktree",
+            threadId,
+          )(
+            `Pick at least one of the project's ${repositories.length} repositories to give a worktree.`,
+          );
+        }
+        const baseRefs = selected.flatMap((repository) => {
           const baseRef = repositoryBaseRefFor(strategy, repository.relativePath);
           return baseRef === null ? [] : [{ relativePath: repository.relativePath, baseRef }];
         });
@@ -467,10 +503,11 @@ const make = Effect.gen(function* () {
           .create(
             {
               workspaceRoot: project.workspaceRoot,
-              repositories,
+              repositories: selected,
               branch: branch!,
               startFromOrigin,
               ...(baseRefs.length === 0 ? {} : { baseRefs }),
+              ...(references.length === 0 ? {} : { references }),
             },
             {
               onContainerClaimed: (path) =>

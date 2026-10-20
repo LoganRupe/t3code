@@ -35,6 +35,8 @@ export interface ProjectThreadStartTurnSpec {
   readonly startFromOrigin: boolean;
   /** Base branches picked per repository of a multi-repo workspace; worktree mode only. */
   readonly repositoryBaseRefs?: ReadonlyArray<RepositoryBaseRef> | undefined;
+  /** Repositories of a multi-repo workspace that get a worktree; absent means all. */
+  readonly repositories?: ReadonlyArray<string> | undefined;
   /** Generated temp branch for worktree mode; unused for local mode. */
   readonly worktreeBranchName: string;
 }
@@ -83,6 +85,7 @@ export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpe
               ...(spec.repositoryBaseRefs && spec.repositoryBaseRefs.length > 0
                 ? { repositoryBaseRefs: spec.repositoryBaseRefs }
                 : {}),
+              ...(spec.repositories ? { repositories: spec.repositories } : {}),
             },
             runSetupScript: true,
           }

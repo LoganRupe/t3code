@@ -197,6 +197,7 @@ import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
+import * as WorkspaceWorktrees from "./git/WorkspaceWorktrees.ts";
 import * as WorkspaceRepositories from "./workspace/WorkspaceRepositories.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
 import * as VcsProvisioningService from "./vcs/VcsProvisioningService.ts";
@@ -1305,6 +1306,7 @@ const layerWsRpc = (
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
+      const workspaceWorktrees = yield* WorkspaceWorktrees.WorkspaceWorktrees;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
@@ -2898,8 +2900,43 @@ const layerWsRpc = (
               repositories: layout.repositories,
               ...(layout.folders === null ? {} : { folders: layout.folders }),
               ...(workspaceFile === null ? {} : { workspaceFile }),
+              ...(layout.references === undefined
+                ? {}
+                : {
+                    referenceRepositories: layout.references.map(
+                      ({ relativePath, name, path }) => ({ relativePath, name, path }),
+                    ),
+                  }),
             })),
           ),
+        [WS_METHODS.vcsAddRunRepository]: (input) =>
+          workspaceWorktrees
+            .addRepository({ path: input.cwd, relativePath: input.relativePath })
+            .pipe(
+              Effect.tap(() =>
+                input.threadId === undefined
+                  ? Effect.void
+                  : threadManagement.getThreadShell(input.threadId).pipe(
+                      Effect.flatMap((shell) =>
+                        shell === null
+                          ? Effect.void
+                          : projectSetupScriptRunner.runForThread({
+                              threadId: input.threadId!,
+                              projectId: shell.projectId,
+                              worktreePath: input.cwd,
+                              onlyRepository: input.relativePath,
+                            }),
+                      ),
+                      // The worktree is there either way; a failed setup shows in its terminal.
+                      Effect.ignoreCause({ log: true }),
+                    ),
+              ),
+              Effect.tap(() => refreshGitStatus(input.cwd)),
+            ),
+        [WS_METHODS.vcsRemoveRunRepository]: (input) =>
+          workspaceWorktrees
+            .removeRepository({ path: input.cwd, relativePath: input.relativePath })
+            .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.vcsCreateWorktree]: (input) =>
           gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.vcsRemoveWorktree]: (input) =>

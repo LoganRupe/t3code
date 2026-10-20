@@ -59,6 +59,7 @@ export function ThreadDetailsCard({
     key: measurementKey,
     heights: { full: 0, compact: 0 },
     fullContentHeight: 0,
+    essentialHeight: 0,
   });
   const contentHeights =
     measurements.key === measurementKey ? measurements.heights : { full: 0, compact: 0 };
@@ -88,7 +89,28 @@ export function ThreadDetailsCard({
   }, [mode, onPresentationChange, threadRef, popoverOpen]);
   useLayoutEffect(() => {
     const element = contentElement;
-    if (!element || density === "essential") return;
+    if (!element) return;
+    // Essential shows too little to measure the richer densities, so it only watches for the
+    // content shrinking, as when a draft's many repositories become a run's few. Then the
+    // heights it was chosen from are stale, and measuring starts again from full.
+    if (density === "essential") {
+      const watch = () => {
+        const next = element.offsetHeight;
+        setMeasurements((current) => {
+          if (current.key !== measurementKey || current.essentialHeight === next) return current;
+          return next < current.essentialHeight
+            ? {
+                key: measurementKey,
+                heights: { full: 0, compact: 0 },
+                fullContentHeight: 0,
+                essentialHeight: 0,
+              }
+            : { ...current, essentialHeight: next };
+        });
+      };
+      watch();
+      return observeResize(element, watch);
+    }
     // Measure the single content tree before the scroll viewport clips it. Retain each
     // observed height so increasing available space restores the detail it can hold.
     const measure = () => {
@@ -114,6 +136,7 @@ export function ThreadDetailsCard({
               key: measurementKey,
               heights: { ...heights, [density]: fittingHeight },
               fullContentHeight,
+              essentialHeight: current.key === measurementKey ? current.essentialHeight : 0,
             };
       });
     };

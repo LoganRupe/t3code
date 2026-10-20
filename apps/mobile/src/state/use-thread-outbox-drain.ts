@@ -536,6 +536,9 @@ export async function restoreRejectedQueuedMessage(
               ...(queuedMessage.creation.repositoryBaseRefs
                 ? { repositoryBaseRefs: queuedMessage.creation.repositoryBaseRefs }
                 : {}),
+              ...(queuedMessage.creation.worktreeRepositories
+                ? { worktreeRepositories: queuedMessage.creation.worktreeRepositories }
+                : {}),
             },
           }
         : {}),
@@ -1122,6 +1125,7 @@ export function useThreadOutboxDrain(): void {
           worktreePath: workspace.worktreePath,
           startFromOrigin: workspace.startFromOrigin ?? false,
           repositoryBaseRefs: workspace.repositoryBaseRefs,
+          repositories: workspace.worktreeRepositories,
           worktreeBranchName: buildTemporaryWorktreeBranchName(randomHex),
         }),
       });

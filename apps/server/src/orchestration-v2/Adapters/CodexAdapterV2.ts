@@ -792,6 +792,7 @@ export function buildCodexTurnStartParams(input: {
               reasoningEffort: effort ?? "medium",
               repositories: input.runtimePolicy.repositories,
               folders: input.runtimePolicy.folders,
+              references: input.runtimePolicy.references,
             },
             {
               browser: input.browserToolsAvailable ?? true,
@@ -801,6 +802,7 @@ export function buildCodexTurnStartParams(input: {
         : buildCodexRepositoriesContext(
             input.runtimePolicy.repositories,
             input.runtimePolicy.folders,
+            input.runtimePolicy.references,
           );
     const additionalContext =
       t3Context === undefined && Object.keys(appContext).length === 0

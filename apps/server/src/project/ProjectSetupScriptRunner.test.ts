@@ -346,6 +346,20 @@ it.effect("runs the setup script once in every repository of an isolated run", (
       closeIdle.mock.calls.map(([input]) => input.terminalId),
       ["setup-setup"],
     );
+
+    // A repository added to the run later gets the script in its worktree alone.
+    open.mockClear();
+    const added = yield* runner.runForThread({
+      threadId: "thread-1",
+      projectId,
+      worktreePath: container,
+      onlyRepository: "api",
+    });
+    assert.equal(added.status, "started");
+    assert.deepEqual(
+      open.mock.calls.map(([input]) => input.terminalId),
+      ["setup-setup-api"],
+    );
   }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(layer, NodeServices.layer)));
 });
 

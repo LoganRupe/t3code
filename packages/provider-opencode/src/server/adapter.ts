@@ -3269,6 +3269,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                   model: turnInput.modelSelection.model,
                   repositories: turnInput.runtimePolicy.repositories,
                   folders: turnInput.runtimePolicy.folders,
+                  references: turnInput.runtimePolicy.references,
                 }),
               ]
                 .filter(Boolean)

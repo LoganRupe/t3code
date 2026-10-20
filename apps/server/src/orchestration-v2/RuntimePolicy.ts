@@ -131,11 +131,22 @@ export const layerFromProjectStore: Layer.Layer<
           ));
         const layout = yield* workspaceRepositories.describe(cwd);
         const repositories = layout.repositories;
+        // A left-out repository is named by its link in the run, or by its checkout's path when
+        // it has none; either way the grant goes to the checkout.
+        const references = (layout.references ?? []).map((reference) => ({
+          relativePath: reference.linked ? reference.relativePath : reference.path,
+          name: reference.name,
+          path: reference.path,
+        }));
         // The working directory needs no introduction; the other listed folders do.
         const folders = (layout.folders ?? []).filter(
           (folder) =>
             folder.relativePath !== "." &&
-            !repositories.some((repository) => repository.path === folder.path),
+            !repositories.some((repository) => repository.path === folder.path) &&
+            !(layout.references ?? []).some(
+              (reference) =>
+                folder.path === reference.path || folder.relativePath === reference.relativePath,
+            ),
         );
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
@@ -143,6 +154,7 @@ export const layerFromProjectStore: Layer.Layer<
           cwd,
           ...(repositories.length === 0 ? {} : { repositories }),
           ...(folders.length === 0 ? {} : { folders }),
+          ...(references.length === 0 ? {} : { references }),
         });
       }),
     });

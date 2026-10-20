@@ -57,6 +57,12 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    * agent is told about them and granted the ones outside `cwd`.
    */
   folders: Schema.optional(Schema.Array(WorkspaceFolder)),
+  /**
+   * The project's repositories an isolated run gave no worktree, reached as the project's own
+   * checkouts. `relativePath` is their place in `cwd` when the run links them there, else their
+   * absolute path; `path` is the checkout. The agent is told about them and granted them.
+   */
+  references: Schema.optional(Schema.Array(VcsRepository)),
   approvalPolicy: Schema.optional(Schema.Unknown),
   sandboxPolicy: Schema.optional(Schema.Unknown),
   reasoningEffort: Schema.optional(Schema.String),

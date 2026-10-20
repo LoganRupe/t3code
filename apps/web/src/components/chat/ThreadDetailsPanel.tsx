@@ -22,6 +22,7 @@ import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
+import { RunRepositoriesMenu } from "../RunRepositoriesMenu";
 
 const GitActionsControl = memo(BaseGitActionsControl);
 
@@ -40,6 +41,8 @@ export interface ThreadDetailsPanelProps extends Pick<
   availableEditors: ReadonlyArray<EditorId>;
   showOpenInPicker: boolean;
   gitCwd: string | null;
+  /** The thread's worktree, whose repositories the panel can add and remove in an isolated run. */
+  runWorktreePath: string | null;
   /** The `.code-workspace` file "Open in" hands to editors that open one. */
   openInWorkspaceFile: string | null;
   isGitRepo: boolean;
@@ -125,6 +128,15 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   autoEnvironmentLabel={props.autoEnvironmentLabel}
                   onAutoEnvironment={props.onAutoEnvironment}
                   {...branchToolbarProps}
+                />
+              ) : null}
+
+              {density !== "essential" && props.runWorktreePath ? (
+                <RunRepositoriesMenu
+                  displayMode="panel"
+                  environmentId={props.environmentId}
+                  threadId={props.threadId}
+                  cwd={props.runWorktreePath}
                 />
               ) : null}
 
