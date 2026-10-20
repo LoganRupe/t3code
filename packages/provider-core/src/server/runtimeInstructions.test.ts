@@ -104,6 +104,22 @@ describe("buildRuntimeInstructions", () => {
     );
   });
 
+  it("names repositories without a worktree as shared checkouts to ask about", () => {
+    const instructions = buildRuntimeInstructions({
+      harness: "Claude Code",
+      references: [
+        { relativePath: "assets", name: "assets", path: "/work/assets" },
+        { relativePath: "/work/tools", name: "Tools", path: "/work/tools" },
+      ],
+    });
+    expect(instructions).toContain("<reference_repositories>");
+    expect(instructions).toContain("- assets\n- /work/tools (Tools)\n");
+    expect(instructions).toContain("ask the user before changing files");
+    expect(buildRuntimeInstructions({ harness: "Codex", references: [] })).not.toContain(
+      "reference_repositories",
+    );
+  });
+
   it("keeps workspace-supplied repository names inside the block", () => {
     const instructions = buildRuntimeInstructions({
       harness: "Codex",

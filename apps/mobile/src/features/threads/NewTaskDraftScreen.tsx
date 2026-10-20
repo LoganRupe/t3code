@@ -1057,14 +1057,18 @@ export function NewTaskDraftScreen(props: {
     worktreePath: flow.selectedWorktreePath,
   });
   const showBranchLoading = flow.branchesLoading && flow.availableBranches.length === 0;
-  // A new worktree of a multi-repo workspace gives every repository its own copy; those other
-  // than the folder's own can each start from a branch the user picks.
+  // A new worktree of a multi-repo workspace gives the repositories the user picks their own
+  // copy; those other than the folder's own can each start from a branch the user picks.
   const showsRepositoryBaseRefs =
     flow.workspaceMode === "worktree" && flow.baseRefRepositories.length > 0;
   const repositoryBaseRefsLabel = resolveRepositoryBaseRefsLabel({
     repositoryCount: flow.baseRefRepositories.length,
-    pickCount: flow.repositoryBaseRefs.length,
+    worktreeCount: flow.worktreeRepositories.length,
+    pickCount: flow.repositoryBaseRefs.filter((pick) =>
+      flow.worktreeRepositories.includes(pick.relativePath),
+    ).length,
   });
+  const needsWorktreeRepository = flow.workspaceMode === "worktree" && !flow.hasWorktreeRepository;
 
   async function handlePickMedia(): Promise<void> {
     if (isComposerInteractionLocked || voiceInput.isBusy) {
@@ -1442,7 +1446,8 @@ export function NewTaskDraftScreen(props: {
     !flow.submitting &&
     pendingPastedTextAttachmentCount === 0 &&
     !voiceInput.blocksSubmission &&
-    !(flow.workspaceMode === "worktree" && flow.folderHasBranch && !flow.selectedBranchName);
+    !(flow.workspaceMode === "worktree" && flow.folderHasBranch && !flow.selectedBranchName) &&
+    !needsWorktreeRepository;
   const openDraftDocument = (attachment: ComposerDocumentAttachment) => {
     // A draft attachment lives only in the draft. Without its key the screen would fall through
     // to a remote lookup for bytes the server has never seen.
@@ -1666,7 +1671,7 @@ export function NewTaskDraftScreen(props: {
       {showsRepositoryBaseRefs ? (
         <ComposerInlineControl
           accessibilityHint="Picks a base branch for each repository"
-          accessibilityLabel={`Base branches: ${repositoryBaseRefsLabel}`}
+          accessibilityLabel={`Repositories: ${repositoryBaseRefsLabel}`}
           chevronDirection="right"
           disabled={isComposerInteractionLocked}
           icon="square.3.layers.3d"
@@ -1875,15 +1880,17 @@ export function NewTaskDraftScreen(props: {
                       ? projectClone === null || projectClone.phase === "running"
                         ? "Cloning repository"
                         : "Repository not cloned"
-                      : pendingPastedTextAttachmentCount > 0
-                        ? "Attaching pasted text"
-                        : flow.submitting
-                          ? "Starting task"
-                          : attachmentsUploading
-                            ? "Queue task, sends when uploads finish"
-                            : environmentConnected
-                              ? "Start task"
-                              : "Queue task")
+                      : needsWorktreeRepository
+                        ? "Pick a repository for the worktree"
+                        : pendingPastedTextAttachmentCount > 0
+                          ? "Attaching pasted text"
+                          : flow.submitting
+                            ? "Starting task"
+                            : attachmentsUploading
+                              ? "Queue task, sends when uploads finish"
+                              : environmentConnected
+                                ? "Start task"
+                                : "Queue task")
                   }
                   disabled={!canStart}
                   icon={queuesInsteadOfStarting ? "tray.and.arrow.up" : "arrow.up"}

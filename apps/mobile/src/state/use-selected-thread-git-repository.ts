@@ -1,4 +1,5 @@
 import { resolveReviewRepository } from "@t3tools/client-runtime/state/review";
+import type { VcsRepository } from "@t3tools/contracts";
 import { useCallback } from "react";
 
 import {
@@ -10,6 +11,8 @@ import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 import { useThreadSelection } from "./use-thread-selection";
 import { useWorkspaceRepositories } from "./workspace-repositories";
 
+const NO_REFERENCES: ReadonlyArray<VcsRepository> = [];
+
 /**
  * Where the selected thread's Git sheets act. A multi-repo workspace acts on the repository
  * picked in the Git or review sheet (the folder's own by default). As on web, only the folder's
@@ -20,7 +23,7 @@ import { useWorkspaceRepositories } from "./workspace-repositories";
 export function useSelectedThreadGitRepository() {
   const { selectedThread, selectedThreadProject } = useThreadSelection();
   const { selectedThreadCwd, selectedThreadWorktreePath } = useSelectedThreadWorktree();
-  const { repositories } = useWorkspaceRepositories({
+  const { repositories, referenceRepositories } = useWorkspaceRepositories({
     environmentId: selectedThread?.environmentId,
     cwd: selectedThreadCwd,
   });
@@ -39,6 +42,10 @@ export function useSelectedThreadGitRepository() {
 
   return {
     repositories,
+    /** Repositories an isolated run left out, which can be added to it. */
+    references: selectedThreadWorktreePath === null ? NO_REFERENCES : referenceRepositories,
+    /** The isolated run's folder, where repositories are added and removed. */
+    runCwd: selectedThreadWorktreePath,
     repository,
     selectRepository,
     gitCwd: repository?.path ?? selectedThreadCwd,

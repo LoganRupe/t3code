@@ -1,4 +1,8 @@
-import type { VcsRef, VcsRepository } from "@t3tools/contracts";
+import {
+  WORKTREE_ALL_REPOSITORIES_LIMIT,
+  type VcsRef,
+  type VcsRepository,
+} from "@t3tools/contracts";
 
 /** A base ref the user picked for one repository of a multi-repo workspace's isolated run. */
 export interface RepositoryBaseRef {
@@ -59,6 +63,76 @@ export function repositoryBaseRefsFor(
     const pick = picks.find((candidate) => candidate.relativePath === repository.relativePath);
     return pick ? [pick] : [];
   });
+}
+
+export { WORKTREE_ALL_REPOSITORIES_LIMIT };
+
+/**
+ * The repositories (by `relativePath`) that get a worktree in a new isolated run: the user's
+ * picks that the workspace still lists, else every repository in a small workspace and none in
+ * a large one. The workspace folder's own repository (`.`) always gets one and is left out here.
+ */
+export function worktreeRepositoriesFor(
+  picks: ReadonlyArray<string> | undefined,
+  repositories: ReadonlyArray<Pick<VcsRepository, "relativePath">>,
+): ReadonlyArray<string> {
+  const others = repositories
+    .map((repository) => repository.relativePath)
+    .filter((relativePath) => relativePath !== ".");
+  if (picks !== undefined) return others.filter((relativePath) => picks.includes(relativePath));
+  return others.length <= WORKTREE_ALL_REPOSITORIES_LIMIT ? others : [];
+}
+
+/** Repository lists longer than this get a filter field. */
+export const REPOSITORY_FILTER_THRESHOLD = 5;
+
+/** The repositories whose name or path contains `query`, ignoring case; all of them when empty. */
+export function filterRepositories<R extends Pick<VcsRepository, "relativePath" | "name">>(
+  repositories: ReadonlyArray<R>,
+  query: string,
+): ReadonlyArray<R> {
+  const needle = query.trim().toLowerCase();
+  if (needle === "") return repositories;
+  return repositories.filter(
+    (repository) =>
+      repository.name.toLowerCase().includes(needle) ||
+      repository.relativePath.toLowerCase().includes(needle),
+  );
+}
+
+/** Adds or drops one repository from the picks. */
+export function withWorktreeRepository(
+  picks: ReadonlyArray<string>,
+  relativePath: string,
+  included: boolean,
+): ReadonlyArray<string> {
+  const others = picks.filter((candidate) => candidate !== relativePath);
+  return included ? [...others, relativePath] : others;
+}
+
+/**
+ * The `repositories` a launch sends for the picks, or undefined when every repository gets a
+ * worktree, which is what the server does without the field. Empty when nothing gets one, which
+ * a client checks with `hasWorktreeRepository` before it sends.
+ */
+export function worktreeRepositoriesForSend(
+  picks: ReadonlyArray<string> | undefined,
+  repositories: ReadonlyArray<Pick<VcsRepository, "relativePath">>,
+): ReadonlyArray<string> | undefined {
+  if (repositories.length === 0) return undefined;
+  const selected = worktreeRepositoriesFor(picks, repositories);
+  const others = repositories.filter((repository) => repository.relativePath !== ".");
+  return selected.length === others.length ? undefined : selected;
+}
+
+/** Whether a new isolated run would give at least one repository a worktree. */
+export function hasWorktreeRepository(
+  picks: ReadonlyArray<string> | undefined,
+  repositories: ReadonlyArray<Pick<VcsRepository, "relativePath">>,
+): boolean {
+  return (
+    folderHasOwnBranch(repositories) || worktreeRepositoriesFor(picks, repositories).length > 0
+  );
 }
 
 /**

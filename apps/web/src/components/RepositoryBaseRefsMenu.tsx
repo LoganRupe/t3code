@@ -1,18 +1,24 @@
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { repositoryBaseRefChoices } from "@t3tools/client-runtime/repository-base-refs";
+import {
+  filterRepositories,
+  REPOSITORY_FILTER_THRESHOLD,
+  repositoryBaseRefChoices,
+} from "@t3tools/client-runtime/repository-base-refs";
 import type { EnvironmentId, ThreadId, VcsRepository } from "@t3tools/contracts";
 import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 
-import { useRepositoryBaseRefStore } from "../repositoryBaseRefStore";
+import { useRepositoryBaseRefStore, useWorktreeRepositories } from "../repositoryBaseRefStore";
 import { usePaginatedBranches } from "../state/queries";
 import { useComposerMenuProps } from "./chat/composerEventScope";
+import { RepositoryFilterInput } from "./RepositoryFilterInput";
 import { Button } from "./ui/button";
 import {
   Menu,
   MenuCheckboxItem,
   MenuGroup,
   MenuGroupLabel,
+  MenuItem,
   MenuPopup,
   MenuRadioGroup,
   MenuRadioItem,
@@ -27,10 +33,11 @@ import {
 const DEFAULT_BRANCH = "";
 
 /**
- * Base branch picker for the repositories of a multi-repo workspace in a thread's next isolated
- * run, one submenu per repository. Each shows its own default branch until the user picks one,
- * which is what the server starts from without a pick. Carries the "start from origin" switch
- * when no regular branch selector is there to hold it.
+ * Repository picker for a multi-repo workspace's next isolated run: which repositories get a
+ * worktree, and a base branch submenu for each that does. A base shows the repository's default
+ * branch until the user picks one, which is what the server starts from without a pick. A
+ * repository left out stays reachable as the project's checkout, and can be added to the thread
+ * later. Carries the "start from origin" switch when no regular branch selector holds it.
  */
 export const RepositoryBaseRefsMenu = memo(function RepositoryBaseRefsMenu({
   environmentId,
@@ -49,17 +56,27 @@ export const RepositoryBaseRefsMenu = memo(function RepositoryBaseRefsMenu({
 }) {
   const composerFloatingLayerProps = useComposerMenuProps();
   const threadKey = scopedThreadKey(scopeThreadRef(environmentId, threadId));
+  const worktrees = useWorktreeRepositories(threadKey, repositories);
+  const [query, setQuery] = useState("");
+  const shown = filterRepositories(repositories, query);
+  const setWorktree = useRepositoryBaseRefStore((store) => store.setWorktree);
+  const withWorktree = repositories.filter((repository) =>
+    worktrees.includes(repository.relativePath),
+  );
   const pickCount = useRepositoryBaseRefStore(
     (store) =>
-      repositories.filter((repository) => store.byThread[threadKey]?.[repository.relativePath])
+      withWorktree.filter((repository) => store.byThread[threadKey]?.[repository.relativePath])
         .length,
   );
-  const label =
-    pickCount > 0
-      ? `${repositories.length} ${repositories.length === 1 ? "repo" : "repos"}, ${pickCount} picked`
-      : `${repositories.length} ${repositories.length === 1 ? "repo" : "repos"}`;
+  const repoCount = `${repositories.length} ${repositories.length === 1 ? "repo" : "repos"}`;
+  const label = [
+    withWorktree.length === repositories.length
+      ? repoCount
+      : `${withWorktree.length} of ${repoCount}`,
+    ...(pickCount > 0 ? [`${pickCount} picked`] : []),
+  ].join(", ");
   return (
-    <Menu>
+    <Menu onOpenChange={(open) => !open && setQuery("")}>
       <MenuTrigger
         render={
           displayMode === "panel" ? (
@@ -68,7 +85,7 @@ export const RepositoryBaseRefsMenu = memo(function RepositoryBaseRefsMenu({
             <Button variant="ghost-muted" size="xs" />
           )
         }
-        aria-label="Base branches for each repository"
+        aria-label="Worktrees and base branches for each repository"
         data-composer-context-control
       >
         <GitBranchIcon className="size-3 shrink-0 opacity-70" />
@@ -80,18 +97,42 @@ export const RepositoryBaseRefsMenu = memo(function RepositoryBaseRefsMenu({
         side={displayMode === "panel" ? "bottom" : "top"}
         {...(displayMode === "panel" ? {} : composerFloatingLayerProps)}
       >
+        {repositories.length > REPOSITORY_FILTER_THRESHOLD ? (
+          <RepositoryFilterInput value={query} onChange={setQuery} />
+        ) : null}
         <MenuGroup>
-          <MenuGroupLabel>Base branch for each repository</MenuGroupLabel>
-          {repositories.map((repository) => (
-            <RepositoryBaseRefSub
+          <MenuGroupLabel>Give a worktree to</MenuGroupLabel>
+          {shown.length === 0 ? <MenuItem disabled>No matching repositories</MenuItem> : null}
+          {shown.map((repository) => (
+            <MenuCheckboxItem
               key={repository.relativePath}
-              environmentId={environmentId}
-              threadKey={threadKey}
-              repository={repository}
-              startFromOrigin={startFromOrigin}
-            />
+              checked={worktrees.includes(repository.relativePath)}
+              onCheckedChange={(checked) =>
+                setWorktree(threadKey, worktrees, repository.relativePath, checked)
+              }
+              closeOnClick={false}
+            >
+              <span className="min-w-0 truncate">{repository.name}</span>
+            </MenuCheckboxItem>
           ))}
         </MenuGroup>
+        {withWorktree.length > 0 ? (
+          <>
+            <MenuSeparator />
+            <MenuGroup>
+              <MenuGroupLabel>Base branch</MenuGroupLabel>
+              {withWorktree.map((repository) => (
+                <RepositoryBaseRefSub
+                  key={repository.relativePath}
+                  environmentId={environmentId}
+                  threadKey={threadKey}
+                  repository={repository}
+                  startFromOrigin={startFromOrigin}
+                />
+              ))}
+            </MenuGroup>
+          </>
+        ) : null}
         {onStartFromOriginChange ? (
           <>
             <MenuSeparator />

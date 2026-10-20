@@ -34,7 +34,10 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "../config.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
-import { writeIsolatedRunWorkspaceFile } from "./isolatedRunWorkspaceFile.ts";
+import {
+  retargetIsolatedRunWorkspaceFolder,
+  writeIsolatedRunWorkspaceFile,
+} from "./isolatedRunWorkspaceFile.ts";
 
 export interface CreateWorkspaceWorktreeInput {
   readonly workspaceRoot: string;
@@ -48,6 +51,11 @@ export interface CreateWorkspaceWorktreeInput {
    * run instead of silently starting elsewhere.
    */
   readonly baseRefs?: ReadonlyArray<{ readonly relativePath: string; readonly baseRef: string }>;
+  /**
+   * The project's repositories that get no worktree. The run reaches their checkouts instead,
+   * through a link where their worktree would go when the container is not itself a checkout.
+   */
+  readonly references?: ReadonlyArray<VcsRepository>;
 }
 
 export class WorkspaceWorktrees extends Context.Service<
@@ -71,6 +79,22 @@ export class WorkspaceWorktrees extends Context.Service<
     }) => Effect.Effect<{ readonly branch: string }, GitCommandError>;
     /** Whether `path` is a container this service created. */
     readonly isContainer: (path: string) => Effect.Effect<boolean>;
+    /**
+     * Give a repository the run left out a worktree on the run's branch: the branch itself when
+     * the repository already has it, else a new one from its default branch.
+     */
+    readonly addRepository: (input: {
+      readonly path: string;
+      readonly relativePath: string;
+    }) => Effect.Effect<void, GitCommandError>;
+    /**
+     * Remove one repository's worktree, keeping its branch, and reach the project's checkout
+     * again. Refuses the root repository, the last one, and a worktree with uncommitted changes.
+     */
+    readonly removeRepository: (input: {
+      readonly path: string;
+      readonly relativePath: string;
+    }) => Effect.Effect<void, GitCommandError>;
     /**
      * Remove every repository's worktree, then the links and folders the container added.
      * Anything else left in the container is kept for the user, and it stays a container.
@@ -98,6 +122,19 @@ const make = Effect.gen(function* () {
   const encodeLayout = Schema.encodeEffect(
     Schema.fromJsonString(WorkspaceRepositories.IsolatedRunLayout),
   );
+
+  const writeLayout = (container: string, layout: WorkspaceRepositories.IsolatedRunLayout) =>
+    encodeLayout(layout).pipe(
+      Effect.flatMap((contents) =>
+        fileSystem.writeFileString(
+          WorkspaceRepositories.isolatedRunLayoutPath(container),
+          contents,
+        ),
+      ),
+      Effect.mapError((cause) =>
+        fail("WorkspaceWorktrees.writeLayout", container, `Could not update ${container}.`, cause),
+      ),
+    );
 
   // Where a repository's worktree goes in the container: the root repository is the container
   // itself, a repository outside the project sits at its name, and a nested one keeps its path.
@@ -250,12 +287,22 @@ const make = Effect.gen(function* () {
       }
       const root = input.repositories.find((repository) => repository.relativePath === ".");
       const nested = input.repositories.filter((repository) => repository !== root);
+      // A link inside a root repository's worktree would show up in its changes, so a run
+      // whose root is a checkout reaches the left-out repositories where they are.
+      const references = (input.references ?? []).map((repository) => ({
+        relativePath: placement(repository),
+        name: repository.name,
+        source: repository.path,
+        linked: root === undefined,
+      }));
       // Listed folders keep their place in the run: a repository at its worktree, a folder inside
       // the project at its link, and a plain folder outside the project stays the original.
       const workspaceFolders = (yield* workspaceRepositories.describe(input.workspaceRoot)).folders;
       const folderPlacement = (folder: VcsRepository) => {
         const repository = input.repositories.find((candidate) => candidate.path === folder.path);
         if (repository !== undefined) return placement(repository);
+        const reference = references.find((candidate) => candidate.source === folder.path);
+        if (reference !== undefined) return reference.linked ? reference.relativePath : folder.path;
         return isOutsideWorkspaceRepository(folder) ? folder.path : folder.relativePath;
       };
       // The layout file goes first: it is what makes the folder a container, so a failure
@@ -274,6 +321,7 @@ const make = Effect.gen(function* () {
                 name: folder.name,
               })),
             }),
+        ...(references.length === 0 ? {} : { references }),
       }).pipe(
         Effect.flatMap((contents) =>
           fileSystem
@@ -308,6 +356,9 @@ const make = Effect.gen(function* () {
       for (const repository of nested) {
         yield* createWorktree(repository, join(container, placement(repository)), branch, input);
       }
+      for (const reference of references) {
+        if (reference.linked) yield* linkReference(container, reference);
+      }
       // Editors open the run the way they open the project. Losing that is not worth failing.
       const projectWorkspaceFile = yield* workspaceRepositories.workspaceFile(input.workspaceRoot);
       if (projectWorkspaceFile !== null) {
@@ -332,6 +383,182 @@ const make = Effect.gen(function* () {
       return { path: container, branch };
     },
   );
+
+  // A missing link only costs the agent a path, which the layout still names, so it is logged.
+  const linkReference = (
+    container: string,
+    reference: { readonly relativePath: string; readonly source: string },
+  ) => {
+    const target = join(container, reference.relativePath);
+    return fileSystem.makeDirectory(path.dirname(target), { recursive: true }).pipe(
+      Effect.andThen(fileSystem.symlink(reference.source, target)),
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not link a left-out repository into an isolated run", {
+          container,
+          relativePath: reference.relativePath,
+          cause,
+        }),
+      ),
+    );
+  };
+
+  const readRun = (operation: string, container: string) =>
+    Effect.gen(function* () {
+      const layout = isInsideWorktreesDir(container)
+        ? yield* workspaceRepositories.readIsolatedRun(container)
+        : null;
+      if (layout === null) return yield* fail(operation, container, "Not an isolated run folder.");
+      return layout;
+    });
+
+  const currentBranch = (operation: string, cwd: string) =>
+    git
+      .execute({ operation, cwd, args: ["branch", "--show-current"] })
+      .pipe(Effect.map((result) => result.stdout.trim()));
+
+  // The editor's copy of the project's workspace file follows the repository's new place.
+  const retargetWorkspaceFile = (container: string, from: string, to: string) =>
+    retargetIsolatedRunWorkspaceFolder({ container, from, to }).pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(Path.Path, path),
+      Effect.catch((cause) =>
+        Effect.logWarning("Could not update an isolated run's workspace file", {
+          container,
+          cause,
+        }),
+      ),
+    );
+
+  const addRepository: WorkspaceWorktrees["Service"]["addRepository"] = Effect.fn(
+    "WorkspaceWorktrees.addRepository",
+  )(function* (input) {
+    const operation = "WorkspaceWorktrees.addRepository";
+    const layout = yield* readRun(operation, input.path);
+    const reference = layout.references?.find(
+      (candidate) => candidate.relativePath === input.relativePath,
+    );
+    if (reference === undefined) {
+      return yield* fail(
+        operation,
+        input.path,
+        `${input.relativePath} is not a repository this run left out.`,
+      );
+    }
+    const anchor = layout.repositories[0];
+    const branch =
+      anchor === undefined
+        ? ""
+        : yield* currentBranch(operation, path.resolve(input.path, anchor.relativePath));
+    if (branch === "") {
+      return yield* fail(operation, input.path, "The run is not on a branch to add to.");
+    }
+    const worktreePath = join(input.path, reference.relativePath);
+    if (reference.linked) {
+      yield* fileSystem.remove(worktreePath).pipe(Effect.ignore);
+    }
+    const repository = {
+      relativePath: reference.relativePath,
+      name: reference.name,
+      path: reference.source,
+    };
+    yield* Effect.gen(function* () {
+      if (yield* hasCommit(reference.source, `refs/heads/${branch}`)) {
+        yield* fileSystem
+          .makeDirectory(path.dirname(worktreePath), { recursive: true })
+          .pipe(
+            Effect.mapError((cause) =>
+              fail(operation, reference.source, `Could not create ${worktreePath}.`, cause),
+            ),
+          );
+        yield* git.createWorktree({ cwd: reference.source, refName: branch, path: worktreePath });
+      } else {
+        yield* createWorktree(repository, worktreePath, branch, {
+          workspaceRoot: input.path,
+          repositories: [repository],
+          branch,
+          startFromOrigin: false,
+        });
+      }
+    }).pipe(
+      // Put the link back so the run keeps reaching the repository.
+      Effect.tapError(() =>
+        reference.linked ? linkReference(input.path, reference) : Effect.void,
+      ),
+    );
+    yield* writeLayout(input.path, {
+      ...layout,
+      repositories: [
+        ...layout.repositories,
+        { relativePath: reference.relativePath, name: reference.name, source: reference.source },
+      ],
+      ...(layout.folders === undefined
+        ? {}
+        : {
+            folders: layout.folders.map((folder) =>
+              folder.relativePath === reference.source
+                ? { ...folder, relativePath: reference.relativePath }
+                : folder,
+            ),
+          }),
+      references: (layout.references ?? []).filter((candidate) => candidate !== reference),
+    });
+    yield* retargetWorkspaceFile(input.path, reference.source, worktreePath);
+  });
+
+  const removeRepository: WorkspaceWorktrees["Service"]["removeRepository"] = Effect.fn(
+    "WorkspaceWorktrees.removeRepository",
+  )(function* (input) {
+    const operation = "WorkspaceWorktrees.removeRepository";
+    const layout = yield* readRun(operation, input.path);
+    const repository = layout.repositories.find(
+      (candidate) => candidate.relativePath === input.relativePath,
+    );
+    if (repository === undefined) {
+      return yield* fail(
+        operation,
+        input.path,
+        `${input.relativePath} has no worktree in this run.`,
+      );
+    }
+    if (repository.relativePath === ".") {
+      return yield* fail(operation, input.path, "The run's own repository cannot be removed.");
+    }
+    if (layout.repositories.length === 1) {
+      return yield* fail(operation, input.path, "A run keeps at least one repository.");
+    }
+    const worktreePath = join(input.path, repository.relativePath);
+    const changes = yield* git.execute({
+      operation,
+      cwd: worktreePath,
+      args: ["status", "--porcelain"],
+    });
+    if (changes.stdout.trim() !== "") {
+      return yield* fail(
+        operation,
+        worktreePath,
+        `${repository.name} has uncommitted changes. Commit or discard them first.`,
+      );
+    }
+    yield* git.removeWorktree({ cwd: repository.source, path: worktreePath, force: false });
+    const linked = !layout.repositories.some((candidate) => candidate.relativePath === ".");
+    const reference = { ...repository, linked };
+    if (linked) yield* linkReference(input.path, reference);
+    yield* writeLayout(input.path, {
+      ...layout,
+      repositories: layout.repositories.filter((candidate) => candidate !== repository),
+      ...(layout.folders === undefined || linked
+        ? {}
+        : {
+            folders: layout.folders.map((folder) =>
+              folder.relativePath === repository.relativePath
+                ? { ...folder, relativePath: repository.source }
+                : folder,
+            ),
+          }),
+      references: [...(layout.references ?? []), reference],
+    });
+    yield* retargetWorkspaceFile(input.path, worktreePath, repository.source);
+  });
 
   const renameBranch: WorkspaceWorktrees["Service"]["renameBranch"] = Effect.fn(
     "WorkspaceWorktrees.renameBranch",
@@ -463,7 +690,14 @@ const make = Effect.gen(function* () {
     },
   );
 
-  return WorkspaceWorktrees.of({ create, renameBranch, isContainer, remove });
+  return WorkspaceWorktrees.of({
+    create,
+    addRepository,
+    removeRepository,
+    renameBranch,
+    isContainer,
+    remove,
+  });
 });
 
 export const layer = Layer.effect(WorkspaceWorktrees, make).pipe(

@@ -96,7 +96,32 @@ const layerTest = RuntimePolicy.layerFromProjectStore.pipe(
                   { relativePath: "../docs", name: "Docs", path: "/docs" },
                 ],
               }
-            : { repositories: [], folders: null },
+            : cwd === "/isolated-run"
+              ? {
+                  repositories: [
+                    { relativePath: "game", name: "game", path: "/isolated-run/game" },
+                  ],
+                  folders: [
+                    { relativePath: "game", name: "game", path: "/isolated-run/game" },
+                    { relativePath: "assets", name: "assets", path: "/isolated-run/assets" },
+                    { relativePath: "/project/tools", name: "tools", path: "/project/tools" },
+                  ],
+                  references: [
+                    {
+                      relativePath: "assets",
+                      name: "assets",
+                      path: "/project/assets",
+                      linked: true,
+                    },
+                    {
+                      relativePath: "tools",
+                      name: "tools",
+                      path: "/project/tools",
+                      linked: false,
+                    },
+                  ],
+                }
+              : { repositories: [], folders: null },
         ),
     }),
   ),
@@ -180,6 +205,24 @@ it.layer(layerTest)("RuntimePolicyV2", (it) => {
       ]);
       assert.isUndefined(singleRepo.repositories);
       assert.isUndefined(singleRepo.folders);
+    }),
+  );
+
+  it.effect("names an isolated run's left-out repositories by where the run reaches them", () =>
+    Effect.gen(function* () {
+      const policy = yield* RuntimePolicy.RuntimePolicyV2;
+      const now = yield* DateTime.now;
+      const resolved = yield* policy.resolve({
+        thread: makeThread({ now, worktreePath: "/isolated-run" }),
+        modelSelection,
+      });
+      // A linked one by its link, an unlinked one by its checkout; both grant the checkout,
+      // and neither is mistaken for a plain listed folder.
+      assert.deepEqual(resolved.references, [
+        { relativePath: "assets", name: "assets", path: "/project/assets" },
+        { relativePath: "/project/tools", name: "tools", path: "/project/tools" },
+      ]);
+      assert.isUndefined(resolved.folders);
     }),
   );
 

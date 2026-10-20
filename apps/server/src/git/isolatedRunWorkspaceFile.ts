@@ -68,3 +68,22 @@ export const writeIsolatedRunWorkspaceFile = Effect.fn("writeIsolatedRunWorkspac
     return target;
   },
 );
+
+/**
+ * Points the folder at `from` in an isolated run's workspace file at `to`, when a repository
+ * gains or loses its worktree. A run without a workspace file has nothing to update.
+ */
+export const retargetIsolatedRunWorkspaceFolder = Effect.fn("retargetIsolatedRunWorkspaceFolder")(
+  function* (input: { readonly container: string; readonly from: string; readonly to: string }) {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const target = WorkspaceRepositories.isolatedRunWorkspaceFilePath(input.container);
+    if (!(yield* fileSystem.exists(target))) return;
+    const document = yield* fileSystem.readFileString(target).pipe(Effect.flatMap(decodeDocument));
+    const folders = (Array.isArray(document.folders) ? document.folders : []).map(
+      (folder: unknown) =>
+        isFolder(folder) && folder.path === input.from ? { ...folder, path: input.to } : folder,
+    );
+    const contents = yield* encodeDocument({ ...document, folders });
+    yield* writeFileStringAtomically({ filePath: target, contents: `${contents}\n` });
+  },
+);
