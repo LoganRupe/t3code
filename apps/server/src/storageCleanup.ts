@@ -286,15 +286,29 @@ const make = Effect.gen(function* () {
   );
 
   const measureWorktree = Effect.fn("storageCleanup.measureWorktree")(
-    function* (worktreePath: string) {
+    function* (worktreePath: string, nestedRepositoryPaths: ReadonlyArray<string> = []) {
       const root = yield* fs.realPath(worktreePath);
-      const skipped = yield* sharedPnpmVirtualStore(root);
+      // Each repository of a multi-repo container installs into its own node_modules.
+      const nestedRoots = yield* Effect.forEach(nestedRepositoryPaths, (repositoryPath) =>
+        fs.realPath(repositoryPath).pipe(Effect.orElseSucceed(() => null)),
+      );
+      const skipped = new Set(
+        yield* Effect.forEach(
+          [
+            root,
+            ...nestedRoots.flatMap((nested) =>
+              nested === null || nested === root ? [] : [nested],
+            ),
+          ],
+          (directory) => sharedPnpmVirtualStore(directory),
+        ),
+      );
       const pending = [root];
       let entries = 1;
       let bytes = 0;
       while (pending.length > 0) {
         const target = pending.pop()!;
-        if (target === skipped) continue;
+        if (skipped.has(target)) continue;
         // Effect's stat follows links. Probe with readLink first to get lstat
         // semantics, including skipping dangling links and directory links.
         const isLink = yield* fs.readLink(target).pipe(
@@ -1048,7 +1062,10 @@ const make = Effect.gen(function* () {
         });
         const blocked = yield* blockedSinceCheck();
         if (blocked !== null) return keep(blocked);
-        const bytes = yield* measureWorktree(worktreePath);
+        const bytes = yield* measureWorktree(
+          worktreePath,
+          checked.map((repository) => repository.path),
+        );
         const blockedWhileMeasuring = yield* blockedSinceCheck();
         if (blockedWhileMeasuring !== null) return keep(blockedWhileMeasuring);
         for (const repository of checked) {

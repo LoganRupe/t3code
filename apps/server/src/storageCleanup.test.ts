@@ -39,6 +39,7 @@ import {
   ThreadId,
   type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
+  type StorageCleanupReport,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import {
@@ -1902,6 +1903,33 @@ describe("multi-repo containers", () => {
     ),
   );
 
+  it.live("does not count a nested repository's pnpm clones as freed space", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, container, setPolicy } = yield* containerFixture({
+          rootIsRepository: false,
+        });
+        setPolicy("tracked-changes");
+        const storeDir = yield* fs.makeTempDirectoryScoped({ prefix: "pnpm-store-" });
+        const nodeModules = `${container}/backend/node_modules`;
+        yield* fs.makeDirectory(`${nodeModules}/.pnpm/pkg@1.0.0`, { recursive: true });
+        yield* fs.writeFileString(
+          `${nodeModules}/.pnpm/pkg@1.0.0/index.js`,
+          "clone ".repeat(500_000),
+        );
+        yield* fs.writeFileString(
+          `${nodeModules}/.modules.yaml`,
+          JSON.stringify({ storeDir, virtualStoreDir: ".pnpm" }),
+        );
+        const cloneBytes = yield* allocatedBytes(fs, `${nodeModules}/.pnpm/pkg@1.0.0/index.js`);
+
+        const entry = entryFor(yield* service.runNow, container);
+        expect(entry).toMatchObject({ outcome: "removed" });
+        expect(entry?.bytes).toBeLessThan(cloneBytes);
+      }),
+    ),
+  );
+
   it.live("keeps a plain container while any repository has uncommitted work", () =>
     runCleanupTest(
       Effect.gen(function* () {
@@ -1917,4 +1945,3 @@ describe("multi-repo containers", () => {
     ),
   );
 });
-
