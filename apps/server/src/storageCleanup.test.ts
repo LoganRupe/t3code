@@ -1786,3 +1786,135 @@ it.live("keeps saved usage data when removing a settled checkout", () =>
     }),
   ),
 );
+describe("multi-repo containers", () => {
+  // A multi-repo run's container: `backend` gets a worktree on the run's branch, nested in the
+  // root repository's worktree when the root is a checkout, else in a plain folder.
+  const containerFixture = (input: {
+    readonly rootIsRepository: boolean;
+    readonly storageCleanup?: StorageCleanupSettings;
+  }) =>
+    Effect.gen(function* () {
+      const fixture = yield* cleanupFixture(input.storageCleanup);
+      const { fs, command, config, repo } = fixture;
+      const repository = (prefix: string, defaultBranch: string) =>
+        Effect.gen(function* () {
+          const source = yield* fs.makeTempDirectoryScoped({ prefix });
+          yield* command(source, ["init", "-b", "main"]);
+          yield* command(source, ["config", "user.email", "cleanup@example.test"]);
+          yield* command(source, ["config", "user.name", "Cleanup test"]);
+          yield* fs.writeFileString(`${source}/tracked.txt`, "original\n");
+          yield* command(source, ["add", "."]);
+          yield* command(source, ["commit", "-m", "initial"]);
+          const remote = yield* fs.makeTempDirectoryScoped({ prefix: `${prefix}remote-` });
+          yield* command(remote, ["init", "--bare", "-b", defaultBranch]);
+          yield* command(source, ["remote", "add", "origin", remote]);
+          yield* command(source, ["push", "origin", `main:${defaultBranch}`]);
+          return source;
+        });
+      const backend = yield* repository("cleanup-backend-", "develop");
+      const container = `${config.worktreesDir}/multi`;
+      const repositories = [{ relativePath: "backend", name: "backend", source: backend }];
+      if (input.rootIsRepository) {
+        const remote = yield* fs.makeTempDirectoryScoped({ prefix: "cleanup-root-remote-" });
+        yield* fs.writeFileString(`${repo}/.gitignore`, "/backend/\n");
+        yield* command(repo, ["commit", "-am", "ignore backend"]);
+        yield* command(remote, ["init", "--bare", "-b", "main"]);
+        yield* command(repo, ["remote", "add", "origin", remote]);
+        yield* command(repo, ["push", "origin", "main"]);
+        yield* command(repo, ["worktree", "add", "-b", "multi", container, "main"]);
+        repositories.unshift({ relativePath: ".", name: "root", source: repo });
+      } else {
+        const frontend = yield* repository("cleanup-frontend-", "main");
+        yield* fs.makeDirectory(container);
+        yield* fs.symlink(`${repo}/tracked.txt`, `${container}/shared.txt`);
+        yield* command(frontend, ["worktree", "add", "-b", "multi", `${container}/frontend`]);
+        repositories.push({ relativePath: "frontend", name: "frontend", source: frontend });
+      }
+      yield* command(backend, ["worktree", "add", "-b", "multi", `${container}/backend`]);
+      yield* fs.writeFileString(
+        `${container}.t3-isolated-run.json`,
+        JSON.stringify({ repositories }),
+      );
+      fixture.setThreads([shell({ branch: "multi", worktreePath: container })]);
+      fixture.setStoredWorktreePaths([container]);
+      return { ...fixture, backend, container };
+    });
+  const unchanged = { ...DEFAULT_SERVER_SETTINGS.storageCleanup, worktreeUnchanged: true };
+  const entryFor = (report: StorageCleanupReport, container: string) =>
+    report.entries.find((entry) => entry.path === container);
+
+  it.live("keeps a root repository's worktree while a nested worktree has uncommitted work", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, container } = yield* containerFixture({
+          rootIsRepository: true,
+          storageCleanup: unchanged,
+        });
+        yield* fs.writeFileString(`${container}/backend/wip.txt`, "wip\n");
+
+        expect(entryFor(yield* service.runNow, container)).toMatchObject({
+          outcome: "kept",
+          reason: "Has uncommitted changes (1 file) in backend",
+        });
+        expect(yield* fs.readFileString(`${container}/backend/wip.txt`)).toBe("wip\n");
+      }),
+    ),
+  );
+
+  it.live("judges each repository against its own default branch", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, command, container, backend } = yield* containerFixture({
+          rootIsRepository: true,
+          storageCleanup: unchanged,
+        });
+        yield* fs.writeFileString(`${container}/backend/tracked.txt`, "feature\n");
+        yield* command(`${container}/backend`, ["commit", "-am", "feature"]);
+
+        expect(entryFor(yield* service.runNow, container)).toMatchObject({
+          outcome: "kept",
+          reason: "Has commits beyond the default branch",
+        });
+
+        yield* command(backend, ["push", "origin", "multi:develop"]);
+        expect(entryFor(yield* service.runNow, container)).toMatchObject({
+          outcome: "removed",
+          reason: "No commits beyond the default branch",
+        });
+        expect(yield* fs.exists(container)).toBe(false);
+        expect(yield* fs.exists(`${container}.t3-isolated-run.json`)).toBe(false);
+        expect((yield* command(backend, ["worktree", "list"])).stdout).not.toContain(container);
+      }),
+    ),
+  );
+
+  it.live("removes a plain container's worktrees and links, keeping the linked checkout", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, repo, container } = yield* containerFixture({
+          rootIsRepository: false,
+        });
+
+        expect(entryFor(yield* service.runNow, container)).toMatchObject({ outcome: "removed" });
+        expect(yield* fs.exists(container)).toBe(false);
+        expect(yield* fs.readFileString(`${repo}/tracked.txt`)).toBe("original\n");
+      }),
+    ),
+  );
+
+  it.live("keeps a plain container while any repository has uncommitted work", () =>
+    runCleanupTest(
+      Effect.gen(function* () {
+        const { service, fs, container } = yield* containerFixture({ rootIsRepository: false });
+        yield* fs.writeFileString(`${container}/frontend/tracked.txt`, "edit\n");
+
+        expect(entryFor(yield* service.runNow, container)).toMatchObject({
+          outcome: "kept",
+          reason: "Has uncommitted changes (1 file) in frontend",
+        });
+        expect(yield* fs.exists(`${container}/backend`)).toBe(true);
+      }),
+    ),
+  );
+});
+
