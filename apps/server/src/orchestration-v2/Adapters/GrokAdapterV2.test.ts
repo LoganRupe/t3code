@@ -345,6 +345,7 @@ describe("Grok launch permission mode", () => {
             Layer.provide(
               Layer.mock(WorkspaceRepositories.WorkspaceRepositories)({
                 list: () => Effect.succeed([]),
+                describe: () => Effect.succeed({ repositories: [], folders: null }),
               }),
             ),
             Layer.provide(

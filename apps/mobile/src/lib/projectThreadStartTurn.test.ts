@@ -121,5 +121,4 @@ describe("project thread title", () => {
       branch: "t3code/abc123",
     });
   });
-
 });

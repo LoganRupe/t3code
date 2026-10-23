@@ -134,6 +134,16 @@ interface HarnessOptions {
   readonly repositories?: ReadonlyArray<VcsRepository>;
 }
 
+/** Waits for a launch's worktree setup to finish, without polling the projection. */
+const awaitSetupSettled = (threadId: ThreadId) =>
+  Effect.gen(function* () {
+    const tracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+    yield* tracker.stream(threadId).pipe(
+      Stream.filter((snapshot) => snapshot !== null && snapshot.phase !== "running"),
+      Stream.runHead,
+    );
+  });
+
 function makeHarness(options: HarnessOptions = {}) {
   const layerDatabase = SqlitePersistence.layerMemory;
   const layerRegistry = ProviderAdapterRegistry.layerFromAdapters(options.adapters ?? [adapter]);
@@ -1057,11 +1067,7 @@ it.effect("gives a multi-repo project one container with a worktree per reposito
           workspace: { type: "worktree", baseRef: "main", branch: "t3/abcd1234" },
         }),
       );
-      yield* waitUntil(() =>
-        threads
-          .getThreadProjection(launched.threadId)
-          .pipe(Effect.map((projection) => projection.thread.branch === "generated-branch")),
-      );
+      yield* awaitSetupSettled(launched.threadId);
 
       assert.equal(harness.createWorktree.mock.calls.length, 0);
       assert.deepEqual(harness.createWorkspaceWorktree.mock.calls[0]?.[0], {
@@ -2345,7 +2351,6 @@ it.effect("passes each repository's chosen base to the multi-repo worktree build
     const harness = makeHarness({ repositories });
     yield* Effect.gen(function* () {
       const launches = yield* ThreadLaunch.ThreadLaunchService;
-      const threads = yield* ThreadManagement.ThreadManagementService;
       const launched = yield* launches.launch(
         launchInput({
           command: "command:launch:multi-repo-bases",
@@ -2359,11 +2364,7 @@ it.effect("passes each repository's chosen base to the multi-repo worktree build
           },
         }),
       );
-      yield* waitUntil(() =>
-        threads
-          .getThreadProjection(launched.threadId)
-          .pipe(Effect.map((projection) => projection.thread.worktreePath !== null)),
-      );
+      yield* awaitSetupSettled(launched.threadId);
       // The root repository takes the strategy's base ref, the branch picker's choice for the
       // folder; a repository without a pick is left to its default branch.
       assert.deepEqual(harness.createWorkspaceWorktree.mock.calls[0]?.[0].baseRefs, [
@@ -2384,7 +2385,6 @@ it.effect("gives only the chosen repositories a worktree and the rest a referenc
     const harness = makeHarness({ repositories });
     yield* Effect.gen(function* () {
       const launches = yield* ThreadLaunch.ThreadLaunchService;
-      const threads = yield* ThreadManagement.ThreadManagementService;
       const launched = yield* launches.launch(
         launchInput({
           command: "command:launch:multi-repo-subset",
@@ -2398,11 +2398,7 @@ it.effect("gives only the chosen repositories a worktree and the rest a referenc
           },
         }),
       );
-      yield* waitUntil(() =>
-        threads
-          .getThreadProjection(launched.threadId)
-          .pipe(Effect.map((projection) => projection.thread.worktreePath !== null)),
-      );
+      yield* awaitSetupSettled(launched.threadId);
       // The folder's own repository always gets one, even when the pick leaves it out.
       const input = harness.createWorkspaceWorktree.mock.calls[0]?.[0];
       assert.deepEqual(
@@ -2427,7 +2423,6 @@ it.effect("gives a large polyrepo no worktrees beyond its folder's own unless it
     const harness = makeHarness({ repositories });
     yield* Effect.gen(function* () {
       const launches = yield* ThreadLaunch.ThreadLaunchService;
-      const threads = yield* ThreadManagement.ThreadManagementService;
       const launched = yield* launches.launch(
         launchInput({
           command: "command:launch:polyrepo-default",
@@ -2436,11 +2431,7 @@ it.effect("gives a large polyrepo no worktrees beyond its folder's own unless it
           workspace: { type: "worktree", baseRef: "main", branch: "feature/look" },
         }),
       );
-      yield* waitUntil(() =>
-        threads
-          .getThreadProjection(launched.threadId)
-          .pipe(Effect.map((projection) => projection.thread.worktreePath !== null)),
-      );
+      yield* awaitSetupSettled(launched.threadId);
       const input = harness.createWorkspaceWorktree.mock.calls[0]?.[0];
       assert.deepEqual(
         input?.repositories.map((repository) => repository.relativePath),
@@ -2489,4 +2480,3 @@ it.effect("checks each chosen base in its own repository of a multi-repo workspa
     }).pipe(Effect.provide(harness.layer));
   }),
 );
-

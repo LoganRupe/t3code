@@ -10461,7 +10461,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
         const processQueues: Array<Queue.Queue<SDKMessage>> = [];
         const opened: Array<{ readonly resume?: unknown; readonly systemPrompt?: unknown }> = [];
         const offered: Array<SDKUserMessage> = [];
-        const events: Array<ProviderAdapter.ProviderAdapterV2Event> = [];
+        const terminals = yield* Queue.unbounded<void>();
         const adapter = yield* ClaudeAdapterV2.makeClaudeAdapterV2({
           instanceId: ClaudeAdapterV2.CLAUDE_DEFAULT_INSTANCE_ID,
           settings: DEFAULT_CLAUDE_SETTINGS,
@@ -10509,7 +10509,9 @@ describe("ClaudeAdapterV2 background wake turns", () => {
           runtimePolicy: CLAUDE_TEST_RUNTIME_POLICY,
         });
         yield* runtime.events.pipe(
-          Stream.runForEach((event) => Effect.sync(() => events.push(event))),
+          Stream.runForEach((event) =>
+            event.type === "turn.terminal" ? Queue.offer(terminals, undefined) : Effect.void,
+          ),
           Effect.forkScoped,
         );
         const now = yield* DateTime.now;
@@ -10537,10 +10539,7 @@ describe("ClaudeAdapterV2 background wake turns", () => {
                 result: `Turn ${ordinal} done.`,
               }),
             );
-            yield* awaitUntil(
-              () => events.filter((event) => event.type === "turn.terminal").length === ordinal,
-              `turn ${ordinal} terminal`,
-            );
+            yield* Queue.take(terminals);
           });
 
         yield* turn(1, CLAUDE_TEST_RUNTIME_POLICY);

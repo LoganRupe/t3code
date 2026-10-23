@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vite-plus/test";
-import type { ProjectEntry } from "@t3tools/contracts";
 
 import {
   fileRootFromTreePath,
@@ -7,21 +6,7 @@ import {
   projectFileRoots,
 } from "@t3tools/client-runtime/project-file-roots";
 
-import {
-  buildFileTree,
-  defaultExpandedTreePaths,
-  fileRootDirectoryTreeEntries,
-  fileRootTreeEntries,
-  flattenFileTree,
-} from "./fileTree";
-
-const entries = [
-  { kind: "file", path: "README.md" },
-  { kind: "directory", path: "src" },
-  { kind: "file", path: "src/index.ts" },
-  { kind: "file", path: "src/components/App.tsx" },
-  { kind: "file", path: "package.json" },
-] satisfies ReadonlyArray<ProjectEntry>;
+import { buildFileTree, fileRootDirectoryTreeEntries, fileRootTreeEntries } from "./fileTree";
 
 describe("multi-root file tree", () => {
   const roots = projectFileRoots({

@@ -17,10 +17,7 @@ import {
 } from "../ChatView.logic";
 import { isUsageLimitsCommand } from "@t3tools/shared/usageLimits";
 import { hasWorktreeRepository } from "@t3tools/client-runtime/repository-base-refs";
-import {
-  repositoryBaseRefsForSend,
-  worktreeRepositoryPicks,
-} from "../../repositoryBaseRefStore";
+import { repositoryBaseRefsForSend, worktreeRepositoryPicks } from "../../repositoryBaseRefStore";
 import {
   AuthOrchestrationOperateScope,
   DEFAULT_MODEL,

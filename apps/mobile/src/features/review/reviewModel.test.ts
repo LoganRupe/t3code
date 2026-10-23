@@ -212,5 +212,4 @@ describe("buildReviewSectionItems", () => {
       { id: "git:working-tree:../shared", title: "Uncommitted · shared", isLoading: true },
     ]);
   });
-
 });

@@ -6,7 +6,7 @@ import {
 } from "@t3tools/client-runtime/repository-base-refs";
 import type { EnvironmentId, ThreadId, VcsRepository } from "@t3tools/contracts";
 import { ChevronDownIcon, GitBranchIcon } from "lucide-react";
-import { memo, useMemo, useState } from "react";
+import { memo, useState } from "react";
 
 import { useRepositoryBaseRefStore, useWorktreeRepositories } from "../repositoryBaseRefStore";
 import { usePaginatedBranches } from "../state/queries";

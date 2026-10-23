@@ -7,6 +7,7 @@ import {
   getCloneDirectoryName,
   getDefaultCloneUrl,
   normalizePastedCloneUrl,
+  resolveAddProjectPath,
 } from "./projects.ts";
 import type { EnvironmentProject } from "../state/models.ts";
 
