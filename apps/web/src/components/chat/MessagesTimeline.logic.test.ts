@@ -920,6 +920,8 @@ describe("deriveMessagesTimelineRows", () => {
       checkpointRef: "checkpoint-1" as never,
       status: "ready" as const,
       files: [{ path: "src/index.ts", kind: "modified", additions: 3, deletions: 1 }],
+      repositories: [],
+      outsideEdits: [],
     };
 
     const rows = deriveMessagesTimelineRows({
@@ -3384,6 +3386,8 @@ describe("streaming v2 row projection", () => {
           checkpointRef: CheckpointRef.make("refs/t3/checkpoints/history"),
           status: "ready",
           files: [],
+          repositories: [],
+          outsideEdits: [],
           assistantMessageId: MessageId.make("history-assistant"),
           completedAt: source.time(4),
         },
@@ -3966,6 +3970,7 @@ it("keeps the working header in place across worktree setup handoff", () => {
     worktreePath: null,
     setupScript: null,
     stages: [],
+    repositories: [],
     error: null,
     sequence: 3,
   };

@@ -821,6 +821,8 @@ describe("MessagesTimeline automation prompts", () => {
             checkpointRef: "checkpoint-1" as never,
             status: "ready",
             files: [],
+            repositories: [],
+            outsideEdits: [],
             assistantMessageId: MessageId.make("assistant-1"),
             completedAt: CREATED_AT,
           },

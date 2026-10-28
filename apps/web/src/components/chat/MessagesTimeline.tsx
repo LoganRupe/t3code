@@ -8,6 +8,7 @@ import { useChatCanvas } from "./ChatCanvasContext";
 import { WorkLogBlock } from "./WorkLog";
 import { TimelinePendingApprovalRow } from "./TimelinePendingApprovalRow";
 import type { WorktreeSetupSnapshot } from "@t3tools/contracts";
+import { failedSetupRepositories } from "~/lib/multiRepo";
 import { deriveTimelineMinimapItems } from "./timelineMinimapItems";
 import {
   type AssistantCitation,
@@ -231,7 +232,7 @@ interface MessagesTimelineProps {
   worktreeSetup?: WorktreeSetupSnapshot | null;
   onCancelWorktreeSetup?: () => void;
   retryableWorkspacePreparationRunIds?: ReadonlySet<RunId>;
-  onRetryWorkspacePreparation?: (runId: RunId) => void;
+  onRetryWorkspacePreparation?: (runId: RunId, skipRepositoryPaths?: ReadonlyArray<string>) => void;
   onWorktreeSetupWorkLocally?: () => void;
   onOpenWorktreeSetupTerminal?: (terminalId: string) => void;
   isPreparingWorktree?: boolean;
@@ -255,7 +256,8 @@ interface MessagesTimelineProps {
   /** Off where another region already speaks the thread's status, like a subagent's bar. */
   announceTurnStatus?: boolean;
   onOpenToolDiff?: (target: ToolCallDiffTarget) => void;
-  onOpenTurnDiff?: (runId: RunId, filePath?: string) => void;
+  onOpenTurnDiff?: TimelineRowSharedState["onOpenTurnDiff"];
+  onOpenRepositoryChanges?: TimelineRowSharedState["onOpenRepositoryChanges"];
   onOpenThread: (threadId: OrchestrationV2TurnItem["threadId"]) => void;
   renderHtmlRender?: TimelineRowSharedState["renderHtmlRender"];
   turnItemSource?: TimelineRowSharedState["turnItemSource"];
@@ -369,6 +371,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   announceTurnStatus = true,
   onOpenToolDiff,
   onOpenTurnDiff,
+  onOpenRepositoryChanges,
   onOpenThread,
   renderHtmlRender,
   turnItemSource,
@@ -1046,6 +1049,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     openPullRequest,
     onOpenToolDiff,
     onOpenTurnDiff,
+    onOpenRepositoryChanges,
     onOpenThread,
     renderHtmlRender,
     turnItemSource,
@@ -1058,6 +1062,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onCancelWorktreeSetup: onCancelWorktreeSetup ?? null,
     retryableWorkspacePreparationRunIds,
     onRetryWorkspacePreparation: onRetryWorkspacePreparation ?? null,
+    failedWorktreeRepositories: failedSetupRepositories(worktreeSetup),
     onWorktreeSetupWorkLocally: onWorktreeSetupWorkLocally ?? null,
     onOpenWorktreeSetupTerminal: onOpenWorktreeSetupTerminal ?? null,
     workGroupViewState,

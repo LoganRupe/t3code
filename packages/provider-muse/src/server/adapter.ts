@@ -2079,6 +2079,14 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                 `Muse returned an unsupported compaction status: ${result.status}`,
               );
           } else {
+            const extraWorkspaceRoots = yield* Effect.forEach(
+              turnInput.runtimePolicy.workspace?.extraRoots ?? [],
+              (root) =>
+                fileSystem.realPath(root).pipe(
+                  Effect.orElseSucceed(() => root),
+                  Effect.flatMap(museWorkspaceRoot),
+                ),
+            );
             const result = yield* request(
               "turn/start",
               {
@@ -2089,13 +2097,14 @@ export const makeMuseAdapterV2 = Effect.fn("makeMuseAdapterV2")(function* (
                       harness: "Muse Code",
                       model: session.model ?? undefined,
                       reasoningEffort: effort,
+                      runtimePolicy: turnInput.runtimePolicy,
                     }),
                   },
                   ...parts,
                 ],
                 displayText: turnInput.message.text || "Image attachment",
-                // Resumed sessions retain old roots; pin edits to the current checkout.
-                workspaceRoots: [workspaceRoot],
+                // Resumed sessions retain old roots; pin edits to the current checkouts.
+                workspaceRoots: [workspaceRoot, ...extraWorkspaceRoots],
                 ifBusy: "queue",
                 ...(effort ? { reasoningEffort: effort } : {}),
               },

@@ -24,6 +24,7 @@ import { subscribeChatGptHandoff } from "./provider/CodexChatGptHandoff.ts";
 import {
   AcpRegistryOperationError,
   CommandId,
+  GitCommandError,
   authScopeResponse,
   AuthAccessStreamError,
   type AuthAccessStreamEvent,
@@ -206,6 +207,7 @@ import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
+import * as WorkspaceRepositories from "./workspace/WorkspaceRepositories.ts";
 import { readWorkflowScript } from "./orchestration-v2/workflowScriptQuery.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as VcsStatusBroadcaster from "./vcs/VcsStatusBroadcaster.ts";
@@ -223,6 +225,7 @@ import { mutateProjectWithClone } from "./project/ProjectMutation.ts";
 import * as ProjectCloneTracker from "./project/ProjectCloneTracker.ts";
 import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolver.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
+import * as TaskFolderService from "./workspace/TaskFolderService.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as DirectEndpoints from "./environment/DirectEndpoints.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
@@ -1469,6 +1472,7 @@ export const layerWsRpc = (
       const usage = yield* UsageService.UsageService;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
+      const taskFolders = yield* TaskFolderService.TaskFolderService;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
       const repositoryIdentityResolver =
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
@@ -1510,6 +1514,7 @@ export const layerWsRpc = (
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const workspaceRepositories = yield* WorkspaceRepositories.WorkspaceRepositories;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
       const backgroundPolicy = yield* BackgroundPolicy.BackgroundPolicy;
       const rpcClientIds = yield* Ref.make(new Set<RpcClientId>());
@@ -3003,7 +3008,7 @@ export const layerWsRpc = (
                 new ProjectMutationError({
                   commandId: mutation.commandId,
                   message:
-                    cause._tag === "ProjectNotEmptyError"
+                    cause._tag === "ProjectNotEmptyError" || cause._tag === "ProjectInvalidError"
                       ? cause.message
                       : "Failed to mutate project.",
                   cause,
@@ -3169,14 +3174,38 @@ export const layerWsRpc = (
           ),
         [WS_METHODS.gitResolvePullRequest]: (input) => gitWorkflow.resolvePullRequest(input),
         [WS_METHODS.gitPreparePullRequestThread]: (input) =>
-          gitWorkflow
+          taskFolders
             .preparePullRequestThread(input)
             .pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.vcsListRefs]: (input) => gitWorkflow.listRefs(input),
         [WS_METHODS.vcsCreateWorktree]: (input) =>
           gitWorkflow.createWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
-        [WS_METHODS.vcsRemoveWorktree]: (input) =>
-          gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+        [WS_METHODS.vcsRemoveWorktree]: (input) => {
+          const removalError = (detail: string) =>
+            new GitCommandError({
+              operation: "vcs.removeWorktree",
+              command: "git worktree remove",
+              cwd: input.cwd,
+              detail,
+            });
+          // Task folders remove children first and keep any repo with changes, home included:
+          // a client that did not recognize the folder may still ask to force it.
+          return taskFolders.remove({ path: input.path, force: false }).pipe(
+            Effect.mapError((error) => removalError(error.detail)),
+            Effect.flatMap((removal) => {
+              if (Option.isNone(removal)) return gitWorkflow.removeWorktree(input);
+              const kept = removal.value.repositories.filter((entry) => entry.outcome === "kept");
+              return kept.length === 0
+                ? Effect.void
+                : Effect.fail(
+                    removalError(
+                      `Kept ${kept.map((entry) => `${entry.name} (${entry.detail ?? "not removed"})`).join(", ")}.`,
+                    ),
+                  );
+            }),
+            Effect.tap(() => refreshGitStatus(input.cwd)),
+          );
+        },
         [WS_METHODS.vcsCreateRef]: (input) =>
           gitWorkflow.createRef(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.vcsSwitchRef]: (input) =>
@@ -3184,6 +3213,13 @@ export const layerWsRpc = (
         [WS_METHODS.vcsInit]: (input) =>
           vcsProvisioning.initRepository(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         [WS_METHODS.reviewGetBranchCommits]: (input) => review.getBranchCommits(input),
+        [WS_METHODS.workspaceListRepositories]: (input) =>
+          workspaceRepositories.listForClient(input),
+        [WS_METHODS.workspaceScanFolders]: (input) => workspaceRepositories.scanFolders(input),
+        [WS_METHODS.workspacePreviewHomeGitInit]: (input) =>
+          workspaceRepositories.previewHomeGitInit(input),
+        [WS_METHODS.workspaceInitializeHomeGit]: (input) =>
+          workspaceRepositories.initializeHomeGit(input),
         [WS_METHODS.reviewGetDiffPreview]: (input) => review.getDiffPreview(input),
         [WS_METHODS.reviewGetDiffFileContents]: (input) => review.getDiffFileContents(input),
         [WS_METHODS.terminalOpen]: (input) => terminalManager.open(input),

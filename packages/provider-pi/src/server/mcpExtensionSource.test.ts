@@ -6,7 +6,10 @@ import * as NodeModule from "node:module";
 import * as NodeVM from "node:vm";
 import { assert, describe, it } from "@effect/vitest";
 
-import { PI_T3_MCP_EXTENSION_SOURCE } from "./mcpExtensionSource.ts";
+import {
+  PI_T3_MCP_EXTENSION_SOURCE,
+  T3_PI_WORKSPACE_INSTRUCTIONS_ENV,
+} from "./mcpExtensionSource.ts";
 import { loadMcpBridge } from "./mcpBridge.testkit.ts";
 
 type RequestHook = (
@@ -28,6 +31,7 @@ type InputHook = (
 async function loadHooks(
   commands: ReadonlyArray<SkillCommand> = [],
   argv: ReadonlyArray<string> = [],
+  env: Record<string, string> = {},
 ) {
   const handlers = new Map<string, unknown>();
   const source = NodeModule.stripTypeScriptTypes(
@@ -37,7 +41,7 @@ async function loadHooks(
     ),
   );
   await NodeVM.runInNewContext(`${source}\nt3McpExtension(pi)`, {
-    process: { env: {}, argv },
+    process: { env, argv },
     NodeFSP,
     NodePath,
     stripFrontmatter: (content: string) => content,
@@ -103,6 +107,48 @@ describe("Pi project trust", () => {
     assert.equal(sent.length, notices * 2);
     for (const message of sent)
       assert.include(message, "for /repo because the folder is not trusted");
+  });
+});
+
+describe("Pi workspace prompt section", () => {
+  const block = "<workspace_folders>\n- api (Git repository): /work/api\n</workspace_folders>";
+  type AgentStartHook = (
+    event: {
+      systemPrompt: string;
+      systemPromptOptions?: { sections: Record<string, string> };
+    },
+    ctx: { cwd?: string; isProjectTrusted?: () => boolean; ui: { notify: () => void } },
+  ) => { systemPrompt: string } | undefined;
+
+  it("adds the repo list with or without T3's MCP tools", async () => {
+    const withoutMcp = (await loadHooks([], [], { [T3_PI_WORKSPACE_INSTRUCTIONS_ENV]: block })).get(
+      "before_agent_start",
+    ) as AgentStartHook;
+    const withMcp = (await loadMcpBridge({ workspaceInstructions: block })).handlers.get(
+      "before_agent_start",
+    )!;
+    assert.equal(
+      withoutMcp({ systemPrompt: "base" }, { ui: { notify: assert.fail } })?.systemPrompt,
+      `base\n\n${block}`,
+    );
+    const sections: Record<string, string> = {};
+    withoutMcp(
+      { systemPrompt: "base", systemPromptOptions: { sections } },
+      { ui: { notify: assert.fail } },
+    );
+    assert.deepEqual(sections, { t3_code_workspace: block });
+    const result = await withMcp({ systemPrompt: "base" }, { ui: { notify: assert.fail } });
+    assert.include(result?.systemPrompt, "orchestrator_capabilities");
+    assert.isTrue(result?.systemPrompt.endsWith(`\n\n${block}`));
+  });
+
+  it("adds nothing for single-repo threads", async () => {
+    // The hook left is the project trust check, which never touches the prompt.
+    const hook = (await loadHooks()).get("before_agent_start") as AgentStartHook;
+    const sections: Record<string, string> = {};
+    const ctx = { cwd: "/repo", isProjectTrusted: () => true, ui: { notify: assert.fail } };
+    assert.isUndefined(hook({ systemPrompt: "base", systemPromptOptions: { sections } }, ctx));
+    assert.deepEqual(sections, {});
   });
 });
 

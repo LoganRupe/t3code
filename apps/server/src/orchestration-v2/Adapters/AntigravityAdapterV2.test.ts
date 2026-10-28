@@ -389,6 +389,66 @@ describe("AntigravityAdapterV2 client file system", () => {
   );
 });
 
+describe("AntigravityAdapterV2 multi-repo files", () => {
+  it.effect("reads the thread's other repos and reference folders, nothing beyond them", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const web = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-antigravity-web-" });
+      const api = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-antigravity-api-" });
+      const design = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-antigravity-ref-" });
+      const outside = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-antigravity-out-" });
+      const apiFile = path.join(api, "index.ts");
+      const spec = path.join(design, "spec.md");
+      const secret = path.join(outside, "secret.txt");
+      yield* fileSystem.writeFileString(apiFile, "api");
+      yield* fileSystem.writeFileString(spec, "spec");
+      yield* fileSystem.writeFileString(secret, "secret");
+      const files = makeAntigravityAcpAdapterFlavor({
+        instanceId: ProviderInstanceId.make("antigravity-multi-repo-test"),
+        random: yield* SecureRandom.SecureRandom,
+        fileSystem,
+        path,
+        host: yield* ProviderHost.ProviderHost,
+        selfInvocation: undefined as never,
+        makeRuntime: () => Effect.die("not spawned in this test"),
+        withProcess: (_stop, task) => task,
+        defaultModel: Effect.undefined,
+      }).clientFileSystem;
+      if (files === undefined) return yield* Effect.die("Antigravity serves client files");
+      const policy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        cwd: web,
+        workspace: {
+          repositories: [
+            { name: "web", path: web },
+            { name: "api", path: api },
+          ],
+          referenceFolders: [{ name: "design", path: design }],
+          extraRoots: [api],
+          relativePathsDiffer: false,
+        },
+      });
+
+      const repoRead = yield* files.readTextFile(
+        { sessionId: "mock-session-1", path: apiFile },
+        policy,
+      );
+      assert.equal(repoRead.content, "api");
+      const referenceRead = yield* files.readTextFile(
+        { sessionId: "mock-session-1", path: spec },
+        policy,
+      );
+      assert.equal(referenceRead.content, "spec");
+      const outsideRead = yield* files
+        .readTextFile({ sessionId: "mock-session-1", path: secret }, policy)
+        .pipe(Effect.exit);
+      assert.isTrue(Exit.isFailure(outsideRead));
+    }).pipe(Effect.provide(layerSession), Effect.scoped),
+  );
+});
+
 describe("AntigravityAdapterV2 workspace changes", () => {
   it.effect("confines file requests to the workspace of the turn in progress", () =>
     Effect.gen(function* () {

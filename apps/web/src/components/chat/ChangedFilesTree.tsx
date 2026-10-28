@@ -1,4 +1,6 @@
 import { useSyncLayout } from "@legendapp/list/react";
+import { checkpointFileTotals } from "@t3tools/client-runtime/state/thread-checkpoints";
+import type { ChangedFilesByRepository } from "@t3tools/client-runtime/state/thread-repositories";
 import { type OrchestrationV2CheckpointFileTotals, type RunId } from "@t3tools/contracts";
 import { type MouseEvent, type ReactNode, memo, useLayoutEffect, useRef, useState } from "react";
 import { type TurnDiffFileChange } from "../../types";
@@ -23,23 +25,34 @@ interface ChangedFileRow {
   depth: number;
 }
 
-type ChangedFileContextMenuHandler = (filePath: string, event: MouseEvent) => void;
+/** `cwd` is the repo the path is relative to; null for the thread's own folder. */
+export type ChangedFileContextMenuHandler = (
+  filePath: string,
+  event: MouseEvent,
+  cwd: string | null,
+) => void;
+/** `repositoryKey` names the file's repo in a multi-repo thread: `home` or its tracked path. */
+export type OpenTurnDiffHandler = (runId: RunId, filePath?: string, repositoryKey?: string) => void;
 
 export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   runId: RunId;
   /** May be a prefix of the changed files; `totals` covers all of them. */
   files: ReadonlyArray<TurnDiffFileChange>;
+  /** The home repo's totals. */
   totals: OrchestrationV2CheckpointFileTotals;
+  /** Multi-repo threads list files per repo, home first. */
+  repositories?: ChangedFilesByRepository | undefined;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
   onToggleAllDirectories: () => void;
-  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
+  onOpenTurnDiff: OpenTurnDiffHandler;
   onFileContextMenu?: ChangedFileContextMenuHandler | undefined;
 }) {
   const {
     runId,
     files,
-    totals,
+    totals: homeTotals,
+    repositories,
     allDirectoriesExpanded,
     resolvedTheme,
     onToggleAllDirectories,
@@ -47,8 +60,23 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     onFileContextMenu,
   } = props;
   const syncTimelineLayout = useSyncLayout();
-  const hiddenFileCount = totals.count - files.length;
-  const hasDirectories = files.some((file) => /[/\\]/.test(file.path));
+  const groups = repositories?.multiRepo === true ? repositories.groups : null;
+  const shownFiles = groups?.flatMap((group) => group.files) ?? files;
+  const totals =
+    groups === null
+      ? homeTotals
+      : sumFileTotals(
+          groups.map((group) => (group.key === "home" ? homeTotals : checkpointFileTotals(group))),
+        );
+  const hiddenFileCount = totals.count - shownFiles.length;
+  const hasDirectories = shownFiles.some((file) => /[/\\]/.test(file.path));
+  const unchanged = groups === null ? [] : (repositories?.unchanged ?? []);
+  const noChanges = unchanged.filter((repository) => !repository.failed);
+  const notRecorded = unchanged.filter((repository) => repository.failed);
+  const openFullDiff = () =>
+    groups === null
+      ? onOpenTurnDiff(runId, files[0]?.path)
+      : onOpenTurnDiff(runId, groups[0]?.files[0]?.path, groups[0]?.key);
 
   return (
     <div
@@ -110,7 +138,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                   size="xs"
                   variant="ghost-muted"
                   aria-label="Open diff"
-                  onClick={() => onOpenTurnDiff(runId, files[0]?.path)}
+                  onClick={openFullDiff}
                 />
               }
             >
@@ -121,42 +149,95 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           </Tooltip>
         </div>
       </div>
-      <ChangedFilesTree
-        key={`${runId}:${allDirectoriesExpanded}`}
-        runId={runId}
-        files={files}
-        allDirectoriesExpanded={allDirectoriesExpanded}
-        resolvedTheme={resolvedTheme}
-        onOpenTurnDiff={onOpenTurnDiff}
-        onFileContextMenu={onFileContextMenu}
-      />
+      {groups === null ? (
+        <ChangedFilesTree
+          key={`${runId}:${allDirectoriesExpanded}`}
+          files={files}
+          allDirectoriesExpanded={allDirectoriesExpanded}
+          resolvedTheme={resolvedTheme}
+          onOpenFile={(filePath) => onOpenTurnDiff(runId, filePath)}
+          onFileContextMenu={
+            onFileContextMenu
+              ? (filePath, event) => onFileContextMenu(filePath, event, null)
+              : undefined
+          }
+        />
+      ) : (
+        groups.map((group) => (
+          <section key={group.key} aria-label={group.name}>
+            <div className="flex items-center gap-2 px-3 pt-2 text-xs text-muted-foreground">
+              <span className="min-w-0 truncate font-medium">{group.name}</span>
+              <RepositoryStat
+                totals={group.key === "home" ? homeTotals : checkpointFileTotals(group)}
+              />
+            </div>
+            <ChangedFilesTree
+              key={`${runId}:${group.key}:${allDirectoriesExpanded}`}
+              files={group.files}
+              allDirectoriesExpanded={allDirectoriesExpanded}
+              resolvedTheme={resolvedTheme}
+              onOpenFile={(filePath) => onOpenTurnDiff(runId, filePath, group.key)}
+              onFileContextMenu={
+                onFileContextMenu
+                  ? (filePath, event) => onFileContextMenu(filePath, event, group.cwd)
+                  : undefined
+              }
+            />
+          </section>
+        ))
+      )}
       {hiddenFileCount > 0 && (
         <div className="px-3 pb-2">
-          <Button
-            type="button"
-            size="xs"
-            variant="ghost-muted"
-            onClick={() => onOpenTurnDiff(runId, files[0]?.path)}
-          >
+          <Button type="button" size="xs" variant="ghost-muted" onClick={openFullDiff}>
             {hiddenFileCount.toLocaleString()} more file{hiddenFileCount === 1 ? "" : "s"} in the
             full diff
           </Button>
         </div>
       )}
+      {noChanges.length > 0 || notRecorded.length > 0 ? (
+        <p className="px-3 pb-2 text-xs text-muted-foreground/70">
+          {[
+            ...(noChanges.length > 0
+              ? [`${noChanges.map((repository) => repository.name).join(", ")}: no changes`]
+              : []),
+            ...(notRecorded.length > 0
+              ? [`${notRecorded.map((repository) => repository.name).join(", ")}: not recorded`]
+              : []),
+          ].join(" · ")}
+        </p>
+      ) : null}
     </div>
   );
 });
 
+function sumFileTotals(
+  totals: ReadonlyArray<OrchestrationV2CheckpointFileTotals>,
+): OrchestrationV2CheckpointFileTotals {
+  let count = 0;
+  let additions = 0;
+  let deletions = 0;
+  for (const entry of totals) {
+    count += entry.count;
+    additions += entry.additions;
+    deletions += entry.deletions;
+  }
+  return { count, additions, deletions };
+}
+
+function RepositoryStat({ totals }: { totals: OrchestrationV2CheckpointFileTotals }) {
+  return hasNonZeroStat(totals) ? (
+    <DiffStatLabel additions={totals.additions} deletions={totals.deletions} layout="inline" />
+  ) : null;
+}
+
 const ChangedFilesTree = memo(function ChangedFilesTree(props: {
-  runId: RunId;
   files: ReadonlyArray<TurnDiffFileChange>;
   allDirectoriesExpanded: boolean;
   resolvedTheme: "light" | "dark";
-  onOpenTurnDiff: (runId: RunId, filePath?: string) => void;
-  onFileContextMenu?: ChangedFileContextMenuHandler | undefined;
+  onOpenFile: (filePath: string) => void;
+  onFileContextMenu?: ((filePath: string, event: MouseEvent) => void) | undefined;
 }) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, runId, onFileContextMenu } =
-    props;
+  const { files, allDirectoriesExpanded, onOpenFile, resolvedTheme, onFileContextMenu } = props;
   // Place state before tree derivation to preserve its compiler cache.
   const [directoryExpansionState, setDirectoryExpansionState] = useState<{
     key: string | null;
@@ -233,7 +314,7 @@ const ChangedFilesTree = memo(function ChangedFilesTree(props: {
         type="button"
         className="group flex h-7 w-full cursor-pointer items-center gap-2 rounded-md py-1.5 pr-2 text-left transition-colors hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background"
         style={{ paddingLeft: `${leftPadding}px` }}
-        onClick={() => onOpenTurnDiff(runId, node.path)}
+        onClick={() => onOpenFile(node.path)}
         onContextMenu={
           onFileContextMenu
             ? (event) => {

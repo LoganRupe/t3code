@@ -32,6 +32,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Schema from "effect/Schema";
@@ -55,6 +56,7 @@ import {
 import * as RunFinalizationService from "./RunFinalizationService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import { userFacingDatabaseErrorMessage } from "./UserFacingErrors.ts";
+import { WorkspaceRepositories } from "../workspace/WorkspaceRepositories.ts";
 
 export interface ProviderEventRoutingState {
   readonly ownedThreadIds: ReadonlySet<ThreadId>;
@@ -616,6 +618,84 @@ export const layer: Layer.Layer<
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
     const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
+    // Unwired in most tests; threads there keep their single root scope.
+    const workspaceRepositories = yield* Effect.serviceOption(WorkspaceRepositories);
+
+    // Resolving tracked repos is I/O, so their scopes start here rather than in the orchestrator.
+    const prepareRepositoryScopes = Effect.fn("RunExecutionService.prepareRepositoryScopes")(
+      function* (input: RunExecutionServiceV2StartRootRunInput) {
+        if (Option.isNone(workspaceRepositories)) return [];
+        const workspace = yield* workspaceRepositories.value.resolveThreadWorkspace({
+          projectId: input.appThread.projectId,
+          worktreePath: input.appThread.worktreePath,
+        });
+        const repositories = workspace.repositories.filter(
+          (repository) => repository.kind === "repository",
+        );
+        if (repositories.length === 0) return [];
+        const scopes = yield* checkpointService.prepareRepositoryScopes({
+          rootScope: input.checkpointScope,
+          repositories,
+        });
+        const now = yield* DateTime.now;
+        yield* eventSink.write({
+          events: yield* Effect.forEach(scopes, (scope) =>
+            Effect.map(idAllocator.allocate.event({ threadId: input.run.threadId }), (id) => ({
+              id,
+              type: "checkpoint-scope.created" as const,
+              threadId: input.run.threadId,
+              runId: input.run.id,
+              nodeId: input.rootNode.id,
+              providerInstanceId: input.run.providerInstanceId,
+              occurredAt: now,
+              payload: scope,
+            })),
+          ),
+        });
+        return scopes;
+      },
+      (effect, input) =>
+        effect.pipe(
+          Effect.catchCauseIf(
+            (cause) => !Cause.hasInterruptsOnly(cause),
+            (cause) =>
+              Effect.logWarning("orchestration V2 repository checkpoint scopes unavailable", {
+                runId: input.run.id,
+                cause,
+              }).pipe(Effect.as([])),
+          ),
+        ),
+    );
+
+    const captureRunBaselines = Effect.fn("RunExecutionService.captureRunBaselines")(function* (
+      input: RunExecutionServiceV2StartRootRunInput,
+    ) {
+      const repositoryScopes = yield* prepareRepositoryScopes(input);
+      // Each scope checks its own ref, so a repo added later gets its first baseline here.
+      yield* Effect.forEach(
+        [input.checkpointScope, ...repositoryScopes],
+        (scope) =>
+          checkpointService
+            .captureBaseline({
+              scope,
+              ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
+              ...(scope === input.checkpointScope && repositoryScopes.length > 0
+                ? { repositoryScopes }
+                : {}),
+            })
+            .pipe(
+              Effect.catchCauseIf(
+                (cause) => !Cause.hasInterruptsOnly(cause),
+                (_cause) =>
+                  Effect.logWarning(
+                    "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
+                    { runId: input.run.id, scopeId: scope.id },
+                  ),
+              ),
+            ),
+        { concurrency: 4, discard: true },
+      );
+    });
 
     const writeFinalRunEvents = Effect.fn("RunExecutionService.writeFinalRunEvents")(
       function* (input: {
@@ -930,23 +1010,7 @@ export const layer: Layer.Layer<
             ),
           );
           // Side chats share the parent's worktree; a snapshot would capture the parent's edits.
-          yield* (
-            input.appThread.lineage.sideChat === true
-              ? Effect.void
-              : checkpointService.captureBaseline({
-                  scope: input.checkpointScope,
-                  ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
-                })
-          ).pipe(
-            Effect.catchCauseIf(
-              (cause) => !Cause.hasInterruptsOnly(cause),
-              (_cause) =>
-                Effect.logWarning(
-                  "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
-                  { runId: input.run.id },
-                ),
-            ),
-          );
+          if (input.appThread.lineage.sideChat !== true) yield* captureRunBaselines(input);
           if (
             input.shouldStartProviderTurn !== undefined &&
             !(yield* input.shouldStartProviderTurn())

@@ -7,6 +7,7 @@ import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
 import { AppBar } from "../../components/ui/AppBar";
 import type { AppBarMenuItem } from "../../components/ui/AppBar.types";
 import type { ReviewSectionItem } from "./reviewModel";
+import type { ReviewRepository } from "./reviewRepositories";
 import { useReviewHeaderPresentation } from "./useReviewHeaderPresentation";
 import { type Ref, type ReactElement, useImperativeHandle, useRef, useState } from "react";
 import {
@@ -36,7 +37,6 @@ import { useThreadDraftForThread } from "../../state/use-thread-composer-state";
 import { EnvironmentConnectionNotice } from "../connection/EnvironmentConnectionNotice";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import { Inspector, useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
-import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
 import { useReviewCacheForThread } from "./reviewState";
 import {
   isNativeReviewDiffDrawEvent,
@@ -62,6 +62,10 @@ function ReviewHeader(
     readonly sectionMenu: ReturnType<typeof buildReviewSectionMenu>;
     readonly showSectionToolbar: boolean;
     readonly showChangedFilesToggle: boolean;
+    /** Multi-repo threads only. */
+    readonly repositories: ReadonlyArray<ReviewRepository>;
+    readonly repository: ReviewRepository | null;
+    readonly onSelectRepository: (repository: ReviewRepository) => void;
     readonly onSelectSection: (sectionId: string) => void;
     readonly onReturnToThread: () => void;
   },
@@ -106,6 +110,21 @@ function ReviewHeader(
                 title: "Select diff",
                 icon: presentation.menuIcon,
                 items: [
+                  ...(props.repositories.length > 1
+                    ? [
+                        {
+                          id: "repositories",
+                          title: "Repository",
+                          icon: "folder",
+                          items: props.repositories.map((repository) => ({
+                            id: `repository:${repository.cwd}`,
+                            title: repository.name,
+                            selected: repository.cwd === props.repository?.cwd,
+                            onPress: () => props.onSelectRepository(repository),
+                          })),
+                        },
+                      ]
+                    : []),
                   {
                     id: "sections",
                     inline: true,
@@ -353,6 +372,9 @@ function ReviewFileNavigator({ files, sectionId, onSelectFile, ref }: ReviewFile
 type ReviewSheetProps = StaticScreenProps<{
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  /** A repo the agent edited outside the thread; review lists it next to the thread's repos. */
+  readonly outsideRepositoryRoot?: string;
+  readonly outsideRepositoryName?: string;
 }>;
 
 export function ReviewSheet(props: ReviewSheetProps) {
@@ -363,13 +385,13 @@ export function ReviewSheet(props: ReviewSheetProps) {
   const selectDetail = useSelectWorkspaceDetail();
   const insets = useSafeAreaInsets();
   const { themeAppearance: selectedTheme } = useAppearancePreferences();
-  const { environmentId, threadId } = props.route.params;
+  const { environmentId, threadId, outsideRepositoryRoot, outsideRepositoryName } =
+    props.route.params;
   const environment = useEnvironmentPresentation(environmentId);
   const retryEnvironment = useAtomCommand(environmentCatalog.retryNow, "environment retry");
   const isEnvironmentReady = environment.presentation?.connection.phase === "connected";
   const { draftMessage, draftContext } = useThreadDraftForThread({ environmentId, threadId });
   const reviewCache = useReviewCacheForThread({ environmentId, threadId });
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
   const columnMetrics = useNativeColumnLayoutMetrics();
   const safeArea = columnMetrics?.safeArea ?? insets;
   const topContentInset = useContentTopInset();
@@ -383,11 +405,18 @@ export function ReviewSheet(props: ReviewSheetProps) {
     refreshSelectedSection,
     selectSection,
     isSelectedSectionPending,
+    repositories,
+    repository,
+    cwd: reviewCwd,
+    selectRepository,
   } = useReviewSections({
     enabled: isEnvironmentReady,
     environmentId,
     threadId,
     reviewCache,
+    outsideRepository: outsideRepositoryRoot
+      ? { root: outsideRepositoryRoot, name: outsideRepositoryName ?? outsideRepositoryRoot }
+      : null,
   });
   useReviewDiffPrewarming({
     threadKey: reviewCache.threadKey,
@@ -404,7 +433,7 @@ export function ReviewSheet(props: ReviewSheetProps) {
   } = useReviewDiffData({
     threadKey: reviewCache.threadKey,
     environmentId,
-    cwd: selectedThreadCwd,
+    cwd: reviewCwd,
     selectedSection,
     draftMessage,
     draftContext,
@@ -617,11 +646,19 @@ export function ReviewSheet(props: ReviewSheetProps) {
         title={headerTitleText}
         subtitle={headerSubtitle}
         androidSubtitle={androidHeaderSubtitle}
-        selectedThreadCwd={selectedThreadCwd}
+        selectedThreadCwd={reviewCwd}
+        gitRepository={
+          repository === null
+            ? undefined
+            : { cwd: repository.cwd, home: repository.history === "home" }
+        }
         sectionMenu={sectionMenu}
         selectedSection={selectedSection}
         showSectionToolbar={showSectionToolbar}
         showChangedFilesToggle={showChangedFilesToggle}
+        repositories={repositories}
+        repository={repository}
+        onSelectRepository={selectRepository}
         onRefresh={handlePullToRefresh}
         onSelectSection={selectSection}
         onReturnToThread={handleReturnToThread}

@@ -7,11 +7,13 @@ import { useEnvironmentQuery } from "./query";
 import { sourceControlEnvironment } from "./sourceControl";
 import { useVcsActionState } from "./use-vcs-action-state";
 import { useThreadSelection } from "./use-thread-selection";
+import type { ThreadGitRepositoryTarget } from "./use-selected-thread-git-actions";
 import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 
-export function useSelectedThreadGitState() {
+export function useSelectedThreadGitState(repository?: ThreadGitRepositoryTarget) {
   const { selectedThread } = useThreadSelection();
-  const { selectedThreadCwd } = useSelectedThreadWorktree();
+  const worktree = useSelectedThreadWorktree();
+  const selectedThreadCwd = repository?.cwd ?? worktree.selectedThreadCwd;
 
   const selectedThreadGitTarget = {
     environmentId: selectedThread?.environmentId ?? null,
