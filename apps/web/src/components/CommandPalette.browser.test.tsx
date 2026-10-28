@@ -92,6 +92,7 @@ describe("CommandPalette open intents", () => {
       environmentId,
       title,
       workspaceRoot: `/work/${id}`,
+      trackedFolders: [],
       repositoryIdentity: null,
       defaultModelSelection: null,
       createdAt: "2026-03-01T00:00:00.000Z",
@@ -145,6 +146,7 @@ describe("CommandPalette open intents", () => {
           createdAt: "2026-03-01T00:00:00.000Z",
           updatedAt: "2026-03-01T00:00:00.000Z",
           scripts: [],
+          trackedFolders: [],
         },
       ],
       threads: [

@@ -10,9 +10,11 @@ import * as ProjectEnrichment from "../project/ProjectEnrichmentService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
+import { TaskFolderStore } from "../workspace/TaskFolders.ts";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import * as ProjectStore from "./ProjectStore.ts";
 
 export class RunFinalizationError extends Schema.TaggedError<RunFinalizationError>()(
   "RunFinalizationError",
@@ -126,8 +128,39 @@ export const layerObserver = Layer.effect(
           ),
         ),
     );
+    const projectStore = yield* ProjectStore.ProjectStoreV2;
+    const taskFolders = yield* TaskFolderStore;
+    // Only folders a client watches hold a status to refresh; the others return at once.
+    const refreshTrackedPullRequests = Effect.fn(
+      "RunFinalizationService.refreshTrackedPullRequests",
+    )(function* (projectId: ProjectId) {
+      const project = Option.getOrUndefined(
+        yield* projectStore.get(projectId).pipe(Effect.orElseSucceed(() => Option.none())),
+      );
+      if (project === undefined || project.trackedFolders.length === 0) return;
+      const records = yield* taskFolders.list({ projectId }).pipe(Effect.orElseSucceed(() => []));
+      const cwds = new Set([
+        ...project.trackedFolders.map((folder) => folder.path),
+        ...records.flatMap((record) =>
+          record.repositories.flatMap((repository) =>
+            repository.kind === "repository" ? [repository.worktreePath] : [],
+          ),
+        ),
+      ]);
+      yield* Effect.forEach(
+        cwds,
+        (cwd) => vcsStatus.refreshPullRequestStatus(cwd).pipe(Effect.ignore),
+        { concurrency: 4, discard: true },
+      );
+    });
     return {
-      refreshAfterTurn: pullRequests.refreshAfterTurn,
+      refreshAfterTurn: Effect.fn("RunFinalizationService.refreshAfterTurn")(function* (
+        projectId: ProjectId,
+      ) {
+        yield* pullRequests.refreshAfterTurn(projectId);
+        // Forked: host lookups must not hold up the end of a turn.
+        yield* refreshTrackedPullRequests(projectId).pipe(Effect.forkDetach);
+      }),
       refresh: Effect.fn("RunFinalizationService.refresh")(
         function* ({ cwd, threadId, runId }) {
           const [, local] = yield* Effect.all(

@@ -240,6 +240,9 @@ const ProjectionCheckpointContext = Schema.Struct({
       runId,
       kind,
       cwd,
+      // Repository scopes only; SQL reads a missing key as null.
+      label: Schema.optional(Schema.NullOr(Schema.String)),
+      repositoryPath: Schema.optional(Schema.NullOr(Schema.String)),
     })),
   ),
   checkpoints: Schema.Array(
@@ -258,7 +261,26 @@ const ProjectionCheckpointContext = Schema.Struct({
 export type ProjectionCheckpointContext = typeof ProjectionCheckpointContext.Type;
 const decodeCheckpointContext = Schema.decodeUnknownEffect(ProjectionCheckpointContext);
 
+/** The paths a `file_change` turn item reported. */
+interface ProjectionRunFileChange {
+  readonly fileName: string;
+  readonly changes: ReadonlyArray<{ readonly path: string; readonly oldPath?: string | undefined }>;
+}
+
+const ProjectionRunFileChangeRow = Schema.Struct({
+  fileName: Schema.String,
+  changes: Schema.NullOr(
+    Schema.fromJsonString(
+      Schema.Array(Schema.Struct({ path: Schema.String, oldPath: Schema.optional(Schema.String) })),
+    ),
+  ),
+});
+const decodeRunFileChangeRows = Schema.decodeUnknownEffect(
+  Schema.Array(ProjectionRunFileChangeRow),
+);
+
 export interface ProjectionCheckpointCaptureContext {
+  readonly projectId: ProjectId | undefined;
   readonly run: OrchestrationV2Run | undefined;
   readonly rootNode: OrchestrationV2ExecutionNode | undefined;
   readonly scope: OrchestrationV2CheckpointScope | undefined;
@@ -270,6 +292,15 @@ export interface ProjectionCheckpointCaptureContext {
   readonly preservedCheckpointOrdinals: ReadonlyArray<number>;
   /** Side chats share their parent's worktree and never snapshot it. */
   readonly sideChat: boolean;
+  /** Repository scopes the run's start included. */
+  readonly repositoryScopes: ReadonlyArray<OrchestrationV2CheckpointScope>;
+  readonly repositoryPreservedOrdinals: ReadonlyArray<{
+    readonly scopeId: CheckpointScopeId;
+    readonly ordinal: number;
+  }>;
+  readonly fileChanges: ReadonlyArray<ProjectionRunFileChange>;
+  /** Providers report relative paths against their session cwd. */
+  readonly providerSessionCwd: string | undefined;
 }
 
 const RollbackTargetAttempts = Schema.Array(
@@ -292,6 +323,9 @@ export interface ProjectionCheckpointRollbackContext {
   readonly runsToRollback: ReadonlyArray<OrchestrationV2Run>;
   readonly rootNodes: ReadonlyArray<OrchestrationV2ExecutionNode>;
   readonly staleCheckpoints: ReadonlyArray<OrchestrationV2Checkpoint>;
+  readonly repositoryScopes: ReadonlyArray<OrchestrationV2CheckpointScope>;
+  /** Every checkpoint of `repositoryScopes`, ordered by scope and ordinal. */
+  readonly repositoryCheckpoints: ReadonlyArray<OrchestrationV2Checkpoint>;
 }
 
 export interface ProjectionProviderControlContext {
@@ -5522,7 +5556,9 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             `,
               sql`
               SELECT scope_id AS id, run_id AS "runId", kind,
-                json_extract(payload_json, '$.cwd') AS cwd
+                json_extract(payload_json, '$.cwd') AS cwd,
+                json_extract(payload_json, '$.label') AS label,
+                json_extract(payload_json, '$.repositoryPath') AS "repositoryPath"
               FROM orchestration_v2_projection_checkpoint_scopes
               WHERE thread_id = ${threadId}
               ORDER BY ordinal_within_parent ASC, scope_id ASC
@@ -5555,8 +5591,12 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       sql
         .withTransaction(
           Effect.gen(function* () {
-            const threadRows = yield* sql<{ readonly side_chat: number | null }>`
-          SELECT json_extract(payload_json, '$.lineage.sideChat') AS side_chat
+            const threadRows = yield* sql<{
+              readonly side_chat: number | null;
+              readonly projectId: ProjectId;
+            }>`
+          SELECT json_extract(payload_json, '$.lineage.sideChat') AS side_chat,
+            project_id AS "projectId"
           FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} LIMIT 1`;
             if (threadRows[0] === undefined) {
               return yield* new ProjectionStoreThreadNotFoundError({ threadId });
@@ -5568,7 +5608,15 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               runRows[0] === undefined
                 ? undefined
                 : yield* decodeRunPayload(runRows[0].payload_json);
-            const [nodeRows, scopeRows, providerRows, preservedRows] = yield* Effect.all([
+            const [
+              nodeRows,
+              scopeRows,
+              providerRows,
+              preservedRows,
+              repositoryScopeRows,
+              repositoryPreservedRows,
+              fileChangeRows,
+            ] = yield* Effect.all([
               sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_nodes
             WHERE thread_id = ${threadId} AND node_id = ${run?.rootNodeId ?? null}`,
               sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_checkpoint_scopes
@@ -5582,8 +5630,38 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
             FROM orchestration_v2_projection_checkpoints
             WHERE thread_id = ${threadId} AND scope_id = ${target.scopeId}
               AND (status = 'ready' OR (status = 'missing' AND run_id IS NOT NULL))`,
+              sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_checkpoint_scopes
+            WHERE thread_id = ${threadId} AND kind = 'repository' AND run_id = ${target.runId}
+            ORDER BY ordinal_within_parent ASC, scope_id ASC`,
+              sql<{ readonly scopeId: CheckpointScopeId; readonly ordinal: number }>`
+            SELECT checkpoint.scope_id AS "scopeId", checkpoint.ordinal_within_scope AS ordinal
+            FROM orchestration_v2_projection_checkpoints AS checkpoint
+            JOIN orchestration_v2_projection_checkpoint_scopes AS scope
+              ON scope.scope_id = checkpoint.scope_id
+            WHERE checkpoint.thread_id = ${threadId}
+              AND (checkpoint.status = 'ready'
+                OR (checkpoint.status = 'missing' AND checkpoint.run_id IS NOT NULL))
+              AND scope.kind = 'repository' AND scope.run_id = ${target.runId}`,
+              // Paths only: diff bodies in file_change payloads can be large.
+              sql`SELECT json_extract(payload_json, '$.fileName') AS "fileName",
+              json_extract(payload_json, '$.changes') AS changes
+            FROM orchestration_v2_projection_turn_items
+            WHERE thread_id = ${threadId} AND run_id = ${target.runId} AND type = 'file_change'
+            ORDER BY ordinal ASC`,
             ]);
+            const providerThread =
+              providerRows[0] === undefined
+                ? undefined
+                : yield* decodeProviderThreadPayload(providerRows[0].payload_json);
+            const sessionRows =
+              providerThread?.providerSessionId == null
+                ? []
+                : yield* sql<{ readonly cwd: string | null }>`
+            SELECT json_extract(payload_json, '$.cwd') AS cwd
+            FROM orchestration_v2_projection_provider_sessions
+            WHERE provider_session_id = ${providerThread.providerSessionId}`;
             return {
+              projectId: threadRows[0].projectId,
               run,
               rootNode:
                 nodeRows[0] === undefined
@@ -5593,12 +5671,19 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 scopeRows[0] === undefined
                   ? undefined
                   : yield* decodeCheckpointScopePayload(scopeRows[0].payload_json),
-              providerThread:
-                providerRows[0] === undefined
-                  ? undefined
-                  : yield* decodeProviderThreadPayload(providerRows[0].payload_json),
+              providerThread,
               preservedCheckpointOrdinals: preservedRows.map(({ ordinal }) => ordinal),
               sideChat: threadRows[0].side_chat === 1,
+              repositoryScopes: yield* decodeRows(
+                decodeCheckpointScopePayload,
+                threadId,
+              )(repositoryScopeRows),
+              repositoryPreservedOrdinals: repositoryPreservedRows,
+              fileChanges: (yield* decodeRunFileChangeRows(fileChangeRows)).map((row) => ({
+                fileName: row.fileName,
+                changes: row.changes ?? [],
+              })),
+              providerSessionCwd: sessionRows[0]?.cwd ?? undefined,
             };
           }),
         )
@@ -5647,6 +5732,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               runsToRollback: [],
               rootNodes: [],
               staleCheckpoints: [],
+              repositoryScopes: [],
+              repositoryCheckpoints: [],
             };
             if (
               providerThread === undefined ||
@@ -5661,34 +5748,50 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               return context;
 
             const targetOrdinal = checkpoint.appRunOrdinal ?? 0;
-            const [attemptRows, runRows, sessionRows, rolledBackAttempts, staleRows] =
-              yield* Effect.all([
-                sql`SELECT attempt.attempt_id AS id, attempt.provider_turn_id AS "providerTurnId"
+            const [
+              attemptRows,
+              runRows,
+              sessionRows,
+              rolledBackAttempts,
+              staleRows,
+              repositoryScopeRows,
+              repositoryCheckpointRows,
+            ] = yield* Effect.all([
+              sql`SELECT attempt.attempt_id AS id, attempt.provider_turn_id AS "providerTurnId"
             FROM orchestration_v2_projection_run_attempts AS attempt
             JOIN orchestration_v2_projection_runs AS run
               ON attempt.attempt_id = json_extract(run.payload_json, '$.activeAttemptId')
             WHERE run.thread_id = ${threadId} AND run.ordinal = ${targetOrdinal}
               AND run.status != 'rolled_back' AND attempt.thread_id = ${threadId}`,
-                sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_runs
+              sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_runs
             WHERE thread_id = ${threadId} AND ordinal > ${targetOrdinal}
               AND status IN ('completed', 'interrupted', 'failed', 'cancelled')
             ORDER BY ordinal ASC`,
-                sql<PayloadRow>`SELECT session.payload_json
+              sql<PayloadRow>`SELECT session.payload_json
             FROM orchestration_v2_projection_provider_sessions AS session
             JOIN orchestration_v2_projection_provider_session_bindings AS binding
               ON binding.provider_session_id = session.provider_session_id
             WHERE binding.thread_id = ${threadId}
               AND session.provider_session_id = ${providerThread.providerSessionId}`,
-                sql<{ readonly id: RunAttemptId }>`SELECT attempt.attempt_id AS id
+              sql<{ readonly id: RunAttemptId }>`SELECT attempt.attempt_id AS id
             FROM orchestration_v2_projection_run_attempts AS attempt
             JOIN orchestration_v2_projection_runs AS run ON run.run_id = attempt.run_id
             WHERE run.thread_id = ${threadId} AND run.status = 'rolled_back'
               AND attempt.thread_id = ${threadId}`,
-                sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_checkpoints
+              sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_checkpoints
             WHERE thread_id = ${threadId} AND scope_id = ${scope.id} AND status = 'ready'
               AND app_run_ordinal > ${targetOrdinal}
             ORDER BY ordinal_within_scope ASC`,
-              ]);
+              sql<PayloadRow>`SELECT payload_json FROM orchestration_v2_projection_checkpoint_scopes
+            WHERE thread_id = ${threadId} AND kind = 'repository'
+            ORDER BY ordinal_within_parent ASC, scope_id ASC`,
+              sql<PayloadRow>`SELECT checkpoint.payload_json
+            FROM orchestration_v2_projection_checkpoints AS checkpoint
+            JOIN orchestration_v2_projection_checkpoint_scopes AS scope
+              ON scope.scope_id = checkpoint.scope_id
+            WHERE checkpoint.thread_id = ${threadId} AND scope.kind = 'repository'
+            ORDER BY checkpoint.scope_id ASC, checkpoint.ordinal_within_scope ASC`,
+            ]);
             const targetAttempt = (yield* decodeRollbackTargetAttempts(attemptRows))[0];
             const runsToRollback = yield* decodeRows(decodeRunPayload, threadId)(runRows);
             const [nodeRows, turnRows] = yield* Effect.all([
@@ -5717,6 +5820,14 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               rootNodes: yield* decodeRows(decodeNodePayload, threadId)(nodeRows),
               providerTurns: yield* decodeRows(decodeProviderTurnPayload, threadId)(turnRows),
               staleCheckpoints: yield* decodeRows(decodeCheckpointPayload, threadId)(staleRows),
+              repositoryScopes: yield* decodeRows(
+                decodeCheckpointScopePayload,
+                threadId,
+              )(repositoryScopeRows),
+              repositoryCheckpoints: yield* decodeRows(
+                decodeCheckpointPayload,
+                threadId,
+              )(repositoryCheckpointRows),
             };
           }),
         )

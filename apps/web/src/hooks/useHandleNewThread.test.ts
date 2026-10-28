@@ -207,6 +207,9 @@ vi.mock("../providerInstances", () => ({ resolveDefaultProviderModelSelection: (
 vi.mock("../lib/t3ProjectFileDefaults", () => ({
   readT3ProjectFile: () => testState.projectFileRead,
 }));
+vi.mock("../lib/readWorkspaceRepositories", () => ({
+  readWorkspaceRepositories: async () => null,
+}));
 vi.mock("../lib/utils", () => ({
   newDraftId: () => "draft-delayed",
   newThreadId: () => "thread-delayed",
@@ -382,6 +385,7 @@ describe("default project selection", () => {
       title: project.environmentId,
       defaultModelSelection: null,
       scripts: [],
+      trackedFolders: [],
       createdAt: "2026-11-09T00:00:00.000Z",
       updatedAt: "2026-11-09T00:00:00.000Z",
     }));

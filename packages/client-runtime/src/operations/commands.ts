@@ -13,10 +13,12 @@ import {
   type NodeId,
   type OrchestrationV2Command,
   type OrchestrationV2CreationSource,
+  type OrchestrationV2LaunchRepository,
   type PlanId,
   type ProjectId,
   type ProjectIconOverride,
   type ProjectScript,
+  type ProjectTrackedFolder,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
   type ProviderUserInputAnswers,
@@ -54,6 +56,7 @@ export interface CreateProjectInput extends CommandMetadata {
   readonly createWorkspaceRootIfMissing?: boolean;
   readonly defaultModelSelection?: ModelSelection | null;
   readonly scripts?: ReadonlyArray<ProjectScript>;
+  readonly trackedFolders?: ReadonlyArray<ProjectTrackedFolder>;
 }
 
 export interface UpdateProjectInput extends CommandMetadata {
@@ -68,6 +71,8 @@ export interface UpdateProjectInput extends CommandMetadata {
   readonly scripts?: ReadonlyArray<ProjectScript>;
   readonly pinned?: boolean;
   readonly archived?: boolean;
+  /** Replaces the whole list. */
+  readonly trackedFolders?: ReadonlyArray<ProjectTrackedFolder>;
 }
 
 export interface DeleteProjectInput extends CommandMetadata {
@@ -168,6 +173,8 @@ interface StartThreadBootstrap {
     readonly baseBranch: string;
     readonly branch?: string;
     readonly startFromOrigin?: boolean;
+    /** Multi-repo projects: the tracked repos that get a worktree. Omitted means all of them. */
+    readonly repositories?: ReadonlyArray<OrchestrationV2LaunchRepository>;
   };
   readonly runSetupScript?: boolean;
 }
@@ -260,6 +267,8 @@ export interface CancelQueuedRunInput extends ThreadCommandInput {
 
 export interface RetryWorkspacePreparationInput extends ThreadCommandInput {
   readonly runId: RunId;
+  /** "Start without <repo>": tracked paths to leave out of the task folder. */
+  readonly skipRepositoryPaths?: ReadonlyArray<string>;
 }
 
 export interface EditQueuedRunInput extends ThreadCommandInput {
@@ -369,6 +378,7 @@ const mutateProject = Effect.fn("EnvironmentCommands.mutateProject")(function* (
         readonly createWorkspaceRootIfMissing?: boolean;
         readonly defaultModelSelection?: ModelSelection | null;
         readonly scripts?: ReadonlyArray<ProjectScript>;
+        readonly trackedFolders?: ReadonlyArray<ProjectTrackedFolder>;
       }
     | {
         readonly type: "project.update";
@@ -378,6 +388,7 @@ const mutateProject = Effect.fn("EnvironmentCommands.mutateProject")(function* (
         readonly workspaceRoot?: string;
         readonly defaultModelSelection?: ModelSelection | null;
         readonly scripts?: ReadonlyArray<ProjectScript>;
+        readonly trackedFolders?: ReadonlyArray<ProjectTrackedFolder>;
       }
     | {
         readonly type: "project.delete";
@@ -405,6 +416,7 @@ export const createProject = Effect.fn("EnvironmentCommands.createProject")(func
       ? {}
       : { defaultModelSelection: input.defaultModelSelection }),
     ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
+    ...(input.trackedFolders === undefined ? {} : { trackedFolders: input.trackedFolders }),
   });
 });
 
@@ -429,6 +441,7 @@ export const updateProject = Effect.fn("EnvironmentCommands.updateProject")(func
     ...(input.scripts === undefined ? {} : { scripts: input.scripts }),
     ...(input.pinned === undefined ? {} : { pinned: input.pinned }),
     ...(input.archived === undefined ? {} : { archived: input.archived }),
+    ...(input.trackedFolders === undefined ? {} : { trackedFolders: input.trackedFolders }),
   });
 });
 
@@ -746,6 +759,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
             ...(prepareWorktree.startFromOrigin === undefined
               ? {}
               : { startFromOrigin: prepareWorktree.startFromOrigin }),
+            ...(prepareWorktree.repositories === undefined
+              ? {}
+              : { repositories: prepareWorktree.repositories }),
           }
         : bootstrap?.worktreePath
           ? {
@@ -989,14 +1005,22 @@ export const revertThreadCheckpoint = Effect.fn("EnvironmentCommands.revertThrea
       });
     }
     const projection = yield* getProjection(input.threadId);
+    // Repository scopes share ordinals with the root scope; rewind always targets the root.
+    const repositoryScopeIds = new Set(
+      projection.checkpointScopes
+        .filter((scope) => scope.kind === "repository")
+        .map((scope) => scope.id),
+    );
     const checkpoint =
       projection.checkpoints.find(
         (candidate) => candidate.id === input.checkpointId && candidate.scopeId === input.scopeId,
       ) ??
-      projection.checkpoints.findLast((candidate) =>
-        input.turnCount === 0
-          ? candidate.ordinalWithinScope === 0 && candidate.appRunOrdinal === null
-          : candidate.appRunOrdinal === input.turnCount,
+      projection.checkpoints.findLast(
+        (candidate) =>
+          !repositoryScopeIds.has(candidate.scopeId) &&
+          (input.turnCount === 0
+            ? candidate.ordinalWithinScope === 0 && candidate.appRunOrdinal === null
+            : candidate.appRunOrdinal === input.turnCount),
       );
     if (
       checkpoint === undefined ||
@@ -1130,6 +1154,9 @@ export const retryWorkspacePreparation = Effect.fn("EnvironmentCommands.retryWor
       commandId: yield* allocateCommandId(input),
       threadId: input.threadId,
       runId: input.runId,
+      ...(input.skipRepositoryPaths === undefined || input.skipRepositoryPaths.length === 0
+        ? {}
+        : { skipRepositoryPaths: input.skipRepositoryPaths }),
     });
   },
 );

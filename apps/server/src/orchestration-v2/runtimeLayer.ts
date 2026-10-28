@@ -58,13 +58,25 @@ import * as ThreadForkService from "./ThreadForkService.ts";
 import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
+import * as TaskFolders from "../workspace/TaskFolders.ts";
+import * as TaskFolderService from "../workspace/TaskFolderService.ts";
+import * as WorkspaceRepositories from "../workspace/WorkspaceRepositories.ts";
 
 export const layerEventInfrastructure = Layer.mergeAll(
   OrchestrationEventStore.layer,
   OrchestrationCommandReceipts.layer,
 );
 
+/** Task folders and thread workspaces, provided wherever the project store is. */
+export const layerProjectWorkspaces = Layer.mergeAll(
+  TaskFolders.layer,
+  WorkspaceRepositories.layer.pipe(
+    Layer.provide(Layer.mergeAll(ProjectStore.layer, TaskFolders.layer, GitVcsDriver.layer)),
+  ),
+);
+
 const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
+  Layer.provide(layerProjectWorkspaces),
   Layer.provide(ProjectStore.layer),
 );
 
@@ -80,6 +92,7 @@ const layerStores = Layer.mergeAll(
   layerEventStoreProvided,
   ProjectionStore.layer,
   ProjectStore.layer,
+  layerProjectWorkspaces,
   layerCommandReceiptStoreProvided,
   EffectOutbox.layer,
   TurnItemPositionStore.layer,
@@ -97,6 +110,7 @@ export const layerProjectService = ProjectService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       ProjectStore.layer,
+      layerProjectWorkspaces,
       ProjectionStore.layer,
       layerEventSink,
       IdAllocator.layer,
@@ -160,6 +174,7 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
       IdAllocator.layer,
       layerProviderEventIngestorProvided,
       TurnItemPositionStore.layer,
+      layerProjectWorkspaces,
     ),
   ),
 );
@@ -190,6 +205,7 @@ const layerCheckpointRollbackServiceProvided = CheckpointRollbackService.layer.p
   Layer.provide(
     Layer.mergeAll(
       ProjectStore.layer,
+      layerProjectWorkspaces,
       layerCheckpointServiceProvided,
       layerEventSink,
       IdAllocator.layer,
@@ -207,6 +223,7 @@ const layerCheckpointCaptureServiceProvided = CheckpointCaptureService.layer.pip
       layerEventSink,
       IdAllocator.layer,
       ProjectionStore.layer,
+      ProjectStore.layer,
     ),
   ),
 );
@@ -225,6 +242,7 @@ const layerOrchestratorProvided = Orchestrator.layer.pipe(
       layerContextHandoffServiceProvided,
       IdAllocator.layer,
       ProjectStore.layer,
+      layerProjectWorkspaces,
       ProviderAdapterRegistry.layerFromProviderInstanceRegistry,
       // Reuse the continuation worker's layer reference so memoization shares one request queue.
       ProviderContinuationRequests.layer,
@@ -275,10 +293,15 @@ export const layerProjectSetupScriptRunner = ProjectSetupScriptRunner.layer.pipe
 const layerManagedProjectFoldersProvided = ManagedProjectFolders.layer.pipe(
   Layer.provide(layerProjectService),
 );
+/** Git workflow, settings, and config come from the host, like ThreadLaunchService's own. */
+export const layerTaskFolderService = TaskFolderService.layer.pipe(
+  Layer.provide(Layer.mergeAll(layerProjectWorkspaces, layerProjectService)),
+);
 const layerThreadLaunchProvided = ThreadLaunchService.layer.pipe(
   Layer.provide(
     Layer.mergeAll(
       layerProjectService,
+      layerTaskFolderService,
       layerProjectSetupScriptRunner,
       layerManagedProjectFoldersProvided,
       layerThreadManagementProvided,
@@ -324,6 +347,7 @@ const layerThreadTitleRegenerationProvided = ThreadTitleRegenerationService.laye
     Layer.mergeAll(
       layerThreadManagementProvided,
       ProjectStore.layer,
+      layerProjectWorkspaces,
       TextGeneration.layer.pipe(Layer.provide(ProviderInstallationGate.layer)),
     ),
   ),

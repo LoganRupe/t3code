@@ -55,6 +55,7 @@ it.effect("parks automatic pull until activation without delaying command readin
             repositoryIdentity: null,
             defaultModelSelection: null,
             scripts: [],
+            trackedFolders: [],
             createdAt: updatedAt,
             updatedAt,
             deletedAt: null,

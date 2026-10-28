@@ -1,4 +1,5 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   CheckpointScopeId,
@@ -61,6 +62,7 @@ it.effect(
             ),
           ),
           Layer.provideMerge(NodeCrypto.layer),
+          Layer.provideMerge(NodeServices.layer),
         );
         yield* Effect.gen(function* () {
           const checkpoints = yield* CheckpointService.CheckpointServiceV2;
@@ -91,7 +93,7 @@ it.effect(
               nodeId: scope.nodeId,
               capturedAt: scope.createdAt,
             });
-            assert.strictEqual(materialized.status, "missing");
+            assert.strictEqual(materialized?.status, "missing");
           }
         }).pipe(Effect.provide(layerTest));
       }
@@ -132,6 +134,7 @@ it.effect("records a repository probe failure as an error checkpoint, not a miss
         ),
       ),
       Layer.provideMerge(NodeCrypto.layer),
+      Layer.provideMerge(NodeServices.layer),
     );
 
     const statuses = yield* Effect.gen(function* () {

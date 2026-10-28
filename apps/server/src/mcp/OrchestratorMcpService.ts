@@ -103,6 +103,7 @@ import type {
 import { delegatedTaskResultRun, runOutcome } from "../orchestration-v2/RestartBackgroundNote.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ThreadLaunchService from "../orchestration-v2/ThreadLaunchService.ts";
+import * as TaskFolderService from "../workspace/TaskFolderService.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isSnoozed } from "../orchestration-v2/ThreadSettlementService.ts";
 import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingErrors.ts";
@@ -1056,6 +1057,8 @@ const make = Effect.gen(function* () {
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
+  // Optional so hosts and tests without task folders keep single-repo delegates.
+  const taskFolders = yield* Effect.serviceOption(TaskFolderService.TaskFolderService);
 
   const requireProject = (projectId: ProjectId) =>
     projects.getById(projectId).pipe(
@@ -2489,7 +2492,18 @@ const make = Effect.gen(function* () {
               ),
             );
         }
-        workspaceStrategy = { type: "worktree", baseRef: base.commitSha, startFromOrigin: false };
+        // A multi-repo child gets its own task folder, each repo at the parent's HEAD there.
+        const repositories = Option.isNone(taskFolders)
+          ? null
+          : yield* taskFolders.value
+              .repositoryHeads({ project, worktreePath: parent.thread.worktreePath })
+              .pipe(Effect.mapError((error) => failure("invalid_request", error.detail)));
+        workspaceStrategy = {
+          type: "worktree",
+          baseRef: base.commitSha,
+          startFromOrigin: false,
+          ...(repositories === null ? {} : { repositories }),
+        };
       }
       // ThreadManagementService.dispatch is the chokepoint for this command
       // type's own enablement check, using the same command id and its

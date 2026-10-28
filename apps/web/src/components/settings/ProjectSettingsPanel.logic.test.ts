@@ -16,6 +16,7 @@ function makeProject(environmentId: EnvironmentId, overrides: Partial<Project> =
     id: ProjectId.make(`${environmentId}-project`),
     title: "repo",
     workspaceRoot: `/${environmentId}/repo`,
+    trackedFolders: [],
     repositoryIdentity: {
       canonicalKey: "github.com/owner/repo",
       locator: {

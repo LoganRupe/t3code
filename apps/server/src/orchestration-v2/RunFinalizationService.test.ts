@@ -16,6 +16,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
+import * as Queue from "effect/Queue";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -25,9 +26,11 @@ import * as ProjectService from "../project/ProjectService.ts";
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as PullRequestService from "../pullRequest/PullRequestService.ts";
 import * as VcsStatusBroadcaster from "../vcs/VcsStatusBroadcaster.ts";
+import { TaskFolderStore } from "../workspace/TaskFolders.ts";
 import * as WorkspaceEntries from "../workspace/WorkspaceEntries.ts";
 import * as CheckpointCapture from "./CheckpointCaptureService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import * as ProjectStore from "./ProjectStore.ts";
 import * as RunFinalization from "./RunFinalizationService.ts";
 
 // Without a project the observer never touches enrichment, so its methods stay unimplemented.
@@ -125,6 +128,8 @@ it.effect.each(
         Layer.mock(PullRequestService.PullRequestService)({
           refreshAfterTurn: () => Effect.void,
         }),
+        Layer.mock(ProjectStore.ProjectStoreV2)({}),
+        Layer.mock(TaskFolderStore)({}),
         Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
           refreshLocalStatus: () =>
             Effect.succeed({
@@ -173,6 +178,8 @@ it.effect("returns from the post-turn refresh without waiting for the PR lookup"
         Layer.mock(PullRequestService.PullRequestService)({
           refreshAfterTurn: () => Effect.void,
         }),
+        Layer.mock(ProjectStore.ProjectStoreV2)({}),
+        Layer.mock(TaskFolderStore)({}),
         Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
           refreshLocalStatus: () =>
             Effect.succeed({
@@ -224,6 +231,8 @@ it.effect("replaces a still-running PR lookup when a newer turn finishes", () =>
         Layer.mock(PullRequestService.PullRequestService)({
           refreshAfterTurn: () => Effect.void,
         }),
+        Layer.mock(ProjectStore.ProjectStoreV2)({}),
+        Layer.mock(TaskFolderStore)({}),
         Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
           refreshLocalStatus: () =>
             Effect.succeed({
@@ -309,6 +318,8 @@ const layerIdentityRefresh = <R>(
         Layer.mock(ProjectService.ProjectService)({
           getById: () => Effect.succeedSome({ id: identityProjectId, workspaceRoot } as Project),
         }),
+        Layer.mock(ProjectStore.ProjectStoreV2)({}),
+        Layer.mock(TaskFolderStore)({}),
       ),
     ),
   );
@@ -396,3 +407,79 @@ it.effect("returns from the post-turn refresh while the identity resolver is sti
     assert.strictEqual(change.enrichment.repositoryIdentity?.canonicalKey, identity.canonicalKey);
   }).pipe(Effect.scoped, Effect.provide(layerIdentityRefresh(workspaceRoot, resolver)));
 });
+
+it.effect("refreshes every tracked repo's pull request status after a multi-repo turn", () =>
+  Effect.gen(function* () {
+    const refreshed = yield* Queue.unbounded<string>();
+    const projectId = ProjectId.make("project-multi-repo");
+    const singleRepoId = ProjectId.make("project-single-repo");
+    const row = (id: ProjectId, trackedFolders: ProjectStore.ProjectRow["trackedFolders"]) =>
+      ({ projectId: id, trackedFolders }) as ProjectStore.ProjectRow;
+    const layer = RunFinalization.layerObserver.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          layerNoProject,
+          Layer.mock(WorkspaceEntries.WorkspaceEntries)({}),
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+          Layer.mock(PullRequestService.PullRequestService)({
+            refreshAfterTurn: () => Effect.void,
+          }),
+          Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
+            refreshPullRequestStatus: (cwd) => Queue.offer(refreshed, cwd).pipe(Effect.as(null)),
+          }),
+          Layer.mock(ProjectStore.ProjectStoreV2)({
+            get: (id) =>
+              Effect.succeedSome(
+                id === projectId
+                  ? row(id, [
+                      { path: "/work/home/api", name: "api" },
+                      { path: "/work/app", name: "app" },
+                    ])
+                  : row(id, []),
+              ),
+          }),
+          Layer.mock(TaskFolderStore)({
+            list: () =>
+              Effect.succeed([
+                {
+                  root: "/worktrees/fix",
+                  projectId,
+                  homeWorktreePath: "/worktrees/fix/home",
+                  repositories: [
+                    {
+                      kind: "home" as const,
+                      name: "home",
+                      originalPath: "/work/home",
+                      worktreePath: "/worktrees/fix/home",
+                      relativePath: "",
+                      baseRef: "main",
+                      branch: "t3/fix",
+                    },
+                    {
+                      kind: "repository" as const,
+                      name: "app",
+                      originalPath: "/work/app",
+                      worktreePath: "/worktrees/fix/app",
+                      relativePath: "../app",
+                      baseRef: "main",
+                      branch: "t3/fix",
+                    },
+                  ],
+                  createdAt: "2026-10-27T00:00:00.000Z",
+                  updatedAt: "2026-10-27T00:00:00.000Z",
+                },
+              ]),
+          }),
+        ),
+      ),
+    );
+    return yield* Effect.gen(function* () {
+      const observer = yield* RunFinalization.RunFinalizationObserver;
+      yield* observer.refreshAfterTurn(singleRepoId);
+      yield* observer.refreshAfterTurn(projectId);
+      const cwds = yield* Effect.all(Array.from({ length: 3 }, () => Queue.take(refreshed)));
+      assert.deepEqual(cwds.toSorted(), ["/work/app", "/work/home/api", "/worktrees/fix/app"]);
+      assert.equal(yield* Queue.size(refreshed), 0);
+    }).pipe(Effect.provide(layer));
+  }),
+);

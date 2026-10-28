@@ -5,11 +5,13 @@ import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
   CommandId,
   type ChatAttachment,
+  type GitCommandError,
   type MessageId,
   type ModelSelection,
   type OrchestrationV2Actor,
   type OrchestrationV2CreationSource,
   type OrchestrationV2DelegatedFrom,
+  type OrchestrationV2LaunchRepository,
   type OrchestrationV2LinkOrigin,
   type OrchestrationV2ProviderThreadNativeMetadata,
   type OrchestrationV2ThreadProjection,
@@ -46,6 +48,7 @@ import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
+import * as TaskFolderService from "../workspace/TaskFolderService.ts";
 import * as CommandReceiptStore from "./CommandReceiptStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import type * as Orchestrator from "./Orchestrator.ts";
@@ -66,6 +69,7 @@ export type ThreadLaunchWorkspaceStrategy =
       readonly baseRef: string;
       readonly branch?: string | undefined;
       readonly startFromOrigin?: boolean | undefined;
+      readonly repositories?: ReadonlyArray<OrchestrationV2LaunchRepository> | undefined;
     };
 
 export interface ThreadLaunchInitialMessage {
@@ -105,17 +109,23 @@ export interface ThreadLaunchInput {
   readonly delegatedFrom?: OrchestrationV2DelegatedFrom;
 }
 
+type WorktreeStrategy = Extract<ThreadLaunchWorkspaceStrategy, { readonly type: "worktree" }>;
+
 type PreparationInput = Pick<
   ThreadLaunchInput,
   "commandId" | "projectId" | "workspaceStrategy" | "initialMessage"
 > & {
-  readonly reusedWorktree?: { readonly baseRef: string };
+  /** Retries reuse the bound worktree; a task folder still gets the repos it lacks. */
+  readonly reusedWorktree?: { readonly baseRef: string; readonly strategy?: WorktreeStrategy };
+  readonly skipRepositoryPaths?: ReadonlyArray<string>;
 };
 
 export interface ThreadLaunchPreparationInput {
   readonly commandId: CommandId;
   readonly threadId: ThreadId;
   readonly runId: RunId;
+  /** "Start without <repo>": tracked paths to leave out of the task folder. */
+  readonly skipRepositoryPaths?: ReadonlyArray<string> | undefined;
 }
 
 export interface ThreadLaunchResult {
@@ -248,6 +258,7 @@ const make = Effect.gen(function* () {
   const ids = yield* IdAllocator.IdAllocatorV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
   const managedFolders = yield* ManagedProjectFolders.ManagedProjectFolders;
+  const taskFolders = yield* TaskFolderService.TaskFolderService;
   const preparationScope = yield* Scope.make("sequential");
   const scheduledLaunches = yield* Ref.make<ReadonlySet<CommandId>>(new Set());
   yield* Effect.addFinalizer(() => Scope.close(preparationScope, Exit.void));
@@ -313,7 +324,9 @@ const make = Effect.gen(function* () {
     const repositoryRoot = yield* git
       .repositoryRoot(cwd)
       .pipe(Effect.orElseSucceed(() => undefined));
-    if (repositoryRoot === null)
+    // A multi-repo project's home can be a plain folder; its tracked repos get the worktrees.
+    const homeIsRepository = repositoryRoot !== null;
+    if (!homeIsRepository && project.trackedFolders.length === 0)
       return yield* new ThreadLaunchNotRepositoryError({
         projectId: project.id,
         projectTitle: project.title,
@@ -321,6 +334,7 @@ const make = Effect.gen(function* () {
       });
     const { baseRef, branch } = strategy;
     const baseResolves =
+      !homeIsRepository ||
       // `:/text` is a commit search, which cannot be asked for a commit type.
       baseRef.startsWith(":") ||
       (yield* Effect.gen(function* () {
@@ -343,8 +357,24 @@ const make = Effect.gen(function* () {
         workspaceRoot: project.workspaceRoot,
         baseRef,
       });
+    for (const repository of strategy.repositories ?? []) {
+      const repositoryBase = repository.baseRef;
+      if (repositoryBase === undefined || repositoryBase.startsWith(":")) continue;
+      const resolves = yield* Effect.gen(function* () {
+        const repositoryCwd = repository.path;
+        if (yield* git.hasCommit({ cwd: repositoryCwd, refName: repositoryBase })) return true;
+        return yield* git.hasRefNamed({ cwd: repositoryCwd, refName: repositoryBase });
+      }).pipe(Effect.orElseSucceed(() => true));
+      if (!resolves)
+        return yield* new ThreadLaunchBaseRefError({
+          projectId: project.id,
+          projectTitle: project.title,
+          workspaceRoot: repository.path,
+          baseRef: repositoryBase,
+        });
+    }
     // Provisioning flattens temporary names that collide, so only explicit names are refused.
-    if (branch === undefined || isTemporaryWorktreeBranch(branch)) return;
+    if (!homeIsRepository || branch === undefined || isTemporaryWorktreeBranch(branch)) return;
     const conflictingBranch = (yield* git
       .listLocalBranchNames(cwd)
       .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []))).find(
@@ -382,6 +412,7 @@ const make = Effect.gen(function* () {
     let setupTerminalId: string | null = null;
     let workspaceRecorded = false;
     let runReleased = false;
+    let folderPlan: TaskFolderService.TaskFolderPlan | null = null;
     // Stop background renames before forgetting worktrees; completed renames record them again.
     let branchRename: Fiber.Fiber<unknown> | null = null;
     if (input.workspaceStrategy.type === "worktree") {
@@ -403,6 +434,41 @@ const make = Effect.gen(function* () {
     }
     yield* Effect.gen(function* () {
       const initialMessage = input.initialMessage;
+      const folderStrategy =
+        input.workspaceStrategy.type === "worktree" ? input.workspaceStrategy : reused?.strategy;
+      if (folderStrategy !== undefined) {
+        folderPlan = yield* taskFolders
+          .plan({ project, repositories: folderStrategy.repositories })
+          .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+      }
+      const skipped = input.skipRepositoryPaths ?? [];
+      const plannedRepositories = (folderPlan?.repositories ?? []).filter(
+        (repository) => !skipped.includes(repository.originalPath),
+      );
+      if (plannedRepositories.length > 0) {
+        yield* setupTracker.update(threadId, (snapshot) => ({
+          ...snapshot,
+          repositories: plannedRepositories.map((repository) => ({
+            name: repository.name,
+            path: repository.originalPath,
+            status: "pending",
+            detail: null,
+          })),
+        }));
+      }
+      let folderFailures: ReadonlyArray<TaskFolderService.TaskFolderFailure> = [];
+      const folderProgress: TaskFolderService.TaskFolderProgress = {
+        onFetch: (status) => setupTracker.stageStatus(threadId, "fetch", status),
+        onCheckoutStarted: setupTracker.stageStatus(threadId, "checkout", "running"),
+        onHomeClaimed: (path) =>
+          Effect.sync(() => {
+            createdWorktreePath = path;
+            createdBranch = branch;
+          }),
+        onCheckoutProgress: (percent) => setupTracker.stage(threadId, "checkout", { percent }),
+        onRepository: (path, status, detail) =>
+          setupTracker.repository(threadId, path, status, detail),
+      };
       const generateBranchNameFor = Effect.fn("ThreadLaunchService.generateBranchNameFor")(
         function* (cwd: string, message: ThreadLaunchInitialMessage) {
           const settings = resolveProjectSettings(
@@ -464,74 +530,107 @@ const make = Effect.gen(function* () {
             })
             .pipe(Effect.mapError(mapError(input, "update-thread", threadId)));
         }
-        let startRef = input.workspaceStrategy.baseRef;
-        let baseRefName = input.workspaceStrategy.baseRef;
-        const remote =
-          input.workspaceStrategy.startFromOrigin === true
-            ? yield* git
-                .resolveWorktreeBaseRemote({
-                  cwd: project.workspaceRoot,
-                  refName: input.workspaceStrategy.baseRef,
-                })
-                .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)))
-            : null;
-        const shouldFetch = remote !== null;
-        yield* setupTracker.stageStatus(threadId, "fetch", shouldFetch ? "running" : "skipped");
-        if (remote !== null) {
-          const remoteBase = yield* git
-            .fetchWorktreeBaseCommit({
-              cwd: project.workspaceRoot,
-              refName: input.workspaceStrategy.baseRef,
-              remote,
-            })
-            .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
-          if (remoteBase !== null) {
-            startRef = remoteBase.commitSha;
-            baseRefName = `refs/remotes/${remoteBase.remoteRefName}`;
-          }
-        }
-        if (shouldFetch) yield* setupTracker.stageStatus(threadId, "fetch", "done");
-        if (
-          branch !== null &&
-          isTemporaryWorktreeBranch(branch) &&
-          (yield* git
-            .hasCommit({
-              cwd: project.workspaceRoot,
-              refName: `refs/heads/${WORKTREE_BRANCH_PREFIX}`,
-            })
-            .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId))))
-        ) {
-          branch = flattenTemporaryWorktreeBranchName(branch);
-        }
-        yield* setupTracker.stageStatus(threadId, "checkout", "running");
-        const worktree = yield* git
-          .createWorktree(
-            {
-              cwd: project.workspaceRoot,
-              refName: startRef,
-              newRefName: branch!,
-              baseRefName,
-              path: null,
-            },
-            {
-              progress: {
-                onWorktreeClaimed: (path) =>
-                  Effect.sync(() => {
-                    createdWorktreePath = path;
-                    createdBranch = branch;
-                  }),
-                onCheckoutProgress: (progress) =>
-                  setupTracker.stage(threadId, "checkout", { percent: progress.percent }),
+        if (folderPlan !== null) {
+          const created = yield* taskFolders
+            .create(
+              {
+                plan: folderPlan,
+                branch: branch!,
+                baseRef: input.workspaceStrategy.baseRef,
+                startFromOrigin: input.workspaceStrategy.startFromOrigin === true,
+                skipRepositoryPaths: skipped,
               },
-            },
-          )
-          .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
-        worktreePath = worktree.worktree.path;
-        branch = worktree.worktree.refName;
+              folderProgress,
+            )
+            .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+          worktreePath = created.record.homeWorktreePath;
+          branch = created.record.repositories[0]?.branch ?? branch;
+          folderFailures = created.failed;
+        } else {
+          let startRef = input.workspaceStrategy.baseRef;
+          let baseRefName = input.workspaceStrategy.baseRef;
+          const remote =
+            input.workspaceStrategy.startFromOrigin === true
+              ? yield* git
+                  .resolveWorktreeBaseRemote({
+                    cwd: project.workspaceRoot,
+                    refName: input.workspaceStrategy.baseRef,
+                  })
+                  .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)))
+              : null;
+          const shouldFetch = remote !== null;
+          yield* setupTracker.stageStatus(threadId, "fetch", shouldFetch ? "running" : "skipped");
+          if (remote !== null) {
+            const remoteBase = yield* git
+              .fetchWorktreeBaseCommit({
+                cwd: project.workspaceRoot,
+                refName: input.workspaceStrategy.baseRef,
+                remote,
+              })
+              .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+            if (remoteBase !== null) {
+              startRef = remoteBase.commitSha;
+              baseRefName = `refs/remotes/${remoteBase.remoteRefName}`;
+            }
+          }
+          if (shouldFetch) yield* setupTracker.stageStatus(threadId, "fetch", "done");
+          if (
+            branch !== null &&
+            isTemporaryWorktreeBranch(branch) &&
+            (yield* git
+              .hasCommit({
+                cwd: project.workspaceRoot,
+                refName: `refs/heads/${WORKTREE_BRANCH_PREFIX}`,
+              })
+              .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId))))
+          ) {
+            branch = flattenTemporaryWorktreeBranchName(branch);
+          }
+          yield* setupTracker.stageStatus(threadId, "checkout", "running");
+          const worktree = yield* git
+            .createWorktree(
+              {
+                cwd: project.workspaceRoot,
+                refName: startRef,
+                newRefName: branch!,
+                baseRefName,
+                path: null,
+              },
+              {
+                progress: {
+                  onWorktreeClaimed: (path) =>
+                    Effect.sync(() => {
+                      createdWorktreePath = path;
+                      createdBranch = branch;
+                    }),
+                  onCheckoutProgress: (progress) =>
+                    setupTracker.stage(threadId, "checkout", { percent: progress.percent }),
+                },
+              },
+            )
+            .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+          worktreePath = worktree.worktree.path;
+          branch = worktree.worktree.refName;
+        }
         createdWorktreePath = worktreePath;
         createdBranch = branch;
         yield* setupTracker.update(threadId, (snapshot) => ({ ...snapshot, worktreePath, branch }));
         yield* setupTracker.stageStatus(threadId, "checkout", "done");
+      }
+
+      if (reused !== undefined && folderPlan !== null && worktreePath !== null) {
+        const completed = yield* taskFolders
+          .complete(
+            {
+              plan: folderPlan,
+              homeWorktreePath: worktreePath,
+              startFromOrigin: reused.strategy?.startFromOrigin === true,
+              skipRepositoryPaths: skipped,
+            },
+            folderProgress,
+          )
+          .pipe(Effect.mapError(mapError(input, "provision-worktree", threadId)));
+        if (Option.isSome(completed)) folderFailures = completed.value.failed;
       }
 
       // Do not rewrite reused worktrees; that could undo the original branch rename.
@@ -557,25 +656,35 @@ const make = Effect.gen(function* () {
       ) {
         const oldBranch = branch;
         const worktreeCwd = worktreePath;
+        const renameInFolder = folderPlan !== null;
         branchRename = yield* generateBranchNameFor(worktreeCwd, initialMessage).pipe(
-          Effect.flatMap(({ branch: newBranch, exactName }) =>
-            git
-              .renameBranch({
-                cwd: worktreeCwd,
-                oldBranch,
-                newBranch,
-                ...(exactName ? { exactName: true } : {}),
-              })
-              .pipe(
-                // A cancel must see the renamed branch, or its cleanup deletes the old name.
-                Effect.tap((renamed) =>
-                  Effect.sync(() => {
-                    createdBranch = renamed.branch;
-                  }),
-                ),
-                Effect.uninterruptible,
-              ),
-          ),
+          Effect.flatMap(({ branch: newBranch, exactName }) => {
+            const rename = {
+              oldBranch,
+              newBranch,
+              ...(exactName ? { exactName: true } : {}),
+            };
+            // A cancel must see the renamed branch, or its cleanup deletes the old name.
+            const recordRenamed = <A extends { readonly branch: string }>(renamed: A) =>
+              Effect.sync(() => {
+                createdBranch = renamed.branch;
+                return renamed;
+              });
+            const renameHere = () =>
+              git
+                .renameBranch({ cwd: worktreeCwd, ...rename })
+                .pipe(Effect.flatMap(recordRenamed), Effect.uninterruptible);
+            return renameInFolder
+              ? taskFolders.renameBranch({ worktreePath: worktreeCwd, ...rename }).pipe(
+                  Effect.flatMap(
+                    Option.match({
+                      onNone: renameHere,
+                      onSome: recordRenamed,
+                    }),
+                  ),
+                )
+              : renameHere();
+          }),
           Effect.flatMap((renamed) =>
             Effect.gen(function* () {
               yield* threads
@@ -636,6 +745,21 @@ const make = Effect.gen(function* () {
             }),
           ),
           Effect.forkIn(preparationScope),
+        );
+      }
+
+      if (folderFailures.length > 0) {
+        // The thread stays bound to the folder so a retry reuses what was made.
+        return yield* mapError(
+          input,
+          "provision-worktree",
+          threadId,
+        )(
+          new Error(
+            `Could not create the worktree for ${folderFailures
+              .map((failure) => `${failure.name} (${failure.detail})`)
+              .join("; ")}.`,
+          ),
         );
       }
 
@@ -763,41 +887,68 @@ const make = Effect.gen(function* () {
             if (branchRename !== null) yield* Fiber.interrupt(branchRename);
             const removedPath = createdWorktreePath;
             const removedBranch = createdBranch;
+            const deleteRemovedBranch = (cwd: string) =>
+              removedBranch === null
+                ? Effect.void
+                : git
+                    .deleteLocalBranch({ cwd, refName: removedBranch, force: true })
+                    .pipe(Effect.ignoreCause({ log: true }));
             // Forget worktrees only after removal succeeds; failed removals must not reuse partially written checkouts.
-            yield* git
-              .removeWorktree({ cwd: project.workspaceRoot, path: removedPath, force: true })
-              .pipe(
-                Effect.andThen(
-                  removedBranch === null
-                    ? Effect.void
-                    : git
-                        .deleteLocalBranch({
+            yield* (
+              folderPlan === null
+                ? Effect.succeed(Option.none<TaskFolderService.TaskFolderRemoval>())
+                : taskFolders.remove({ path: removedPath, force: true })
+            ).pipe(
+              Effect.flatMap(
+                (
+                  removal,
+                ): Effect.Effect<void, GitCommandError | TaskFolderService.TaskFolderError> =>
+                  Option.isNone(removal)
+                    ? git
+                        .removeWorktree({
                           cwd: project.workspaceRoot,
-                          refName: removedBranch,
+                          path: removedPath,
                           force: true,
                         })
-                        .pipe(Effect.ignoreCause({ log: true })),
-                ),
-                Effect.andThen(
-                  threads
-                    .dispatch({
-                      type: "thread.metadata.update",
-                      commandId: CommandId.make(`${input.commandId}:cancel-workspace`),
-                      threadId,
-                      worktreePath: null,
-                      branch: null,
-                    })
-                    .pipe(Effect.ignore),
-                ),
-                Effect.catchCause((removeCause) =>
-                  Effect.logWarning("Failed to remove an abandoned thread worktree", {
-                    commandId: input.commandId,
+                        .pipe(Effect.andThen(deleteRemovedBranch(project.workspaceRoot)))
+                    : removal.value.removed
+                      ? Effect.forEach(
+                          new Set([
+                            project.workspaceRoot,
+                            ...removal.value.repositories.map(
+                              (repository) => repository.originalPath,
+                            ),
+                          ]),
+                          deleteRemovedBranch,
+                          { discard: true },
+                        )
+                      : Effect.fail(
+                          new TaskFolderService.TaskFolderError({
+                            operation: "remove",
+                            detail: "A repository with changes kept the folder.",
+                          }),
+                        ),
+              ),
+              Effect.andThen(
+                threads
+                  .dispatch({
+                    type: "thread.metadata.update",
+                    commandId: CommandId.make(`${input.commandId}:cancel-workspace`),
                     threadId,
-                    path: removedPath,
-                    cause: removeCause,
-                  }),
-                ),
-              );
+                    worktreePath: null,
+                    branch: null,
+                  })
+                  .pipe(Effect.ignore),
+              ),
+              Effect.catchCause((removeCause) =>
+                Effect.logWarning("Failed to remove an abandoned thread worktree", {
+                  commandId: input.commandId,
+                  threadId,
+                  path: removedPath,
+                  cause: removeCause,
+                }),
+              ),
+            );
           }
         }),
       ),
@@ -1184,6 +1335,9 @@ const make = Effect.gen(function* () {
       commandId: input.commandId,
       threadId: input.threadId,
       runId: input.runId,
+      ...(input.skipRepositoryPaths === undefined
+        ? {}
+        : { skipRepositoryPaths: input.skipRepositoryPaths }),
     });
     yield* prepareRun(input);
     return dispatched;
@@ -1209,7 +1363,10 @@ const make = Effect.gen(function* () {
               worktreePath: thread.worktreePath,
               branch: thread.branch,
             },
-            reusedWorktree: { baseRef: workspacePreparation.baseRef },
+            reusedWorktree: {
+              baseRef: workspacePreparation.baseRef,
+              strategy: workspacePreparation,
+            },
           }
         : null;
     return yield* schedulePreparation(
@@ -1218,6 +1375,9 @@ const make = Effect.gen(function* () {
         projectId: thread.projectId,
         workspaceStrategy: reuse?.strategy ?? workspacePreparation,
         ...(reuse === null ? {} : { reusedWorktree: reuse.reusedWorktree }),
+        ...(input.skipRepositoryPaths === undefined
+          ? {}
+          : { skipRepositoryPaths: input.skipRepositoryPaths }),
         ...(message === undefined
           ? {}
           : {

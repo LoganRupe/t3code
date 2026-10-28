@@ -170,6 +170,7 @@ const ACP_PROMPT_ACTIVITY_UPDATES: ReadonlySet<string> = new Set([
 
 export interface AcpAdapterV2RuntimeInput {
   readonly cwd: string;
+  readonly extraRoots?: ReadonlyArray<string>;
   readonly runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy;
   readonly mcpServers: ReadonlyArray<EffectAcpSchema.McpServer>;
   readonly acpMcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>;
@@ -412,14 +413,15 @@ export interface AcpAdapterV2Flavor {
    * Under a policy ceiling, a mode the user picks that this does not place under it is not applied.
    */
   readonly runtimeModeForSessionMode?: (modeId: string) => RuntimeMode | undefined;
+  /** Reads may reach the thread's reference folders; writes only its cwd and other repos. */
   readonly clientFileSystem?: {
     readonly readTextFile: (
       request: EffectAcpSchema.ReadTextFileRequest,
-      cwd: string | null,
+      runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
     ) => Effect.Effect<EffectAcpSchema.ReadTextFileResponse, EffectAcpErrors.AcpError>;
     readonly writeTextFile?: (
       request: EffectAcpSchema.WriteTextFileRequest,
-      cwd: string | null,
+      runtimePolicy: ProviderAdapter.ProviderAdapterV2RuntimePolicy,
     ) => Effect.Effect<EffectAcpSchema.WriteTextFileResponse, EffectAcpErrors.AcpError>;
   };
   readonly extractPermissionQuestion?: (request: EffectAcpSchema.RequestPermissionRequest) =>
@@ -2374,6 +2376,9 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
         ): AcpAdapterV2RuntimeInput => {
           return {
             cwd: input.runtimePolicy.cwd ?? process.cwd(),
+            ...(input.runtimePolicy.workspace === undefined
+              ? {}
+              : { extraRoots: input.runtimePolicy.workspace.extraRoots }),
             runtimePolicy: input.runtimePolicy,
             mcpServers: mcpContext.servers,
             acpMcpServers: mcpContext.acpServers,
@@ -6499,14 +6504,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           if (clientFileSystem !== undefined) {
             yield* targetRuntime.handleReadTextFile((request) =>
               clientPolicyContext.pipe(
-                Effect.flatMap(({ policy }) => clientFileSystem.readTextFile(request, policy.cwd)),
+                Effect.flatMap(({ policy }) => clientFileSystem.readTextFile(request, policy)),
               ),
             );
             const writeTextFile = clientFileSystem.writeTextFile;
             if (writeTextFile !== undefined) {
               yield* targetRuntime.handleWriteTextFile((request) =>
                 clientPolicyContext.pipe(
-                  Effect.flatMap(({ policy }) => writeTextFile(request, policy.cwd)),
+                  Effect.flatMap(({ policy }) => writeTextFile(request, policy)),
                 ),
               );
             }
@@ -8052,6 +8057,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 pullRequestLinking:
                   sessionSetup === null ||
                   flavor.sessionCarriesPullRequestLinking?.(sessionSetup.initializeResult) !== true,
+                runtimePolicy: turnInput.runtimePolicy,
               }),
             });
           }

@@ -57,6 +57,7 @@ import {
   SCRATCH_PROJECT_TITLE,
   scopeProjectSettingsGroup,
 } from "./ProjectSettingsPanel.logic";
+import { ProjectRepositoriesSettings } from "./ProjectRepositoriesSettings";
 import { useSettingsProjectGroups } from "./useSettingsProjectGroups";
 import { readUnloadedThreadCount } from "../../state/olderSettledShelf";
 import { settingsScopeEnvironmentLabels } from "./settingsScopeAxis";
@@ -649,6 +650,18 @@ function ProjectDetail({
             </>
           ) : null}
         </SettingsSection>
+        {group.memberProjects.map((member) => (
+          <ProjectRepositoriesSettings
+            key={member.physicalProjectKey}
+            project={member}
+            title={
+              hasMultipleCheckouts
+                ? `Repositories on ${member.environmentLabel ?? "this machine"}`
+                : "Repositories"
+            }
+            canEdit={editableIds.has(member.environmentId)}
+          />
+        ))}
         <ProjectDefaultsSettings category="project" />
         <ProjectActionsSettings />
         {checkoutChoices}
