@@ -690,6 +690,7 @@ describe("DesktopUpdates", () => {
           restartScheduled: false,
         })),
         waitForReady: () => Effect.succeed(true),
+        waitForStarted: () => Effect.succeed(true),
       } satisfies DesktopBackendPool.DesktopBackendInstance;
     };
     const primary = makeInstance(DesktopBackendPool.PRIMARY_INSTANCE_ID, false);
