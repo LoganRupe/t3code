@@ -62,6 +62,7 @@ vi.mock("~/state/entities", () => ({
   useThreadCheckpointSummaries: () => [],
   useQuietThreadVisibleTurnItems: () => [],
 }));
+vi.mock("~/state/threadRepositories", () => ({ useThreadWorkspaceRepositories: () => null }));
 vi.mock("~/state/filesystem", () => ({
   useFilesystemReadAccess: () => ({ canReadFiles: true, isPending: false, error: null }),
 }));

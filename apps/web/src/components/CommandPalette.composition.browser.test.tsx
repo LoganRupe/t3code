@@ -7,6 +7,7 @@ import { act, render } from "../../test/render";
 import { CommandPalette } from "./CommandPalette";
 import { openCommandPalette } from "../commandPaletteBus";
 import { primaryServerKeybindingsAtom } from "../state/server";
+import { workspaceRepositoryEnvironment } from "../state/workspaceRepositories";
 
 const scopes = vi.hoisted(() => ({ denied: undefined as string | undefined }));
 const setup = (deniedScope?: string) => {
@@ -45,8 +46,15 @@ vi.mock("../hooks/useHandleNewThread", () => ({
 vi.mock("../hooks/useOpenPanelPullRequestUrl", () => ({ useOpenPanelPullRequestUrl: () => null }));
 vi.mock("../connection/useDesktopLocalBootstraps", () => ({ useDesktopLocalBootstraps: () => [] }));
 vi.mock("../state/use-atom-command", () => ({
-  // The add-project destination step starts a clone and follows its project id.
-  useAtomCommand: () => async () => ({ _tag: "Success", value: { projectId: "project-cloned" } }),
+  // A folder with no child repos adds right away; any other scan result opens the picker. The
+  // destination step starts a clone and follows its project id.
+  useAtomCommand: (command: unknown) => async () => ({
+    _tag: "Success",
+    value:
+      command === workspaceRepositoryEnvironment.scanFolders
+        ? { folders: [] }
+        : { projectId: "project-cloned" },
+  }),
 }));
 vi.mock("../state/use-atom-query-runner", () => ({
   useAtomQueryRunner: () => async () => ({ _tag: "Success", value: undefined }),
