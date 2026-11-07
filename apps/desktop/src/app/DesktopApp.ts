@@ -291,8 +291,8 @@ const bootstrap = Effect.gen(function* () {
       Option.isSome(config) &&
       Option.isNone(config.value.preflightFailure)
     ) {
-      // Creating a window can block the main thread in X (GLX on an inactive VT), which would
-      // stop the backend from ever spawning. Spawn it first so the server never waits on the UI.
+      // Creating a window can block the main thread in X (GLX on an inactive VT). Hand the
+      // backend its fd3 bootstrap first so the server never waits on the UI.
       yield* primaryBackend.waitForStarted(BACKEND_SPAWN_BEFORE_WINDOW_TIMEOUT);
       yield* desktopWindow.ensureMain;
     }
