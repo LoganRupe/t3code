@@ -5,9 +5,12 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Migrator from "effect/sql/Migrator";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { migrationManifest, runMigrations } from "./Migrations.ts";
+import ProjectionProjectsTrackedFolders from "./Migrations/083_ProjectionProjectsTrackedFolders.ts";
+import TaskFolders from "./Migrations/084_TaskFolders.ts";
 
 const v2Migrations = migrationManifest.filter(([id]) => id >= 55);
 const newerMigrationId = Math.max(...migrationManifest.map(([id]) => id)) + 1;
@@ -162,6 +165,48 @@ describe("runMigrations", () => {
         migrationManifest.filter(([id]) => id >= 70),
       );
       assert.deepStrictEqual(yield* history, migrationManifest);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("upgrades a multi-repo preview that recorded its migrations at 73 and 74", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 72 });
+      yield* Migrator.make({})({
+        loader: Migrator.fromRecord({
+          "73_ProjectionProjectsTrackedFolders": ProjectionProjectsTrackedFolders,
+          "74_TaskFolders": TaskFolders,
+        }),
+      });
+      yield* sql`INSERT INTO task_folders VALUES ('/tmp/task', 'project-1', '/tmp/home', '[]', 'now', 'now')`;
+
+      assert.deepStrictEqual(
+        yield* runMigrations(),
+        migrationManifest.filter(([id]) => id >= 73),
+      );
+      assert.deepStrictEqual(yield* history, migrationManifest);
+      assert.deepStrictEqual(yield* sql`SELECT root FROM task_folders`, [{ root: "/tmp/task" }]);
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
+
+  it.effect("upgrades a multi-repo preview that recorded its migrations at 81 and 82", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 80 });
+      yield* Migrator.make({})({
+        loader: Migrator.fromRecord({
+          "81_ProjectionProjectsTrackedFolders": ProjectionProjectsTrackedFolders,
+          "82_TaskFolders": TaskFolders,
+        }),
+      });
+      yield* sql`INSERT INTO task_folders VALUES ('/tmp/task', 'project-1', '/tmp/home', '[]', 'now', 'now')`;
+
+      assert.deepStrictEqual(
+        yield* runMigrations(),
+        migrationManifest.filter(([id]) => id >= 81),
+      );
+      assert.deepStrictEqual(yield* history, migrationManifest);
+      assert.deepStrictEqual(yield* sql`SELECT root FROM task_folders`, [{ root: "/tmp/task" }]);
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
