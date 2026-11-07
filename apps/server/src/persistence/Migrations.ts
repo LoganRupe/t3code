@@ -218,6 +218,30 @@ const assertV2MigrationsCanRun = Effect.fn("assertV2MigrationsCanRun")(function*
   });
 });
 
+// Multi-repo preview builds recorded TrackedFolders and TaskFolders at 73/74 before main took
+// those ids. Forget them so main's 73-80 run; 81/82 are idempotent and re-record them.
+const forgetMultiRepoPreviewMigrationIds = Effect.fn("forgetMultiRepoPreviewMigrationIds")(
+  function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const tables = yield* sql`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+    `;
+    if (tables.length === 0) return;
+    const later = yield* sql<{ readonly migration_id: number; readonly name: string }>`
+      SELECT migration_id, name FROM effect_sql_migrations WHERE migration_id >= 73
+    `;
+    const isPreview =
+      later.length > 0 &&
+      later.every(
+        (row) =>
+          (row.migration_id === 73 && row.name === "ProjectionProjectsTrackedFolders") ||
+          (row.migration_id === 74 && row.name === "TaskFolders"),
+      );
+    if (!isPreview) return;
+    yield* sql`DELETE FROM effect_sql_migrations WHERE migration_id IN (73, 74)`;
+  },
+);
+
 const run = Migrator.make({});
 
 export interface RunMigrationsOptions {
@@ -231,6 +255,7 @@ export const runMigrations = Effect.fn("runMigrations")(function* ({
     toMigrationInclusive === undefined || toMigrationInclusive >= FIRST_V2_MIGRATION_ID;
   const previewMigrations = includesV2 ? yield* reconcileV2PreviewMigration() : [];
   if (includesV2) {
+    yield* forgetMultiRepoPreviewMigrationIds();
     yield* assertV2MigrationsCanRun(toMigrationInclusive);
   }
   const executedMigrations = [
