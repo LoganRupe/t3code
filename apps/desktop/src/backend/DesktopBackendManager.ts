@@ -203,6 +203,7 @@ interface RunBackendProcessOptions extends DesktopBackendStartConfig {
   readonly readinessTimeout?: Duration.Duration;
   readonly outputDrainTimeout?: Duration.Duration;
   readonly onStarted?: (pid: number) => Effect.Effect<void>;
+  readonly onBootstrapDelivered?: () => Effect.Effect<void>;
   readonly onExitObserved?: () => Effect.Effect<void>;
   readonly onReady?: () => Effect.Effect<void>;
   readonly onReadinessFailure?: (error: BackendReadinessTimeoutError) => Effect.Effect<void>;
@@ -265,6 +266,7 @@ interface ActiveBackendRun {
   readonly scope: Scope.Closeable;
   readonly fiber: Option.Option<Fiber.Fiber<void, never>>;
   readonly pid: Option.Option<number>;
+  readonly bootstrapDelivered: boolean;
   readonly exitObserved: boolean;
   readonly stopRequested: boolean;
 }
@@ -414,7 +416,9 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     ),
   );
   const onOutput = options.onOutput ?? (() => Effect.void);
-  const bootstrapStream = Stream.encodeText(Stream.make(`${bootstrapJson}\n`));
+  const bootstrapStream = Stream.encodeText(Stream.make(`${bootstrapJson}\n`)).pipe(
+    Stream.onEnd(options.onBootstrapDelivered?.() ?? Effect.void),
+  );
   const additionalFds: Record<`fd${number}`, ChildProcess.AdditionalFdConfig> = {};
   if (options.bootstrapDelivery === "fd3") {
     additionalFds.fd3 = {
@@ -808,6 +812,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               scope: runScope,
               fiber: Option.none(),
               pid: Option.none(),
+              bootstrapDelivered: false,
               exitObserved: false,
               stopRequested: false,
             } satisfies ActiveBackendRun),
@@ -921,6 +926,11 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               details: `pid=${pid} port=${config.value.bootstrap.port} cwd=${config.value.cwd}`,
             });
           }),
+          onBootstrapDelivered: () =>
+            updateActiveRun(runId, (run) => ({
+              ...run,
+              bootstrapDelivered: true,
+            })),
           onExitObserved: () =>
             updateActiveRun(runId, (run) => ({
               ...run,
@@ -1172,7 +1182,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
         Stream.filter(
           (current) =>
             !current.desiredRunning ||
-            Option.isSome(Option.flatMap(current.active, (run) => run.pid)),
+            Option.exists(current.active, (run) => run.bootstrapDelivered),
         ),
         Stream.map((current) => current.desiredRunning),
         Stream.runHead,

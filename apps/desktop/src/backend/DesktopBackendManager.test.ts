@@ -199,17 +199,20 @@ describe("DesktopBackendManager", () => {
         const probe = yield* Deferred.make<void>();
         const ready = yield* Deferred.make<void>();
         const exit = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+        const spawned = yield* Deferred.make<ChildProcess.Command>();
         const instance = yield* makeTestInstance({
           spawnerLayer: Layer.succeed(
             ChildProcessSpawner.ChildProcessSpawner,
-            ChildProcessSpawner.make(() =>
+            ChildProcessSpawner.make((command) =>
               Effect.acquireRelease(
-                Effect.succeed(
-                  makeProcess({
-                    exitCode: Deferred.await(exit),
-                    kill: () =>
-                      Deferred.succeed(exit, ChildProcessSpawner.ExitCode(0)).pipe(Effect.asVoid),
-                  }),
+                Deferred.succeed(spawned, command).pipe(
+                  Effect.as(
+                    makeProcess({
+                      exitCode: Deferred.await(exit),
+                      kill: () =>
+                        Deferred.succeed(exit, ChildProcessSpawner.ExitCode(0)).pipe(Effect.asVoid),
+                    }),
+                  ),
                 ),
                 () => Deferred.succeed(exit, ChildProcessSpawner.ExitCode(0)),
               ),
@@ -227,7 +230,16 @@ describe("DesktopBackendManager", () => {
         });
         yield* instance.start;
         yield* Deferred.await(probe);
-        assert.isTrue(yield* instance.waitForStarted(Duration.seconds(15)));
+        // Spawned but fd3 not yet consumed: a window created now could still starve the bootstrap.
+        const started = yield* instance
+          .waitForStarted(Duration.seconds(15))
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        assert.isUndefined(started.pollUnsafe());
+        const command = yield* Deferred.await(spawned);
+        const fd3 =
+          command._tag === "StandardCommand" ? command.options.additionalFds?.fd3 : undefined;
+        if (fd3?.type === "input" && fd3.stream) yield* Stream.runDrain(fd3.stream);
+        assert.isTrue(yield* Fiber.join(started));
         const waiter = yield* instance.waitForReady(Duration.seconds(15)).pipe(Effect.forkChild);
         yield* Deferred.succeed(ready, undefined);
         assert.isTrue(yield* Fiber.join(waiter));
