@@ -244,6 +244,7 @@ export interface DesktopBackendInstance {
   readonly currentConfig: Effect.Effect<Option.Option<DesktopBackendStartConfig>>;
   readonly snapshot: Effect.Effect<DesktopBackendSnapshot>;
   readonly waitForReady: (timeout: Duration.Duration) => Effect.Effect<boolean>;
+  readonly waitForStarted: (timeout: Duration.Duration) => Effect.Effect<boolean>;
 }
 
 export interface BackendInstanceSpec {
@@ -1165,6 +1166,23 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
       ),
   );
 
+  const waitForStarted = Effect.fn("DesktopBackendManager.waitForStarted")(
+    (timeout: Duration.Duration) =>
+      SubscriptionRef.changes(state).pipe(
+        Stream.filter(
+          (current) =>
+            !current.desiredRunning ||
+            Option.isSome(Option.flatMap(current.active, (run) => run.pid)),
+        ),
+        Stream.map((current) => current.desiredRunning),
+        Stream.runHead,
+        Effect.timeoutOption(timeout),
+        Effect.map(
+          (result) => Option.isSome(result) && Option.getOrElse(result.value, () => false),
+        ),
+      ),
+  );
+
   yield* Effect.addFinalizer(() => stop());
 
   return {
@@ -1175,5 +1193,6 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
     currentConfig,
     snapshot,
     waitForReady,
+    waitForStarted,
   } satisfies DesktopBackendInstance;
 });

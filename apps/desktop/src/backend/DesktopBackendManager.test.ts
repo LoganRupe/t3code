@@ -227,11 +227,13 @@ describe("DesktopBackendManager", () => {
         });
         yield* instance.start;
         yield* Deferred.await(probe);
+        assert.isTrue(yield* instance.waitForStarted(Duration.seconds(15)));
         const waiter = yield* instance.waitForReady(Duration.seconds(15)).pipe(Effect.forkChild);
         yield* Deferred.succeed(ready, undefined);
         assert.isTrue(yield* Fiber.join(waiter));
         yield* instance.stop();
         assert.isFalse(yield* instance.waitForReady(Duration.seconds(15)));
+        assert.isFalse(yield* instance.waitForStarted(Duration.seconds(15)));
       }),
     ),
   );

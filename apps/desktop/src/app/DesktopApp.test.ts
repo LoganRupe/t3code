@@ -173,6 +173,7 @@ it.effect.each([false, true])(
           Effect.provideService(DesktopBackendPool.DesktopBackendPool, {
             primary: Effect.succeed({
               start: record("backend"),
+              waitForStarted: () => record("backend spawned").pipe(Effect.as(true)),
               currentConfig: Effect.succeedSome({ preflightFailure: Option.none() }),
             }),
             list: Effect.succeed([
@@ -247,7 +248,14 @@ it.effect.each([false, true])(
       );
       yield* Deferred.await(registrationStarted);
       yield* Deferred.await(windowStarted);
-      assert.deepEqual(events, ["identity", "ready", "identity", "backend", "window"]);
+      assert.deepEqual(events, [
+        "identity",
+        "ready",
+        "identity",
+        "backend",
+        "backend spawned",
+        "window",
+      ]);
       assert.isFalse(yield* Deferred.isDone(registrationStopped));
       const shutdown = yield* DesktopShutdown.DesktopShutdown;
       yield* shutdown.request;
