@@ -387,7 +387,9 @@ const make = Effect.gen(function* () {
     if (siblings.length === 0)
       return {
         layout: { root: null, homeWorktreePath: null, rowPath: childPath } satisfies Layout,
-        expectedRoot: defaultRoot,
+        // Git names home's folder as for a single-repo worktree (branch prefix plus a hash of
+        // repo and branch), so there is no folder to probe.
+        expectedRoot: null,
       };
     let ancestor = path.resolve(plan.homePath);
     for (const sibling of siblings) {
@@ -444,7 +446,7 @@ const make = Effect.gen(function* () {
   const resolveBranch = Effect.fn("TaskFolderService.resolveBranch")(function* (
     repos: ReadonlyArray<string>,
     requested: string,
-    rootFor?: (branch: string) => Effect.Effect<string, TaskFolderError>,
+    rootFor?: (branch: string) => Effect.Effect<string | null, TaskFolderError>,
   ) {
     let branch = requested;
     const temporary = isTemporaryWorktreeBranch(branch);
@@ -461,12 +463,8 @@ const make = Effect.gen(function* () {
       } else if (attempt > 0) {
         candidate = `${branch}-${attempt}`;
       }
-      if (
-        rootFor !== undefined &&
-        (yield* fileSystem
-          .exists(yield* rootFor(candidate))
-          .pipe(Effect.orElseSucceed(() => false)))
-      )
+      const root = rootFor === undefined ? null : yield* rootFor(candidate);
+      if (root !== null && (yield* fileSystem.exists(root).pipe(Effect.orElseSucceed(() => false))))
         continue;
       if (!(yield* anyRepoHasRef(repos, `refs/heads/${candidate}`))) return candidate;
     }
@@ -644,6 +642,7 @@ const make = Effect.gen(function* () {
             path: layout.homeWorktreePath,
           },
           {
+            worktreesDirectory: yield* worktreesDirectory,
             progress: {
               ...(progress?.onHomeClaimed === undefined
                 ? {}
@@ -1043,13 +1042,16 @@ const make = Effect.gen(function* () {
         const homeStart: RowStart = samePath(folderPlan.homePath, pullRequestPath)
           ? { refName: pullRequestBranch, baseRef: pullRequestBranch }
           : yield* resolveStart(folderPlan.homePath, undefined, false, branch);
-        const home = yield* git.createWorktree({
-          cwd: folderPlan.homePath,
-          refName: homeStart.refName,
-          ...(homeStart.newRefName === undefined ? {} : { newRefName: homeStart.newRefName }),
-          ...(homeStart.baseRefName === undefined ? {} : { baseRefName: homeStart.baseRefName }),
-          path: layout.homeWorktreePath,
-        });
+        const home = yield* git.createWorktree(
+          {
+            cwd: folderPlan.homePath,
+            refName: homeStart.refName,
+            ...(homeStart.newRefName === undefined ? {} : { newRefName: homeStart.newRefName }),
+            ...(homeStart.baseRefName === undefined ? {} : { baseRefName: homeStart.baseRefName }),
+            path: layout.homeWorktreePath,
+          },
+          { worktreesDirectory: yield* worktreesDirectory },
+        );
         const now = yield* nowIso;
         const record: TaskFolderRecord = {
           root: layout.root ?? home.worktree.path,

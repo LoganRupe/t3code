@@ -119,7 +119,7 @@ const layerGitManager = Layer.effect(
   }),
 );
 
-const makeLayer = (fixture: () => Fixture, baseDir: string) =>
+const makeLayer = (fixture: () => Fixture, baseDir: string, worktreesDirectory = "") =>
   TaskFolderService.layer.pipe(
     Layer.provideMerge(layerWorkspaces(fixture)),
     Layer.provideMerge(TaskFolders.layer),
@@ -150,7 +150,7 @@ const makeLayer = (fixture: () => Fixture, baseDir: string) =>
     ),
     Layer.provideMerge(GitVcsDriver.layer.pipe(Layer.provide(VcsProcess.layer))),
     Layer.provideMerge(SqlitePersistence.layerMemory),
-    Layer.provideMerge(ServerSettings.layerTest()),
+    Layer.provideMerge(ServerSettings.layerTest({ worktreesDirectory })),
     Layer.provideMerge(ServerConfig.layerTest(baseDir, baseDir)),
     Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
@@ -196,6 +196,7 @@ const withFolders = <A, E>(
     | FileSystem.FileSystem
     | Path.Path
   >,
+  worktreesDirectory?: (base: string) => string,
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -208,7 +209,7 @@ const withFolders = <A, E>(
       setFixture: (next) => {
         fixture = next;
       },
-    }).pipe(Effect.provide(makeLayer(() => fixture!, base)));
+    }).pipe(Effect.provide(makeLayer(() => fixture!, base, worktreesDirectory?.(base))));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
 const project = (fixture: Fixture) => ({
@@ -248,9 +249,11 @@ it.live("creates child repos inside the home worktree on one task branch", () =>
         startFromOrigin: false,
       });
       assert.deepEqual(created.failed, []);
-      const homeWorktree = `${config.worktreesDir}/web/t3-abc12345`;
+      // Git names home's folder as for any worktree: branch prefix plus a repo/branch hash.
+      const homeWorktree = created.record.homeWorktreePath;
+      assert.match(homeWorktree, /\/web\/t3-abc12345-[0-9a-f]{16}$/);
+      assert.isTrue(homeWorktree.startsWith(`${config.worktreesDir}/`));
       assert.equal(created.record.root, homeWorktree);
-      assert.equal(created.record.homeWorktreePath, homeWorktree);
       assert.deepEqual(created.record.repositories[0]?.kind, "home");
       assert.deepEqual(
         created.record.repositories.map((row) => [row.relativePath, row.branch]).toSorted(),
@@ -273,6 +276,26 @@ it.live("creates child repos inside the home worktree on one task branch", () =>
       );
       assert.equal(Option.getOrThrow(stored).repositories.length, 3);
     }),
+  ),
+);
+
+it.live("puts a child-only home worktree in the configured worktrees folder", () =>
+  withFolders(
+    ({ base, setFixture }) =>
+      Effect.gen(function* () {
+        const fixture = yield* childFixture(base);
+        setFixture(fixture);
+        const service = yield* TaskFolderService.TaskFolderService;
+        const plan = yield* service.plan({ project: project(fixture) });
+        const created = yield* service.create({
+          plan: plan!,
+          branch: "task",
+          baseRef: "main",
+          startFromOrigin: false,
+        });
+        assert.isTrue(created.record.homeWorktreePath.startsWith(`${base}/custom/web/task-`));
+      }),
+    (base) => `${base}/custom`,
   ),
 );
 
@@ -356,7 +379,7 @@ it.live("uses a per-repo base and renames the branch for every repo when any rep
         created.record.repositories.map((row) => row.branch),
         ["task-1", "task-1", "task-1"],
       );
-      assert.equal(created.record.homeWorktreePath.endsWith("/web/task-1"), true);
+      assert.match(created.record.homeWorktreePath, /\/web\/task-1-[0-9a-f]{16}$/);
       const app = created.record.repositories.find((row) => row.name === "app")!;
       assert.equal(
         yield* out(app.worktreePath, ["rev-parse", "HEAD"]),
