@@ -7,6 +7,7 @@ import {
   latestProviderTurnForAttempt,
   repositoryRewindCheckpoint,
   OrchestrationV2CheckpointFileSummary,
+  OrchestrationV2CheckpointScopeJson,
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
@@ -25,6 +26,7 @@ const decodeOrchestrationV2TurnItemJson = Schema.decodeUnknownSync(Orchestration
 const encodeOrchestrationV2TurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
 const decodeOrchestrationV2Subagent = Schema.decodeUnknownSync(OrchestrationV2Subagent);
 const decodeCheckpointFileSummary = Schema.decodeSync(OrchestrationV2CheckpointFileSummary);
+const decodeCheckpointScopeJson = Schema.decodeSync(OrchestrationV2CheckpointScopeJson);
 const encodeOrchestrationV2SubagentJson = Schema.encodeSync(OrchestrationV2SubagentJson);
 const decodeOrchestrationV2ProviderThreadJson = Schema.decodeUnknownSync(
   OrchestrationV2ProviderThreadJson,
@@ -636,6 +638,27 @@ describe("background work kinds from older or newer servers", () => {
         pendingBackgroundTasks: [{ taskId: "", kind: "command" }],
       }),
     ).toThrow();
+  });
+});
+
+describe("checkpoint scopes from the 0.1.9 multi-repo preview", () => {
+  it("decodes a per-repository scope, so its threads still open", () => {
+    const scope = decodeCheckpointScopeJson({
+      id: "checkpoint-scope:thread:t:name:repository%3A%2Frepos%2Fapp",
+      threadId: "t",
+      runId: "run",
+      nodeId: "node",
+      parentScopeId: "checkpoint-scope:thread:t:name:root",
+      providerThreadId: null,
+      kind: "repository",
+      ordinalWithinParent: 1,
+      advancesAppRunCount: false,
+      cwd: "/repos/app",
+      label: "app",
+      repositoryPath: "/repos/app",
+      createdAt: "2026-11-02T05:53:23.382Z",
+    });
+    expect(scope.kind).toBe("repository");
   });
 });
 

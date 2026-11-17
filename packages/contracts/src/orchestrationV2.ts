@@ -986,7 +986,16 @@ export const OrchestrationV2CheckpointScope = Schema.Struct({
   nodeId: NodeId,
   parentScopeId: Schema.NullOr(CheckpointScopeId),
   providerThreadId: Schema.NullOr(ProviderThreadId),
-  kind: Schema.Literals(["root_run", "subagent", "tool", "provider_thread", "manual"]),
+  // "repository" is only read: the 0.1.9 multi-repo preview stored one scope per repository.
+  // This build checkpoints every repository under the root scope instead.
+  kind: Schema.Literals([
+    "root_run",
+    "subagent",
+    "tool",
+    "provider_thread",
+    "manual",
+    "repository",
+  ]),
   ordinalWithinParent: NonNegativeInt,
   advancesAppRunCount: Schema.Boolean,
   cwd: TrimmedNonEmptyString,

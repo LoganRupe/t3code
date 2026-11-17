@@ -7,7 +7,7 @@ import * as SqlClient from "effect/sql/SqlClient";
  * so those rows would skip main's migrations. Forgetting them lets main's run; the multi-repo
  * migrations are idempotent and record themselves again at their own ids.
  */
-export const MULTI_REPO_MIGRATION_IDS: Readonly<Record<string, number>> = {
+const MULTI_REPO_MIGRATION_IDS: Readonly<Record<string, number>> = {
   ProjectionProjectsTrackedFolders: 98,
   TaskFolders: 99,
 };
