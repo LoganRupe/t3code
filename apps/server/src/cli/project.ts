@@ -3,6 +3,7 @@ import {
   CommandId,
   EnvironmentHttpApi,
   EnvironmentHttpCommonError,
+  PROJECT_TRACKED_FOLDERS_MAX,
   type ProjectMutation,
   type ProjectSnapshot,
   ProjectId,
@@ -41,6 +42,7 @@ import {
   clearPersistedServerRuntimeState,
   readLiveServerRuntimeState,
 } from "../serverRuntimeState.ts";
+import { discoverFolders } from "../workspace/WorkspaceFolders.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
 import { type CliAuthLocationFlags, projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
 
@@ -473,6 +475,12 @@ const projectAddCommand = Command.make("add", {
     Argument.withDescription("Workspace root to add as a project."),
   ),
   title: Flag.String("title").pipe(Flag.withDescription("Optional project title."), Flag.optional),
+  track: Flag.String("track").pipe(
+    Flag.withDescription(
+      "A folder outside the path that the project also works in. Repositories inside the path are found on their own. Repeat for more.",
+    ),
+    Flag.atLeast(0),
+  ),
 }).pipe(
   Command.withDescription("Add a project."),
   Command.withHandler((flags) =>
@@ -514,6 +522,18 @@ const projectAddCommand = Command.make("add", {
         }
 
         const title = yield* resolveProjectTitle(workspaceRoot, Option.getOrUndefined(flags.title));
+        const path = yield* Path.Path;
+        // Found here, not by a running server: this command runs on the server's machine.
+        const found = yield* discoverFolders(workspaceRoot);
+        const named = flags.track.map((folder) => {
+          const resolved = path.resolve(folder);
+          return { path: resolved, name: path.basename(resolved) || resolved };
+        });
+        const trackedFolders = [...found, ...named]
+          .filter(
+            (folder, index, all) => all.findIndex((other) => other.path === folder.path) === index,
+          )
+          .slice(0, PROJECT_TRACKED_FOLDERS_MAX);
         const projectId = ProjectId.make(yield* projectCommandUuid);
         yield* dispatch({
           type: "project.create",
@@ -521,8 +541,13 @@ const projectAddCommand = Command.make("add", {
           projectId,
           title,
           workspaceRoot,
+          ...(trackedFolders.length === 0 ? {} : { trackedFolders }),
         });
-        return `Added project ${projectId} (${title}) at ${workspaceRoot}.`;
+        const added = `Added project ${projectId} (${title}) at ${workspaceRoot}.`;
+        if (trackedFolders.length > 0) {
+          return `${added} It also covers ${trackedFolders.length} other ${trackedFolders.length === 1 ? "folder" : "folders"}.`;
+        }
+        return added;
       }),
     ),
   ),
